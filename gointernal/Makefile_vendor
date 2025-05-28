@@ -1,0 +1,17 @@
+
+build: package test
+
+generate:
+	go generate ./...
+
+test:
+	go test -mod vendor ./...
+
+package:
+	go mod vendor
+	go mod tidy
+	go mod download -x
+	go build -mod vendor ./...
+
+clean :
+	go clean 

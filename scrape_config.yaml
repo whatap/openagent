@@ -1,0 +1,45 @@
+# Global configuration
+global:
+  scrape_interval: 15s  # Default interval between scrapes
+
+# Scrape configurations
+scrape_configs:
+  - job_name: prometheus  # Name of the job
+    static_config:
+      targets:
+        - localhost:9090  # Prometheus server
+        - localhost:9100  # Node exporter
+      filter:
+        enabled: true
+        whitelist:
+          - http_requests_total
+          - http_requests_duration_seconds
+          - process_cpu_seconds_total
+          - go_goroutines
+
+  - job_name: node_exporter
+    static_config:
+      targets:
+        - localhost:9100  # Node exporter
+      filter:
+        enabled: true
+        whitelist:
+          - node_cpu_seconds_total
+          - node_memory_MemTotal_bytes
+          - node_memory_MemFree_bytes
+          - node_filesystem_avail_bytes
+          - node_network_receive_bytes_total
+          - node_network_transmit_bytes_total
+
+  - job_name: kubernetes
+    static_config:
+      targets:
+        - kubernetes.default.svc:443  # Kubernetes API server
+      filter:
+        enabled: true
+        whitelist:
+          - kube_pod_container_status_running
+          - kube_pod_container_status_waiting
+          - kube_pod_container_status_terminated
+          - kube_deployment_status_replicas
+          - kube_deployment_status_replicas_available
