@@ -237,3 +237,229 @@ created by github.com/whatap/gointernal/net/secure.GetTcpSession in goroutine 1
 
 2025/05/28 17:25:53 [>>>>] [>>>>] keyReset hello oname=  ,ip= 168296494
 
+2025/05/28 17:27:53 [WA172] [WA172] invalid license key error.  WA003 Read Error size=1, left=1, elapsed=0, err=read tcp 10.8.0.46:62561->15.165.146.117:6600: i/o timeout,
+ goroutine 53 [running]:
+runtime/debug.Stack()
+	/opt/homebrew/opt/go/libexec/src/runtime/debug/stack.go:26 +0x64
+github.com/whatap/gointernal/net/secure.(*TcpSession).open.func1()
+	/Users/jaeyoung/work/go_project/openagent/gointernal/net/secure/TcpSession.go:77 +0xa0
+panic({0x102476580?, 0x14000090130?})
+	/opt/homebrew/opt/go/libexec/src/runtime/panic.go:792 +0x124
+github.com/whatap/gointernal/net/secure.(*TcpSession).readKeyReset.func1()
+	/Users/jaeyoung/work/go_project/openagent/gointernal/net/secure/TcpSession.go:162 +0x78
+panic({0x102476580?, 0x14000090010?})
+	/opt/homebrew/opt/go/libexec/src/runtime/panic.go:792 +0x124
+github.com/whatap/golib/io.(*DataInputX).ReadBytes(0x14000068600, 0x1)
+	/Users/jaeyoung/go/pkg/mod/github.com/whatap/golib@v0.0.35/io/DataInputX.go:54 +0x2f8
+github.com/whatap/golib/io.(*DataInputX).ReadByte(...)
+	/Users/jaeyoung/go/pkg/mod/github.com/whatap/golib@v0.0.35/io/DataInputX.go:94
+github.com/whatap/gointernal/net/secure.(*TcpSession).readKeyReset(0x14000094088?, 0x14000068600)
+	/Users/jaeyoung/work/go_project/openagent/gointernal/net/secure/TcpSession.go:165 +0xb0
+github.com/whatap/gointernal/net/secure.(*TcpSession).open(0x14000608040)
+	/Users/jaeyoung/work/go_project/openagent/gointernal/net/secure/TcpSession.go:127 +0x468
+github.com/whatap/gointernal/net/secure.GetTcpSession.func1()
+	/Users/jaeyoung/work/go_project/openagent/gointernal/net/secure/TcpSession.go:57 +0x34
+created by github.com/whatap/gointernal/net/secure.GetTcpSession in goroutine 1
+	/Users/jaeyoung/work/go_project/openagent/gointernal/net/secure/TcpSession.go:55 +0x1b0
+
+
+2025/05/28 17:27:56 [>>>>] [>>>>] keyReset hello oname=  ,ip= 168296494
+
+2025/05/28 17:29:40 
+2025/05/28 17:29:40 ## OPEN LOG FILE  boot  20250528 08:29:40.856 ##
+2025/05/28 17:29:40 
+2025/05/28 17:29:40 [DirectSampleSender] [DirectSampleSender] Starting direct sample sender
+
+2025/05/28 17:29:40 [>>>>] [>>>>] ,cypher= <nil> , license= x41pl22ek7jhv-z43cebasdv4il7-z62p3l35fj5502
+
+2025/05/28 17:29:40 [>>>>> readKeyReset] [>>>>> readKeyReset] pcod= 1845 , oid= -662733300
+
+2025/05/28 17:31:29 
+2025/05/28 17:31:29 ## OPEN LOG FILE  boot  20250528 08:31:29.24 ##
+2025/05/28 17:31:29 
+2025/05/28 17:31:29 [DirectSampleSender] [DirectSampleSender] Starting direct sample sender
+
+2025/05/28 17:31:29 [>>>>] [>>>>] ,cypher= <nil> , license= x41pl22ek7jhv-z43cebasdv4il7-z62p3l35fj5502
+
+2025/05/28 17:31:29 [>>>>> readKeyReset] [>>>>> readKeyReset] pcod= 1845 , oid= -662733300
+
+2025/05/28 17:32:55 
+2025/05/28 17:32:55 ## OPEN LOG FILE  boot  20250528 08:32:55.361 ##
+2025/05/28 17:32:55 
+2025/05/28 17:32:55 [DirectSampleSender] [DirectSampleSender] Starting direct sample sender
+
+2025/05/28 17:32:55 [>>>>] [>>>>] ,cypher= <nil> , license= x41pl22ek7jhv-z43cebasdv4il7-z62p3l35fj5502
+
+2025/05/28 17:32:55 [>>>>> readKeyReset] [>>>>> readKeyReset] pcod= 1845 , oid= -662733300
+
+2025/05/28 17:34:47 
+2025/05/28 17:34:47 ## OPEN LOG FILE  boot  20250528 08:34:47.48 ##
+2025/05/28 17:34:47 
+2025/05/28 17:34:47 [DirectSampleSender] [DirectSampleSender] Starting direct sample sender
+
+2025/05/28 17:34:47 [>>>>] [>>>>] ,cypher= <nil> , license= x41pl22ek7jhv-z43cebasdv4il7-z62p3l35fj5502
+
+2025/05/28 17:34:47 [>>>>> readKeyReset] [>>>>> readKeyReset] pcod= 1845 , oid= -662733300
+
+2025/05/28 17:39:48 
+2025/05/28 17:39:48 ## OPEN LOG FILE  boot  20250528 08:39:48.707 ##
+2025/05/28 17:39:48 
+2025/05/28 17:39:48 [DirectSampleSender] [DirectSampleSender] Starting direct sample sender
+
+2025/05/28 17:39:48 [>>>>] [>>>>] ,cypher= <nil> , license= x41pl22ek7jhv-z43cebasdv4il7-z62p3l35fj5502
+
+2025/05/28 17:39:48 [>>>>> readKeyReset] [>>>>> readKeyReset] pcod= 1845 , oid= -662733300
+
+2025/05/28 17:39:56 
+2025/05/28 17:39:56 ## OPEN LOG FILE  boot  20250528 08:39:56.312 ##
+2025/05/28 17:39:56 
+2025/05/28 17:39:56 [DirectSampleSender] [DirectSampleSender] Starting direct sample sender
+
+2025/05/28 17:39:56 [>>>>] [>>>>] ,cypher= <nil> , license= x41pl22ek7jhv-z43cebasdv4il7-z62p3l35fj5502
+
+2025/05/28 17:39:56 [>>>>> readKeyReset] [>>>>> readKeyReset] pcod= 1845 , oid= -662733300
+
+2025/05/28 17:40:18 
+2025/05/28 17:40:18 ## OPEN LOG FILE  boot  20250528 08:40:18.836 ##
+2025/05/28 17:40:18 
+2025/05/28 17:40:18 [DirectSampleSender] [DirectSampleSender] Starting direct sample sender
+
+2025/05/28 17:40:18 [>>>>] [>>>>] ,cypher= <nil> , license= x41pl22ek7jhv-z43cebasdv4il7-z62p3l35fj5502
+
+2025/05/28 17:40:18 [>>>>> readKeyReset] [>>>>> readKeyReset] pcod= 1845 , oid= -662733300
+
+2025/05/28 17:40:27 
+2025/05/28 17:40:27 ## OPEN LOG FILE  boot  20250528 08:40:27.660 ##
+2025/05/28 17:40:27 
+2025/05/28 17:40:27 [DirectSampleSender] [DirectSampleSender] Starting direct sample sender
+
+2025/05/28 17:40:27 [>>>>] [>>>>] ,cypher= <nil> , license= x41pl22ek7jhv-z43cebasdv4il7-z62p3l35fj5502
+
+2025/05/28 17:40:27 [>>>>> readKeyReset] [>>>>> readKeyReset] pcod= 1845 , oid= -662733300
+
+2025/05/28 17:40:39 
+2025/05/28 17:40:39 ## OPEN LOG FILE  boot  20250528 08:40:39.747 ##
+2025/05/28 17:40:39 
+2025/05/28 17:40:39 [DirectSampleSender] [DirectSampleSender] Starting direct sample sender
+
+2025/05/28 17:40:39 [>>>>] [>>>>] ,cypher= <nil> , license= x41pl22ek7jhv-z43cebasdv4il7-z62p3l35fj5502
+
+2025/05/28 17:40:39 [>>>>> readKeyReset] [>>>>> readKeyReset] pcod= 1845 , oid= -662733300
+
+2025/05/28 17:40:47 
+2025/05/28 17:40:47 ## OPEN LOG FILE  boot  20250528 08:40:47.764 ##
+2025/05/28 17:40:47 
+2025/05/28 17:40:47 [DirectSampleSender] [DirectSampleSender] Starting direct sample sender
+
+2025/05/28 17:40:47 [>>>>] [>>>>] ,cypher= <nil> , license= x41pl22ek7jhv-z43cebasdv4il7-z62p3l35fj5502
+
+2025/05/28 17:40:47 [>>>>> readKeyReset] [>>>>> readKeyReset] pcod= 1845 , oid= -662733300
+
+2025/05/28 17:40:57 
+2025/05/28 17:40:57 ## OPEN LOG FILE  boot  20250528 08:40:57.610 ##
+2025/05/28 17:40:57 
+2025/05/28 17:40:57 [DirectSampleSender] [DirectSampleSender] Starting direct sample sender
+
+2025/05/28 17:40:57 [>>>>] [>>>>] ,cypher= <nil> , license= x41pl22ek7jhv-z43cebasdv4il7-z62p3l35fj5502
+
+2025/05/28 17:40:57 [>>>>> readKeyReset] [>>>>> readKeyReset] pcod= 1845 , oid= -662733300
+
+2025/05/28 17:41:16 
+2025/05/28 17:41:16 ## OPEN LOG FILE  boot  20250528 08:41:16.807 ##
+2025/05/28 17:41:16 
+2025/05/28 17:41:16 [DirectSampleSender] [DirectSampleSender] Starting direct sample sender
+
+2025/05/28 17:41:16 [>>>>] [>>>>] ,cypher= <nil> , license= x41pl22ek7jhv-z43cebasdv4il7-z62p3l35fj5502
+
+2025/05/28 17:41:16 [>>>>> readKeyReset] [>>>>> readKeyReset] pcod= 1845 , oid= -662733300
+
+2025/05/28 17:41:28 
+2025/05/28 17:41:28 ## OPEN LOG FILE  boot  20250528 08:41:28.333 ##
+2025/05/28 17:41:28 
+2025/05/28 17:41:28 [DirectSampleSender] [DirectSampleSender] Starting direct sample sender
+
+2025/05/28 17:41:28 [>>>>] [>>>>] ,cypher= <nil> , license= x41pl22ek7jhv-z43cebasdv4il7-z62p3l35fj5502
+
+2025/05/28 17:41:28 [>>>>> readKeyReset] [>>>>> readKeyReset] pcod= 1845 , oid= -662733300
+
+2025/05/28 17:42:08 
+2025/05/28 17:42:08 ## OPEN LOG FILE  boot  20250528 08:42:08.192 ##
+2025/05/28 17:42:08 
+2025/05/28 17:42:08 [DirectSampleSender] [DirectSampleSender] Starting direct sample sender
+
+2025/05/28 17:42:08 [>>>>] [>>>>] ,cypher= <nil> , license= x41pl22ek7jhv-z43cebasdv4il7-z62p3l35fj5502
+
+2025/05/28 17:42:08 [>>>>> readKeyReset] [>>>>> readKeyReset] pcod= 1845 , oid= -662733300
+
+2025/05/28 17:42:17 
+2025/05/28 17:42:17 ## OPEN LOG FILE  boot  20250528 08:42:17.255 ##
+2025/05/28 17:42:17 
+2025/05/28 17:42:17 [DirectSampleSender] [DirectSampleSender] Starting direct sample sender
+
+2025/05/28 17:42:17 [>>>>] [>>>>] ,cypher= <nil> , license= x41pl22ek7jhv-z43cebasdv4il7-z62p3l35fj5502
+
+2025/05/28 17:42:17 [>>>>> readKeyReset] [>>>>> readKeyReset] pcod= 1845 , oid= -662733300
+
+2025/05/28 17:42:28 
+2025/05/28 17:42:28 ## OPEN LOG FILE  boot  20250528 08:42:28.304 ##
+2025/05/28 17:42:28 
+2025/05/28 17:42:28 [DirectSampleSender] [DirectSampleSender] Starting direct sample sender
+
+2025/05/28 17:42:28 [>>>>] [>>>>] ,cypher= <nil> , license= x41pl22ek7jhv-z43cebasdv4il7-z62p3l35fj5502
+
+2025/05/28 17:42:28 [>>>>> readKeyReset] [>>>>> readKeyReset] pcod= 1845 , oid= -662733300
+
+2025/05/28 17:42:35 
+2025/05/28 17:42:35 ## OPEN LOG FILE  boot  20250528 08:42:35.389 ##
+2025/05/28 17:42:35 
+2025/05/28 17:42:35 [DirectSampleSender] [DirectSampleSender] Starting direct sample sender
+
+2025/05/28 17:42:35 [>>>>] [>>>>] ,cypher= <nil> , license= x41pl22ek7jhv-z43cebasdv4il7-z62p3l35fj5502
+
+2025/05/28 17:42:35 [>>>>> readKeyReset] [>>>>> readKeyReset] pcod= 1845 , oid= -662733300
+
+2025/05/28 17:42:45 
+2025/05/28 17:42:45 ## OPEN LOG FILE  boot  20250528 08:42:45.831 ##
+2025/05/28 17:42:45 
+2025/05/28 17:42:45 [DirectSampleSender] [DirectSampleSender] Starting direct sample sender
+
+2025/05/28 17:42:45 [>>>>] [>>>>] ,cypher= <nil> , license= x41pl22ek7jhv-z43cebasdv4il7-z62p3l35fj5502
+
+2025/05/28 17:42:45 [>>>>> readKeyReset] [>>>>> readKeyReset] pcod= 1845 , oid= -662733300
+
+2025/05/28 17:42:57 
+2025/05/28 17:42:57 ## OPEN LOG FILE  boot  20250528 08:42:57.109 ##
+2025/05/28 17:42:57 
+2025/05/28 17:42:57 [DirectSampleSender] [DirectSampleSender] Starting direct sample sender
+
+2025/05/28 17:42:57 [>>>>] [>>>>] ,cypher= <nil> , license= x41pl22ek7jhv-z43cebasdv4il7-z62p3l35fj5502
+
+2025/05/28 17:42:57 [>>>>> readKeyReset] [>>>>> readKeyReset] pcod= 1845 , oid= -662733300
+
+2025/05/28 17:43:10 
+2025/05/28 17:43:10 ## OPEN LOG FILE  boot  20250528 08:43:10.693 ##
+2025/05/28 17:43:10 
+2025/05/28 17:43:10 [DirectSampleSender] [DirectSampleSender] Starting direct sample sender
+
+2025/05/28 17:43:10 [>>>>] [>>>>] ,cypher= <nil> , license= x41pl22ek7jhv-z43cebasdv4il7-z62p3l35fj5502
+
+2025/05/28 17:43:11 [>>>>> readKeyReset] [>>>>> readKeyReset] pcod= 1845 , oid= -662733300
+
+2025/05/28 17:43:17 
+2025/05/28 17:43:17 ## OPEN LOG FILE  boot  20250528 08:43:17.679 ##
+2025/05/28 17:43:17 
+2025/05/28 17:43:17 [DirectSampleSender] [DirectSampleSender] Starting direct sample sender
+
+2025/05/28 17:43:17 [>>>>] [>>>>] ,cypher= <nil> , license= x41pl22ek7jhv-z43cebasdv4il7-z62p3l35fj5502
+
+2025/05/28 17:43:17 [>>>>> readKeyReset] [>>>>> readKeyReset] pcod= 1845 , oid= -662733300
+
+2025/05/28 17:43:25 
+2025/05/28 17:43:25 ## OPEN LOG FILE  boot  20250528 08:43:25.724 ##
+2025/05/28 17:43:25 
+2025/05/28 17:43:25 [DirectSampleSender] [DirectSampleSender] Starting direct sample sender
+
+2025/05/28 17:43:25 [>>>>] [>>>>] ,cypher= <nil> , license= x41pl22ek7jhv-z43cebasdv4il7-z62p3l35fj5502
+
+2025/05/28 17:43:25 [>>>>> readKeyReset] [>>>>> readKeyReset] pcod= 1845 , oid= -662733300
+

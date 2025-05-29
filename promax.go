@@ -4,14 +4,22 @@ import (
 	"fmt"
 	"github.com/whatap/gointernal/net/secure"
 	"github.com/whatap/golib/logger/logfile"
+	"github.com/whatap/golib/util/dateutil"
+	"math/rand"
 	"open-agent/pkg/model"
 	"os"
 	"strings"
 	"time"
 )
 
-// logBoth logs a message to both the file logger and stdout
-func logBoth(logger *logfile.FileLogger, tag string, message string) {
+// Map to store the last value for each metric to calculate deltas
+var deltaMap = make(map[string]int64)
+
+// Last time help information was sent
+var lastHelpSendTime int64 = 0
+
+// promaxLogMessage logs a message to both the file logger and stdout
+func promaxLogMessage(logger *logfile.FileLogger, tag string, message string) {
 	logger.Println(tag, message)
 	fmt.Printf("[%s] %s\n", tag, message)
 }
@@ -21,7 +29,9 @@ func main() {
 	license := os.Getenv("WHATAP_LICENSE")
 	host := os.Getenv("WHATAP_HOST")
 	port := os.Getenv("WHATAP_PORT")
-
+	license = "x208gorb3c4c1-zvduoi0m5ajsd-x6tto2th6n1haj"
+	host = "59.13.101.109"
+	port = "61574"
 	if license == "" || host == "" || port == "" {
 		fmt.Println("Please set the following environment variables:")
 		fmt.Println("WHATAP_LICENSE - The license key for the WHATAP server")
@@ -32,133 +42,133 @@ func main() {
 
 	// Create a logger
 	logger := logfile.NewFileLogger()
-	logBoth(logger, "DirectSampleSender", "Starting direct sample sender")
+	promaxLogMessage(logger, "PromaX", "Starting PromaX sample sender")
 
 	// Initialize secure communication
 	servers := []string{fmt.Sprintf("%s:%s", host, port)}
-
 	secure.StartNet(secure.WithLogger(logger), secure.WithAccessKey(license), secure.WithServers(servers), secure.WithOname("test"))
 
-	// Create sample metrics data
-	metrics := createSampleMetrics()
+	// Initialize random number generator
+	rand.Seed(time.Now().UnixNano())
 
-	// Send the sample data directly
-	logBoth(logger, "DirectSampleSender", "Sending sample data to WHATAP server")
-	sendSampleData(metrics, logger)
-
-	logBoth(logger, "DirectSampleSender", "Sample data sent successfully")
+	// Process metrics periodically
+	for {
+		process(logger)
+		time.Sleep(10 * time.Second)
+	}
 }
 
-// sendSampleData sends the sample metrics data directly to the WHATAP server
-func sendSampleData(metrics []*model.OpenMx, logger *logfile.FileLogger) {
+// process creates and sends metrics and help information
+func process(logger *logfile.FileLogger) {
+	// Create metrics
+	metrics := createMetrics()
+	promaxLogMessage(logger, "PromaX", fmt.Sprintf("Created %d metrics", len(metrics)))
 
-	// Create a pack for the metrics
-	metricsPack := model.NewOpenMxPack()
-	metricsPack.SetRecords(metrics)
+	// Create help information if needed
+	helpItems := make([]*model.OpenMxHelp, 0)
+	now := time.Now().UnixMilli()
 
-	// Set the time to the current time
-	metricsPack.SetTime(time.Now().UnixMilli())
+	// Send help information only once per minute
+	if now-lastHelpSendTime > 5*dateutil.MILLIS_PER_SECOND {
+		for _, mx := range metrics {
+			helpText := model.GetMetricHelp(mx.Metric)
+			metricType := model.GetMetricType(mx.Metric)
 
-	// Get the security master from the secure package
-	securityMaster := secure.GetSecurityMaster()
-	if securityMaster == nil {
-		logBoth(logger, "DirectSampleSender", "No security master available")
-		return
+			// Use default values if not found
+			if helpText == "" {
+				helpText = fmt.Sprintf("Help information for %s", mx.Metric)
+			}
+			if metricType == "" {
+				metricType = "gauge"
+			}
+
+			mxh := model.NewOpenMxHelp(mx.Metric)
+			mxh.Put("help", helpText)
+			mxh.Put("type", metricType)
+			//fmt.Printf("mxh-Metric=%v\n", mxh.Metric)
+			helpItems = append(helpItems, mxh)
+		}
+		lastHelpSendTime = now
 	}
 
-	// Set the PCODE and OID from the security master
-	metricsPack.SetPCODE(securityMaster.PCODE)
-	metricsPack.SetOID(securityMaster.OID)
-
-	// Log the metrics
-	logBoth(logger, "DirectSampleSender", fmt.Sprintf("PCODE=%d", securityMaster.PCODE))
-	logBoth(logger, "DirectSampleSender", fmt.Sprintf("Sending %d metrics", len(metrics)))
-
-	// Send the pack to the server using secure.Send
-	secure.Send(secure.NET_SECURE_HIDE, metricsPack, true)
-
-	logBoth(logger, "DirectSampleSender", "Metrics sent successfully")
-
-	// Create help information for the metrics
-	helpList := createHelpInfo(metrics)
-	if len(helpList) > 0 {
-		// Create a pack for the help information
+	// Send help information if available
+	if len(helpItems) > 0 {
 		helpPack := model.NewOpenMxHelpPack()
-		for _, help := range helpList {
-			fmt.Println("help=", help)
+		securityMaster := secure.GetSecurityMaster()
+		if securityMaster == nil {
+			promaxLogMessage(logger, "PromaX", "No security master available")
+			return
 		}
-		helpPack.SetRecords(helpList)
-
-		// Set the time to the current time
-		helpPack.SetTime(time.Now().UnixMilli())
-
-		// Set the PCODE and OID from the security master
+		// Set PCODE and OID
 		helpPack.SetPCODE(securityMaster.PCODE)
 		helpPack.SetOID(securityMaster.OID)
+		helpPack.SetTime(now)
+		helpPack.SetRecords(helpItems)
+		//testRe := helpPack.GetRecords()
 
-		// Log the help information
-		logBoth(logger, "DirectSampleSender", fmt.Sprintf("Sending %d help records", len(helpList)))
-
-		// Send the pack to the server using secure.Send
+		//fmt.Printf("helpPack.GetRecords()=%v\n", testRe)
+		// Get the security master
+		promaxLogMessage(logger, "PromaX", fmt.Sprintf("Sending %d help records", len(helpItems)))
+		//for _, helpItem := range helpItems {
+		//fmt.Printf("helpItem.Metric=%v//help=%v//type=%v\n", helpItem.Metric, helpItem.Get("help"), helpItem.Get("type"))
+		//}
 		secure.Send(secure.NET_SECURE_HIDE, helpPack, true)
-		time.Sleep(5 * 1000 * time.Millisecond)
-		logBoth(logger, "DirectSampleSender", "Help information sent successfully")
+		time.Sleep(1000 * time.Millisecond)
 	}
+
+	//Send metrics
+	//metricsPack := model.NewOpenMxPack()
+	//metricsPack.SetTime(now)
+	//metricsPack.SetRecords(metrics)
+	//
+	//// Get the security master
+	//securityMaster := secure.GetSecurityMaster()
+	//if securityMaster == nil {
+	//	promaxLogMessage(logger, "PromaX", "No security master available")
+	//	return
+	//}
+	//
+	////Set PCODE and OID
+	//metricsPack.SetPCODE(securityMaster.PCODE)
+	//metricsPack.SetOID(securityMaster.OID)
+	//
+	//promaxLogMessage(logger, "PromaX", fmt.Sprintf("Sending %d metrics", len(metrics)))
+	//secure.Send(secure.NET_SECURE_HIDE, metricsPack, true)
 }
 
-// createHelpInfo creates help information for the metrics
-func createHelpInfo(metrics []*model.OpenMx) []*model.OpenMxHelp {
-	// Create a map to store unique metrics
-	uniqueMetrics := make(map[string]bool)
-	for _, metric := range metrics {
-		uniqueMetrics[metric.Metric] = true
-	}
-
-	// Create help information for each unique metric
-	helpList := make([]*model.OpenMxHelp, 0, len(uniqueMetrics))
-	for metric := range uniqueMetrics {
-		help := model.NewOpenMxHelp(metric)
-
-		// Get help text from METRIC_HELP map, or use a default if not found
-		helpText := model.GetMetricHelp(metric)
-		fmt.Println("metric=", metric, " helpText=", helpText)
-		if helpText == "" {
-			helpText = fmt.Sprintf("Help information for %s", metric)
-		}
-		help.Put("help", helpText)
-
-		// Get type from METRIC_TYPE map, or use "gauge" as default if not found
-		metricType := model.GetMetricType(metric)
-		if metricType == "" {
-			metricType = "gauge"
-		}
-		help.Put("type", metricType)
-
-		helpList = append(helpList, help)
-	}
-
-	return helpList
-}
-
-// createSampleMetrics creates sample metrics data based on the provided examples
-func createSampleMetrics() []*model.OpenMx {
-	now := time.Now().UnixMilli()
+// createMetrics creates sample metrics data
+func createMetrics() []*model.OpenMx {
 	metrics := make([]*model.OpenMx, 0, 100)
 
 	// Add metrics with no labels
-	addNoLabelMetrics(&metrics, now)
+	promaxAddNoLabelMetrics(&metrics)
 
 	// Add metrics with one label
-	addOneLabelsMetrics(&metrics, now)
+	promaxAddOneLabelsMetrics(&metrics)
 
 	// Add metrics with two labels
-	addTwoLabelsMetrics(&metrics, now)
+	promaxAddTwoLabelsMetrics(&metrics)
 
 	return metrics
 }
 
-// addNoLabelMetrics adds metrics with no labels
-func addNoLabelMetrics(metrics *[]*model.OpenMx, timestamp int64) {
+// addDelta adds a random delta to the value for a metric
+func addDelta(metricName string, value float64) float64 {
+	// Generate a random delta between 0 and 99
+	delta := rand.Int63n(100)
+
+	// Add the delta to the stored value for this metric
+	if _, ok := deltaMap[metricName]; !ok {
+		deltaMap[metricName] = 0
+	}
+	deltaMap[metricName] += delta
+
+	// Return the value plus the accumulated delta
+	return value + float64(deltaMap[metricName])
+}
+
+// promaxAddNoLabelMetrics adds metrics with no labels
+func promaxAddNoLabelMetrics(metrics *[]*model.OpenMx) {
 	noLabelData := []struct {
 		name  string
 		value float64
@@ -219,13 +229,17 @@ func addNoLabelMetrics(metrics *[]*model.OpenMx, timestamp int64) {
 	}
 
 	for _, data := range noLabelData {
-		metric := model.NewOpenMx(data.name, timestamp, data.value)
+		// Add a random delta to the value
+		value := addDelta(data.name, data.value)
+
+		// Create the metric with the current timestamp
+		metric := model.NewOpenMxWithCurrentTime(data.name, value)
 		*metrics = append(*metrics, metric)
 	}
 }
 
-// addOneLabelsMetrics adds metrics with one label
-func addOneLabelsMetrics(metrics *[]*model.OpenMx, timestamp int64) {
+// promaxAddOneLabelsMetrics adds metrics with one label
+func promaxAddOneLabelsMetrics(metrics *[]*model.OpenMx) {
 	oneLabelData := []struct {
 		name   string
 		labels []string
@@ -263,19 +277,32 @@ func addOneLabelsMetrics(metrics *[]*model.OpenMx, timestamp int64) {
 	}
 
 	for _, data := range oneLabelData {
-		metric := model.NewOpenMx(data.name, timestamp, data.value)
+		// Create a unique key for the metric with its labels
+		key := data.name
+		for _, label := range data.labels {
+			key += "_" + label
+		}
+
+		// Add a random delta to the value
+		value := addDelta(key, data.value)
+
+		// Create the metric with the current timestamp
+		metric := model.NewOpenMxWithCurrentTime(data.name, value)
+
+		// Add labels
 		for _, labelStr := range data.labels {
-			parts := splitLabel(labelStr)
+			parts := promaxSplitLabel(labelStr)
 			if len(parts) == 2 {
 				metric.AddLabel(parts[0], parts[1])
 			}
 		}
+
 		*metrics = append(*metrics, metric)
 	}
 }
 
-// addTwoLabelsMetrics adds metrics with two labels
-func addTwoLabelsMetrics(metrics *[]*model.OpenMx, timestamp int64) {
+// promaxAddTwoLabelsMetrics adds metrics with two labels
+func promaxAddTwoLabelsMetrics(metrics *[]*model.OpenMx) {
 	twoLabelData := []struct {
 		name   string
 		labels []string
@@ -294,19 +321,32 @@ func addTwoLabelsMetrics(metrics *[]*model.OpenMx, timestamp int64) {
 	}
 
 	for _, data := range twoLabelData {
-		metric := model.NewOpenMx(data.name, timestamp, data.value)
+		// Create a unique key for the metric with its labels
+		key := data.name
+		for _, label := range data.labels {
+			key += "_" + label
+		}
+
+		// Add a random delta to the value
+		value := addDelta(key, data.value)
+
+		// Create the metric with the current timestamp
+		metric := model.NewOpenMxWithCurrentTime(data.name, value)
+
+		// Add labels
 		for _, labelStr := range data.labels {
-			parts := splitLabel(labelStr)
+			parts := promaxSplitLabel(labelStr)
 			if len(parts) == 2 {
 				metric.AddLabel(parts[0], parts[1])
 			}
 		}
+
 		*metrics = append(*metrics, metric)
 	}
 }
 
 // Helper function to split a label string in the format "key=value" into key and value
-func splitLabel(label string) []string {
+func promaxSplitLabel(label string) []string {
 	idx := strings.Index(label, "=")
 	if idx == -1 {
 		return []string{}

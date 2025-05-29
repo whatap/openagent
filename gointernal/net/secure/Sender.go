@@ -1,6 +1,7 @@
 package secure
 
 import (
+	"fmt"
 	//"log"
 	//"runtime/debug"
 	"runtime"
@@ -34,8 +35,8 @@ func Send(f byte, p pack.Pack, flush bool) {
 	if TcpQueue != nil {
 		TcpQueue.Put1(TcpSend{f, p, flush})
 	}
-
 }
+
 func SendProfile(f byte, p pack.Pack, flush bool) {
 	InitSender()
 	// DEBUG Queue
@@ -95,8 +96,10 @@ func runSend() {
 			lock.Lock()
 			session := GetTcpSession()
 			defer func() {
+				fmt.Println("Sender.runSend defer")
 				lock.Unlock()
 				if x := recover(); x != nil {
+					fmt.Println("Recover", x)
 					conf.Log.Println("WA10901", " Recover", x) //, string(debug.Stack()))
 					session.Close()
 				}
@@ -165,6 +168,7 @@ func runSend() {
 				session.Send(p.flag, b, p.flush)
 				pack_len = len(b)
 			} else {
+				fmt.Printf("SendTest flag=%v//packType=%v,flush=%v\n", p.flag, p.pack.GetPackType(), p.flush)
 				switch GetSecureMask(p.flag) {
 				case NET_SECURE_HIDE:
 					if secuTcp.Cypher != nil {
@@ -173,12 +177,14 @@ func runSend() {
 						if conf.DebugTcpSendEnabled && stringutil.InArray(pack.GetPackTypeString((p.pack).GetPackType()), conf.DebugTcpSendPacks) {
 							conf.Log.Infoln("[DEBUG]", "Send NET_SECURE_HIDE ", pack.GetPackTypeString((p.pack).GetPackType()), " flush=", p.flush, " size=", len(b)) //, p.pack)
 						}
+						fmt.Println("SendTest", p.flag, p.pack.GetPackType(), p.flush, " 1", len(b))
 						if conf.NetFailoverRetrySendDataEnabled {
 							session.RetryQueue.PutForce(&p)
 						}
 						if session.Send(p.flag, b, p.flush) == false {
-							//fmt.Println("[whatap_debug] send hide failed")
+							fmt.Println("[whatap_debug] send secure failed")
 						}
+						fmt.Println("SendTest", p.flag, p.pack.GetPackType(), p.flush, " 2", len(b))
 						pack_len = len(b)
 					} else {
 						// send default
