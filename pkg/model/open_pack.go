@@ -55,32 +55,3 @@ func (om *OpenMx) Read(in *io.DataInputX) *OpenMx {
 	return om
 }
 
-// Write serializes an OpenMxHelp to a DataOutputX
-func (omh *OpenMxHelp) Write(o *io.DataOutputX) {
-	o.WriteByte(0) // version
-	o.WriteText(omh.Metric)
-
-	// Write properties as key-value pairs
-	o.WriteShort(int16(len(omh.Property)))
-	for k, v := range omh.Property {
-		o.WriteText(k)
-		o.WriteText(v)
-	}
-}
-
-// Read deserializes an OpenMxHelp from a DataInputX
-func (omh *OpenMxHelp) Read(in *io.DataInputX) *OpenMxHelp {
-	_ = in.ReadByte() // version
-	omh.Metric = in.ReadText()
-
-	// Read properties
-	propCount := int(in.ReadShort())
-	omh.Property = make(map[string]string, propCount)
-	for i := 0; i < propCount; i++ {
-		key := in.ReadText()
-		value := in.ReadText()
-		omh.Property[key] = value
-	}
-
-	return omh
-}

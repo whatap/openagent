@@ -117,23 +117,23 @@ func process(logger *logfile.FileLogger) {
 	}
 
 	//Send metrics
-	//metricsPack := model.NewOpenMxPack()
-	//metricsPack.SetTime(now)
-	//metricsPack.SetRecords(metrics)
-	//
-	//// Get the security master
-	//securityMaster := secure.GetSecurityMaster()
-	//if securityMaster == nil {
-	//	promaxLogMessage(logger, "PromaX", "No security master available")
-	//	return
-	//}
-	//
-	////Set PCODE and OID
-	//metricsPack.SetPCODE(securityMaster.PCODE)
-	//metricsPack.SetOID(securityMaster.OID)
-	//
-	//promaxLogMessage(logger, "PromaX", fmt.Sprintf("Sending %d metrics", len(metrics)))
-	//secure.Send(secure.NET_SECURE_HIDE, metricsPack, true)
+	metricsPack := model.NewOpenMxPack()
+	metricsPack.SetTime(now)
+	metricsPack.SetRecords(metrics)
+
+	// Get the security master
+	securityMaster := secure.GetSecurityMaster()
+	if securityMaster == nil {
+		promaxLogMessage(logger, "PromaX", "No security master available")
+		return
+	}
+
+	//Set PCODE and OID
+	metricsPack.SetPCODE(securityMaster.PCODE)
+	metricsPack.SetOID(securityMaster.OID)
+
+	promaxLogMessage(logger, "PromaX", fmt.Sprintf("Sending %d metrics", len(metrics)))
+	secure.Send(secure.NET_SECURE_HIDE, metricsPack, true)
 }
 
 // createMetrics creates sample metrics data

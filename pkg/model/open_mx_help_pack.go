@@ -1,6 +1,7 @@
 package model
 
 import (
+	"fmt"
 	"github.com/whatap/golib/io"
 	"github.com/whatap/golib/lang/pack"
 	"github.com/whatap/golib/util/compressutil"
@@ -66,7 +67,9 @@ func (p *OpenMxHelpPack) reset(items []*OpenMxHelp) *OpenMxHelpPack {
 		p.zip = 1
 		compressed, err := compressutil.DoZip(p.bytes)
 		if err == nil {
+			fmt.Println("bytes compressed")
 			p.bytes = compressed
+
 		}
 	}
 
