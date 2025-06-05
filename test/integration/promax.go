@@ -1,4 +1,4 @@
-package open
+package main
 
 import (
 	"fmt"
@@ -6,57 +6,25 @@ import (
 	"github.com/whatap/golib/logger/logfile"
 	"github.com/whatap/golib/util/dateutil"
 	"math/rand"
-	"open-agent/pkg/config"
 	"open-agent/pkg/model"
-	"open-agent/pkg/processor"
-	"open-agent/pkg/scraper"
-	"open-agent/pkg/sender"
 	"os"
 	"strings"
 	"time"
 )
 
-const (
-	// QueueSize is the size of the queues
-	RawQueueSize       = 10000
-	ProcessedQueueSize = 10000
-)
-
-var isRun = false
-var readyHealthCheck = false
-var runDate int64
-
-// Global logger for the application
-var appLogger *logfile.FileLogger
-
-// Channels for shutdown coordination
-var shutdownCh = make(chan struct{})
-var doneCh = make(chan struct{}, 3) // Buffer for 3 components: scraper, processor, sender
-
-// Debug mode variables
 // Map to store the last value for each metric to calculate deltas
 var deltaMap = make(map[string]int64)
 
 // Last time help information was sent
 var lastHelpSendTime int64 = 0
 
-// SetAppLogger sets the application logger
-func SetAppLogger(logger *logfile.FileLogger) {
-	appLogger = logger
+// promaxLogMessage logs a message to both the file logger and stdout
+func promaxLogMessage(logger *logfile.FileLogger, tag string, message string) {
+	logger.Println(tag, message)
+	fmt.Printf("[%s] %s\n", tag, message)
 }
 
-// GetAppLogger returns the application logger
-func GetAppLogger() *logfile.FileLogger {
-	return appLogger
-}
-
-// BootOpenAgent initializes and starts the Prometheus Agent
-func BootOpenAgent(version, commitHash string, logger *logfile.FileLogger) {
-	// Store the logger in the global variable for centralized access
-	SetAppLogger(logger)
-
-	GetAppLogger().Println("BootOpenAgent", fmt.Sprintf("Starting OpenAgent version=%s, commitHash=%s", version, commitHash))
-
+func main() {
 	// Check if environment variables are set
 	license := os.Getenv("WHATAP_LICENSE")
 	host := os.Getenv("WHATAP_HOST")
@@ -72,244 +40,22 @@ func BootOpenAgent(version, commitHash string, logger *logfile.FileLogger) {
 		os.Exit(1)
 	}
 
-	// Parse server list
-	servers := []string{fmt.Sprintf("%s:%s", host, port)}
+	// Create a logger
+	logger := logfile.NewFileLogger()
+	promaxLogMessage(logger, "PromaX", "Starting PromaX sample sender")
 
 	// Initialize secure communication
+	servers := []string{fmt.Sprintf("%s:%s", host, port)}
 	secure.StartNet(secure.WithLogger(logger), secure.WithAccessKey(license), secure.WithServers(servers), secure.WithOname("test"))
 
-	// Check if debug mode is enabled
-	debugMode := os.Getenv("debug")
-	if debugMode == "true" {
-		GetAppLogger().Println("BootOpenAgent", "Debug mode enabled, running process method")
-		// Initialize random number generator
-		rand.Seed(time.Now().UnixNano())
-		// Run the process method in a loop
-		for {
-			process(logger)
-			time.Sleep(10 * time.Second)
-		}
-		// The code below will not be executed in debug mode
+	// Initialize random number generator
+	rand.Seed(time.Now().UnixNano())
+
+	// Process metrics periodically
+	for {
+		process(logger)
+		time.Sleep(10 * time.Second)
 	}
-
-	fmt.Println("BootOpenAgent", "Debug mode disabled, starting agent")
-	// Create channels for communication between components
-	rawQueue := make(chan *model.ScrapeRawData, RawQueueSize)
-	processedQueue := make(chan *model.ConversionResult, ProcessedQueueSize)
-
-	// Create the configuration manager
-	configManager := config.NewConfigManager()
-
-	// Create and start the scraper manager with error recovery and shutdown handling
-	scraperManager := scraper.NewScraperManager(configManager, rawQueue)
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				logger.Println("ScraperManagerPanic", fmt.Sprintf("Recovered from panic: %v", r))
-				// Restart the scraper manager after a short delay
-				select {
-				case <-shutdownCh:
-					// Don't restart if we're shutting down
-					doneCh <- struct{}{}
-					return
-				case <-time.After(5 * time.Second):
-					go scraperManager.StartScraping()
-				}
-			} else {
-				// Normal exit
-				doneCh <- struct{}{}
-			}
-		}()
-
-		// Start scraping in a separate goroutine so we can listen for shutdown
-		scrapeDone := make(chan struct{})
-		go func() {
-			scraperManager.StartScraping()
-			close(scrapeDone)
-		}()
-
-		// Wait for either scraping to finish or shutdown signal
-		select {
-		case <-scrapeDone:
-			// Scraping finished normally
-		case <-shutdownCh:
-			// Shutdown requested, cleanup will be handled by defer
-			logger.Println("ScraperManager", "Shutdown requested")
-			// Here we would call a stop method on scraperManager if it had one
-		}
-	}()
-
-	// Create and start the processor with error recovery and shutdown handling
-	processor := processor.NewProcessor(rawQueue, processedQueue)
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				logger.Println("ProcessorPanic", fmt.Sprintf("Recovered from panic: %v", r))
-				// Restart the processor after a short delay
-				select {
-				case <-shutdownCh:
-					// Don't restart if we're shutting down
-					doneCh <- struct{}{}
-					return
-				case <-time.After(5 * time.Second):
-					processor.Start()
-				}
-			} else {
-				// Normal exit
-				doneCh <- struct{}{}
-			}
-		}()
-
-		// Start processing in a separate goroutine so we can listen for shutdown
-		processDone := make(chan struct{})
-		go func() {
-			processor.Start()
-			close(processDone)
-		}()
-
-		// Wait for either processing to finish or shutdown signal
-		select {
-		case <-processDone:
-			// Processing finished normally
-		case <-shutdownCh:
-			// Shutdown requested, cleanup will be handled by defer
-			logger.Println("Processor", "Shutdown requested")
-			// Here we would call a stop method on processor if it had one
-		}
-	}()
-
-	// Create and start the sender with error recovery and shutdown handling
-	senderInstance = sender.NewSender(processedQueue, GetAppLogger())
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				logger.Println("SenderPanic", fmt.Sprintf("Recovered from panic: %v", r))
-				// Restart the sender after a short delay
-				select {
-				case <-shutdownCh:
-					// Don't restart if we're shutting down
-					doneCh <- struct{}{}
-					return
-				case <-time.After(5 * time.Second):
-					senderInstance.Start()
-				}
-			} else {
-				// Normal exit
-				doneCh <- struct{}{}
-			}
-		}()
-
-		// Start sending in a separate goroutine so we can listen for shutdown
-		sendDone := make(chan struct{})
-		go func() {
-			senderInstance.Start()
-			close(sendDone)
-		}()
-
-		// Wait for either sending to finish or shutdown signal
-		select {
-		case <-sendDone:
-			// Sending finished normally
-		case <-shutdownCh:
-			// Shutdown requested, cleanup will be handled by defer
-			logger.Println("Sender", "Shutdown requested")
-			// Call Stop on the sender
-			senderInstance.Stop()
-		}
-	}()
-
-	// Set flags to indicate the agent is running
-	isRun = true
-	runDate = dateutil.SystemNow()
-
-	logger.Println("BootOpenAgent", "OpenAgent started successfully")
-}
-
-// IsOK checks if the agent is running properly
-func IsOK() bool {
-	// If health check is not ready yet, check if it's time to enable it
-	if !readyHealthCheck {
-		if isRun && (dateutil.SystemNow()-runDate > 2*dateutil.MILLIS_PER_MINUTE) {
-			GetAppLogger().Println("HealthCheckReady", "Worker HealthCheck Ready")
-			readyHealthCheck = true
-		}
-		return true // Return healthy until health check is ready
-	}
-
-	// Perform actual health check
-	secu := secure.GetSecurityMaster()
-
-	// Check PCODE
-	if secu.PCODE == 0 {
-		GetAppLogger().Println("HealthCheckFail", fmt.Sprintf("PCODE Error: %d", secu.PCODE))
-		return false
-	}
-
-	// Check OID
-	if secu.OID == 0 {
-		GetAppLogger().Println("HealthCheckFail", fmt.Sprintf("OID Error: %d", secu.OID))
-		return false
-	}
-
-	return true
-}
-
-// Global variables to store component references for shutdown
-var senderInstance *sender.Sender
-
-// Shutdown gracefully shuts down all components
-func Shutdown() {
-	if !isRun {
-		GetAppLogger().Println("Shutdown", "Agent is not running")
-		return
-	}
-
-	GetAppLogger().Println("Shutdown", "Initiating graceful shutdown")
-
-	// Stop the sender if it exists
-	if senderInstance != nil {
-		GetAppLogger().Println("Shutdown", "Stopping sender")
-		senderInstance.Stop()
-	}
-
-	// Signal all components to shut down
-	close(shutdownCh)
-
-	// Wait for all components to acknowledge shutdown with a timeout
-	timeout := time.NewTimer(30 * time.Second)
-	defer timeout.Stop()
-
-	// Count how many components we're waiting for
-	componentsToWait := 3
-
-	// Wait for components to signal they're done or timeout
-	for componentsToWait > 0 {
-		select {
-		case <-doneCh:
-			componentsToWait--
-			GetAppLogger().Println("Shutdown", fmt.Sprintf("Component shutdown acknowledged, %d remaining", componentsToWait))
-		case <-timeout.C:
-			GetAppLogger().Println("Shutdown", "Timeout waiting for components to shut down")
-			return
-		}
-	}
-
-	// Clean up resources
-	isRun = false
-	readyHealthCheck = false
-
-	// Shutdown secure communication
-	//secure.StopNet()
-
-	GetAppLogger().Println("Shutdown", "All components shut down successfully")
-}
-
-// Debug mode functions
-
-// promaxLogMessage logs a message to both the file logger and stdout
-func promaxLogMessage(logger *logfile.FileLogger, tag string, message string) {
-	logger.Println(tag, message)
-	fmt.Printf("[%s] %s\n", tag, message)
 }
 
 // process creates and sends metrics and help information
@@ -323,7 +69,7 @@ func process(logger *logfile.FileLogger) {
 	now := time.Now().UnixMilli()
 
 	// Send help information only once per minute
-	if now-lastHelpSendTime > 60*dateutil.MILLIS_PER_SECOND {
+	if now-lastHelpSendTime > 5*dateutil.MILLIS_PER_SECOND {
 		for _, mx := range metrics {
 			helpText := model.GetMetricHelp(mx.Metric)
 			metricType := model.GetMetricType(mx.Metric)
@@ -339,6 +85,7 @@ func process(logger *logfile.FileLogger) {
 			mxh := model.NewOpenMxHelp(mx.Metric)
 			mxh.Put("help", helpText)
 			mxh.Put("type", metricType)
+			//fmt.Printf("mxh-Metric=%v\n", mxh.Metric)
 			helpItems = append(helpItems, mxh)
 		}
 		lastHelpSendTime = now
@@ -357,9 +104,14 @@ func process(logger *logfile.FileLogger) {
 		helpPack.SetOID(securityMaster.OID)
 		helpPack.SetTime(now)
 		helpPack.SetRecords(helpItems)
+		//testRe := helpPack.GetRecords()
 
+		//fmt.Printf("helpPack.GetRecords()=%v\n", testRe)
 		// Get the security master
 		promaxLogMessage(logger, "PromaX", fmt.Sprintf("Sending %d help records", len(helpItems)))
+		//for _, helpItem := range helpItems {
+		//fmt.Printf("helpItem.Metric=%v//help=%v//type=%v\n", helpItem.Metric, helpItem.Get("help"), helpItem.Get("type"))
+		//}
 		secure.Send(secure.NET_SECURE_HIDE, helpPack, true)
 		time.Sleep(1000 * time.Millisecond)
 	}

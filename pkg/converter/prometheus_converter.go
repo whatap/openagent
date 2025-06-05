@@ -2,6 +2,7 @@ package converter
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -122,9 +123,9 @@ func parseRecordLine(line string) (*model.OpenMx, error) {
 		// Parse value
 		rest := strings.TrimSpace(line[endBrace+1:])
 		if rest == "+Inf" {
-			value = float64(1.0) / 0.0 // Positive infinity
+			value = math.Inf(1) // Positive infinity
 		} else if rest == "-Inf" {
-			value = -float64(1.0) / 0.0 // Negative infinity
+			value = math.Inf(-1) // Negative infinity
 		} else {
 			var err error
 			value, err = strconv.ParseFloat(rest, 64)
@@ -143,9 +144,9 @@ func parseRecordLine(line string) (*model.OpenMx, error) {
 		valStr := strings.TrimSpace(line[spaceIndex+1:])
 
 		if valStr == "+Inf" {
-			value = float64(1.0) / 0.0 // Positive infinity
+			value = math.Inf(1) // Positive infinity
 		} else if valStr == "-Inf" {
-			value = -float64(1.0) / 0.0 // Negative infinity
+			value = math.Inf(-1) // Negative infinity
 		} else {
 			var err error
 			value, err = strconv.ParseFloat(valStr, 64)

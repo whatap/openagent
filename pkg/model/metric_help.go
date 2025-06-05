@@ -2,6 +2,9 @@ package model
 
 // METRIC_HELP is a map of metric names to help text
 var METRIC_HELP = map[string]string{
+
+	//
+	"apiserver_request_duration_seconds_count": "Response latency distribution in seconds for each verb, dry run value, group, version, resource, subresource, scope and component.",
 	// HTTP 요청 관련 메트릭
 	"http_requests_total":            "Total number of HTTP requests.",
 	"http_requests_duration_seconds": "Duration of HTTP requests in seconds.",
@@ -82,6 +85,8 @@ var METRIC_HELP = map[string]string{
 
 // METRIC_TYPE is a map of metric names to metric types
 var METRIC_TYPE = map[string]string{
+
+	"apiserver_request_duration_seconds_count": "counter",
 	// HTTP 요청 관련 메트릭
 	"http_requests_total":            "counter",
 	"http_requests_duration_seconds": "histogram",

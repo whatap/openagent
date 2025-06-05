@@ -2,23 +2,31 @@ package config
 
 import (
 	"fmt"
+	"gopkg.in/yaml.v2"
 	"io/ioutil"
+	"log"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"gopkg.in/yaml.v2"
+	"sync"
 )
 
 // ConfigManager is responsible for loading and parsing the scrape configuration
 type ConfigManager struct {
-	config map[string]interface{}
+	config      map[string]interface{}
+	configFile  string
+	mu          sync.RWMutex
 }
 
 // NewConfigManager creates a new ConfigManager instance
 func NewConfigManager() *ConfigManager {
 	cm := &ConfigManager{}
-	cm.LoadConfig()
+	err := cm.LoadConfig()
+	if err != nil {
+		log.Printf("Failed to load configuration: %v", err)
+		return nil
+	}
 	return cm
 }
 
@@ -29,6 +37,7 @@ func (cm *ConfigManager) LoadConfig() error {
 		homeDir = "."
 	}
 	configFile := filepath.Join(homeDir, "scrape_config.yaml")
+	cm.configFile = configFile
 
 	data, err := ioutil.ReadFile(configFile)
 	if err != nil {
@@ -41,14 +50,21 @@ func (cm *ConfigManager) LoadConfig() error {
 		return fmt.Errorf("error parsing configuration file: %v", err)
 	}
 
+	// Update the config with a lock to ensure thread safety
+	cm.mu.Lock()
 	cm.config = config
+	cm.mu.Unlock()
+
 	return nil
 }
 
 // GetConfig returns the entire configuration
 func (cm *ConfigManager) GetConfig() map[string]interface{} {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
 	return cm.config
 }
+
 
 // GetScrapeInterval returns the global scrape interval
 func (cm *ConfigManager) GetScrapeInterval() string {
@@ -62,24 +78,47 @@ func (cm *ConfigManager) GetScrapeInterval() string {
 	return "15s"
 }
 
-// GetScrapeConfigs returns the scrape_configs section
+// GetScrapeConfigs returns the scrape_configs section or the openAgent.scrapConfigs/targets section if available
 func (cm *ConfigManager) GetScrapeConfigs() []map[string]interface{} {
+	// First, try to get the openAgent section from the CR format
 	if cm.config != nil {
-		if configs, ok := cm.config["scrape_configs"].([]interface{}); ok {
-			result := make([]map[string]interface{}, 0, len(configs))
-			for _, config := range configs {
-				if configMap, ok := config.(map[interface{}]interface{}); ok {
-					// Convert map[interface{}]interface{} to map[string]interface{}
-					stringMap := make(map[string]interface{})
-					for k, v := range configMap {
-						if key, ok := k.(string); ok {
-							stringMap[key] = convertToStringMap(v)
+		// Check if we have a features section (CR format)
+		if features, ok := cm.config["features"].(map[interface{}]interface{}); ok {
+			// Check if we have an openAgent section
+			if openAgent, ok := features["openAgent"].(map[interface{}]interface{}); ok {
+				// Check if openAgent is enabled
+				if enabled, ok := openAgent["enabled"].(bool); ok && enabled {
+					// First check if we have a targets section (new format)
+					if targets, ok := openAgent["targets"].([]interface{}); ok {
+						result := make([]map[string]interface{}, 0, len(targets))
+						for _, target := range targets {
+							if targetMap, ok := target.(map[interface{}]interface{}); ok {
+								// Convert map[interface{}]interface{} to map[string]interface{}
+								stringMap := make(map[string]interface{})
+								for k, v := range targetMap {
+									if key, ok := k.(string); ok {
+										stringMap[key] = convertToStringMap(v)
+									}
+								}
+								// Add global settings if they exist
+								if globalInterval, ok := openAgent["globalInterval"].(string); ok {
+									if _, exists := stringMap["interval"]; !exists {
+										stringMap["interval"] = globalInterval
+									}
+								}
+								if globalPath, ok := openAgent["globalPath"].(string); ok {
+									if _, exists := stringMap["path"]; !exists {
+										stringMap["path"] = globalPath
+									}
+								}
+
+								result = append(result, stringMap)
+							}
 						}
+						return result
 					}
-					result = append(result, stringMap)
 				}
 			}
-			return result
 		}
 	}
 	return nil

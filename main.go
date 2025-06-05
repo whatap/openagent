@@ -1,33 +1,57 @@
 package main
 
+// OpenAgent - A Prometheus metrics collector for WHATAP
+//
+// This application collects metrics from Prometheus endpoints and sends them to the WHATAP server.
+// It can run in two modes:
+// 1. Supervisor mode (default): Manages a worker process and monitors its health
+// 2. Worker mode (with "foreground" argument): Performs the actual metrics collection and sending
+
 import (
 	"fmt"
+	whatap_io "github.com/whatap/golib/io"
+	"github.com/whatap/golib/lang/value"
 	"github.com/whatap/golib/logger/logfile"
 	"github.com/whatap/golib/util/dateutil"
 	"log"
 	"net"
 	"open-agent/open"
+	"open-agent/util/io"
 	"os"
 	"os/exec"
 	"os/signal"
-	"path/filepath"
+	"reflect"
 	"runtime"
 	"runtime/pprof"
 	"syscall"
 	"time"
 )
 
+// Version information, set during build
 var (
-	version    string
-	commitHash string
+	version    string // Version of the application
+	commitHash string // Git commit hash
 )
 
+// Constants for the keep-alive mechanism
 const (
-	AliveSockAddr       = "/var/run/whatap_openagent.sock"
-	KEEP_ALIVE_PROTOCOL = 0x5B9B
+	KEEP_ALIVE_PROTOCOL = 0x5B9B // Protocol identifier for keep-alive messages
 )
+
+// getAliveSockAddr returns the socket address for keep-alive communication
+// It uses the current working directory where main.go is executed
+func getAliveSockAddr() string {
+	// Get the current working directory
+	cwd, err := os.Getwd()
+	if err != nil {
+		// If there's an error getting the current directory, fall back to temp directory
+		return fmt.Sprintf("%s/whatap_openagent.sock", os.TempDir())
+	}
+	return fmt.Sprintf("%s/whatap_openagent.sock", cwd)
+}
 
 func run(home string, logger *logfile.FileLogger) {
+	// Set up signal handling for graceful shutdown
 	stopper := make(chan os.Signal, 1)
 	signal.Notify(stopper, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
 
@@ -63,12 +87,8 @@ func run(home string, logger *logfile.FileLogger) {
 	// Start the agent
 	open.BootOpenAgent(version, commitHash, logger)
 
-	// Wait for termination signal
-	<-stopper
-
-	// Perform graceful shutdown
 	logger.Println("run", "Received termination signal, shutting down")
-	open.Shutdown()
+	<-stopper
 }
 
 func exitOnStdinClose(logger *logfile.FileLogger) {
@@ -81,7 +101,6 @@ func exitOnStdinClose(logger *logfile.FileLogger) {
 		time.Sleep(1 * time.Second)
 	}
 }
-
 func startWorker(command string, logger *logfile.FileLogger) (*exec.Cmd, error) {
 	logger.Println("StartWorker", fmt.Sprintf("Start Worker Process(%s foreground)", command))
 	cmd := exec.Command(command, "foreground")
@@ -92,26 +111,80 @@ func startWorker(command string, logger *logfile.FileLogger) (*exec.Cmd, error) 
 	}
 	return cmd, nil
 }
+func superviseRun(childHealthChannel chan bool, logger *logfile.FileLogger) {
+	for {
+		logger.Println("superviseRun", "Worker Start")
+		cmd, err := startWorker(os.Args[0], logger)
+		if err != nil {
+			return
+		}
 
-func getCurrentDir() (string, error) {
-	return filepath.Abs(filepath.Dir(os.Args[0]))
+		childAlive := true
+		//childStart := time.Now()
+
+		for childAlive {
+			select {
+			case healthStatus := <-childHealthChannel:
+				if !healthStatus {
+					if cmd != nil && cmd.Process != nil {
+						cmd.Process.Signal(syscall.SIGABRT)
+						err = cmd.Wait()
+						childAlive = false
+					}
+					logger.Println("superviseCheck", "child health problem, child kill")
+				}
+			case <-time.After(time.Duration(3) * time.Minute):
+				if cmd != nil && cmd.Process != nil {
+					cmd.Process.Signal(syscall.SIGABRT)
+					err = cmd.Wait()
+					childAlive = false
+				}
+				logger.Println("superviseCheck", "child health check timeout, child kill")
+			}
+		}
+
+		if err != nil {
+			logger.Println("superviseRunError", "command wait error : ", err)
+		}
+	}
 }
+func sendKeepAliveMessage(logger *logfile.FileLogger, conn net.Conn) {
+	writer := io.NewNetWriteHelper(conn)
+	var err error
+	for err == nil {
+		msgmap := value.NewMapValue()
+		if open.IsOK() {
+			msgmap.PutString("Health", "OK")
+		} else {
+			logger.Println("KeepAlive", "HealthCheck Fail")
+			msgmap.PutString("Health", "PROBLEM")
+		}
 
+		dout := whatap_io.NewDataOutputX()
+		dout.WriteShort(KEEP_ALIVE_PROTOCOL)
+		doutx := whatap_io.NewDataOutputX()
+		msgmap.Write(doutx)
+		dout.WriteIntBytes(doutx.ToByteArray())
+		err = writer.WriteBytes(dout.ToByteArray(), 30*time.Second)
+		if err != nil {
+			logger.Println("KeepAliveWriteFail", "KeepAliveFail")
+		}
+
+		time.Sleep(60 * time.Second)
+	}
+}
 func keepAliveSender(logger *logfile.FileLogger) {
 	for {
 		logger.Println("keepAliveSender", "keepAliveSender Start")
-		if _, err := os.Stat(AliveSockAddr); os.IsNotExist(err) {
-			logger.Println("keepAliveSenderError-1", "keepAliveSocketNotExist", AliveSockAddr)
-			time.Sleep(10 * time.Second)
+		sockAddr := getAliveSockAddr()
+		if _, err := os.Stat(sockAddr); os.IsNotExist(err) {
+			logger.Println("keepAliveSenderError-1", "keepAliveSocketNotExist", sockAddr)
 			continue
 		}
-
 		socktype := "unix"
-		laddr := net.UnixAddr{AliveSockAddr, socktype}
+		laddr := net.UnixAddr{sockAddr, socktype}
 		var serverconn net.Conn
-
-		// Simplified nil check
-		for serverconn == nil {
+		for serverconn == nil || (reflect.ValueOf(serverconn).Kind() == reflect.Ptr && reflect.ValueOf(serverconn).IsNil()) {
 			conn, err := net.DialUnix(socktype, nil, &laddr)
 			if err != nil {
 				logger.Println("keepAliveSenderError-2", "Dial Error", err)
@@ -121,53 +194,102 @@ func keepAliveSender(logger *logfile.FileLogger) {
 			serverconn = conn
 		}
 
-		// Use a ticker for regular keep-alive messages
-		ticker := time.NewTicker(60 * time.Second)
-		defer ticker.Stop()
-
-		// Send keep-alive messages until connection fails
-	keepAliveLoop:
-		for {
-			select {
-			case <-ticker.C:
-				msgmap := make(map[string]string)
-				if open.IsOK() {
-					msgmap["Health"] = "OK"
-				} else {
-					logger.Println("KeepAlive", "HealthCheck Fail")
-					msgmap["Health"] = "PROBLEM"
-				}
-
-				// Send the message
-				// In a real implementation, this would serialize and send the message
-				logger.Println("KeepAlive", fmt.Sprintf("Sending keep-alive message: %v", msgmap))
-
-				// Check if connection is still valid
-				if serverconn == nil {
-					logger.Println("keepAliveSenderError-3", "Connection lost")
-					break keepAliveLoop
-				}
-			}
-		}
-
-		// Clean up connection before retrying
+		sendKeepAliveMessage(logger, serverconn)
 		if serverconn != nil {
 			serverconn.Close()
-			serverconn = nil
 		}
 
 		time.Sleep(10 * time.Second)
+
+	}
+}
+func keepAlive(conn net.Conn, childHealthChannel chan bool, logger *logfile.FileLogger) {
+	defer func() {
+		if conn != nil {
+			conn.Close()
+		}
+	}()
+
+	reader := io.NewNetReadHelper(conn)
+	for {
+		protocol, err := reader.ReadShort()
+		if err != nil || protocol != KEEP_ALIVE_PROTOCOL {
+			logger.Println("keepAliveError-1", err)
+			return
+		}
+
+		msgbytes, err := reader.ReadIntBytesLimit(2048)
+		if err != nil {
+			logger.Println("keepAliveError-2", err)
+			return
+		}
+
+		datainputx := whatap_io.NewDataInputX(msgbytes)
+		msgmap := value.NewMapValue()
+		msgmap.Read(datainputx)
+
+		if msgmap.GetString("Health") == "OK" {
+			childHealthChannel <- true
+		} else {
+			childHealthChannel <- false
+		}
+	}
+}
+func monitorChildHealth(childHealthChannel chan bool, logger *logfile.FileLogger) {
+	logger.Println("childHealthCheck", "childHealthCheck Start")
+	for {
+		sockAddr := getAliveSockAddr()
+		if err := os.RemoveAll(sockAddr); err != nil {
+			logger.Println("childHealthCheckError-1", err)
+		}
+
+		l, err := net.Listen("unix", sockAddr)
+		if err != nil {
+			logger.Println("childHealthCheckError-2", err)
+			continue
+		}
+
+		errorCount := 0
+		for {
+			conn, err := l.Accept()
+			if err != nil {
+				if conn != nil {
+					conn.Close()
+				}
+				logger.Println("childHealthCheckError-3", err)
+				errorCount += 1
+				time.Sleep(3 * time.Second)
+			}
+
+			if errorCount > 10 {
+				if conn != nil {
+					conn.Close()
+				}
+
+				logger.Println("childHealthCheckError-4", "ErrorCount Over 10")
+				break
+			}
+
+			keepAlive(conn, childHealthChannel, logger)
+		}
+
+		l.Close()
+		time.Sleep(3 * time.Second)
 	}
 }
 
 func main() {
 	if len(os.Args) > 1 {
 		arg1 := os.Args[1]
-		if arg1 == "-v" || arg1 == "--version" {
-			fmt.Printf("Version: %s\nCommit Hash: %s\n", version, commitHash)
-		} else if arg1 == "-h" || arg1 == "--help" {
-			fmt.Printf("option:\n\t -h, --help : help\n\t -v, --version : version\n")
-		} else if arg1 == "foreground" {
+		if arg1 == "foreground" {
+			fmt.Println("mode:foreground")
+
+			// Check if we have a second argument for debug mode
+			if len(os.Args) > 2 && os.Args[2] == "debug" {
+				fmt.Println("Debug mode: enabled")
+				os.Setenv("debug", "true")
+			}
+
 			//worker
 			openHome := os.Getenv("WHATAP_OPEN_HOME")
 			logger := logfile.NewFileLogger(logfile.WithOnameLogID("open", "OPEN-AGENT-WORKER"), logfile.WithHomePath(openHome))
@@ -175,56 +297,20 @@ func main() {
 			go keepAliveSender(logger)
 			run(openHome, logger)
 		}
-		os.Exit(0)
 	}
 
 	// master
 	stopper := make(chan os.Signal, 1)
 	signal.Notify(stopper, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
-	openHome := os.Getenv("WHATAP_OPEN_HOME")
-	logger := logfile.NewFileLogger(logfile.WithOnameLogID("open", "OPEN-AGENT-SUPERVISOR"), logfile.WithHomePath(openHome))
 
 	// Create a file to indicate that the agent is running
-	pid := os.Getpid()
-	homeDir := os.Getenv("WHATAP_HOME")
-	if homeDir == "" {
-		homeDir = "."
-	}
-	exitFile := filepath.Join(homeDir, fmt.Sprintf("openagent-%d.whatap", pid))
+	openHome := os.Getenv("WHATAP_OPEN_HOME")
+	logger := logfile.NewFileLogger(logfile.WithOnameLogID("open", "OPEN-AGENT-SUPERVISOR"), logfile.WithHomePath(openHome))
+	childHealthChannel := make(chan bool)
+	go monitorChildHealth(childHealthChannel, logger)
+	time.Sleep(1 * time.Second)
 
-	// Create the exit file
-	file, err := os.Create(exitFile)
-	if err != nil {
-		log.Fatalf("Error creating exit file: %v", err)
-	}
-	file.Close()
-
-	// Delete the exit file when the program exits
-	defer os.Remove(exitFile)
-
-	// Wait for either a signal or the exit file to be deleted
-	go func() {
-		for {
-			if _, err := os.Stat(exitFile); os.IsNotExist(err) {
-				logger.Println("Exit file deleted, shutting down...")
-				os.Exit(0)
-			}
-			time.Sleep(10 * time.Second)
-		}
-	}()
-
-	// Start the worker process
-	cmd, err := startWorker(os.Args[0], logger)
-	if err != nil {
-		logger.Println("StartWorkerError", err)
-		os.Exit(1)
-	}
-
-	// Wait for the worker process to exit
-	err = cmd.Wait()
-	if err != nil {
-		logger.Println("WorkerExitError", err)
-	}
+	go superviseRun(childHealthChannel, logger)
 
 	<-stopper
 }

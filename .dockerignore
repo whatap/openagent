@@ -1,0 +1,34 @@
+# Git
+.git
+.gitignore
+
+# Build artifacts
+openagent
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Logs
+logs/
+*.log
+
+# Temporary files
+*.tmp
+*.swp
+*.swo
+.DS_Store
+
+# IDE files
+.idea/
+.vscode/
+*.iml
+
+# Test files
+test/
+
+# Socket file
+*.sock
+
+# Kubernetes manifests
+k8s/

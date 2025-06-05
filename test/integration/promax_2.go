@@ -245,6 +245,7 @@ func promaxAddOneLabelsMetrics(metrics *[]*model.OpenMx) {
 		labels []string
 		value  float64
 	}{
+		{"apiserver_request_duration_seconds_count", []string{"target=kube-apiserver"}, 2999},
 		{"http_requests_total", []string{"method=GET"}, 1023},
 		{"http_requests_total", []string{"method=POST"}, 234},
 		{"http_requests_failed_total", []string{"method=DELETE"}, 54},
@@ -308,6 +309,7 @@ func promaxAddTwoLabelsMetrics(metrics *[]*model.OpenMx) {
 		labels []string
 		value  float64
 	}{
+		{"apiserver_request_duration_seconds_count", []string{"target=kube-apiserver", "instance=192.168.0.105"}, 3333},
 		{"http_requests_total", []string{"method=GET", "status=200"}, 982},
 		{"http_requests_total", []string{"method=POST", "status=500"}, 45},
 		{"cpu_usage_seconds_total", []string{"core=1", "node=node1"}, 65478},

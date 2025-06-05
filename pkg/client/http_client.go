@@ -7,18 +7,22 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 )
 
 const (
 	// File and path constants
-	localCAPath               = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
-	localServiceAccountToken  = "/var/run/secrets/kubernetes.io/serviceaccount/token"
-	kubernetesServiceHost     = "KUBERNETES_SERVICE_HOST"
-	kubernetesServicePort     = "KUBERNETES_SERVICE_PORT"
+	localCAPath              = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+	localServiceAccountToken = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+	kubernetesServiceHost    = "KUBERNETES_SERVICE_HOST"
+	kubernetesServicePort    = "KUBERNETES_SERVICE_PORT"
 )
+
+// TLSConfig represents TLS configuration options
+type TLSConfig struct {
+	InsecureSkipVerify bool
+}
 
 // HTTPClient is responsible for making HTTP requests to scrape metrics from targets
 type HTTPClient struct {
@@ -57,14 +61,14 @@ func FormatURL(target string) string {
 	if target == "" {
 		return target
 	}
-	
+
 	target = strings.TrimSpace(target)
 	lower := strings.ToLower(target)
-	
+
 	if !strings.HasPrefix(lower, "http://") && !strings.HasPrefix(lower, "https://") {
 		return "https://" + target
 	}
-	
+
 	return target
 }
 
@@ -74,16 +78,16 @@ func GetKubeServiceEndpoint(customHost, customPort string) string {
 	if customHost != "" {
 		host = customHost
 	}
-	
+
 	port := os.Getenv(kubernetesServicePort)
 	if customPort != "" {
 		port = customPort
 	}
-	
+
 	if host == "" || port == "" {
 		return ""
 	}
-	
+
 	return fmt.Sprintf("https://%s:%s", host, port)
 }
 
@@ -102,50 +106,84 @@ func loadKubernetesCACert() (*x509.Certificate, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error reading CA certificate: %v", err)
 	}
-	
+
 	certs, err := x509.ParseCertificates(data)
 	if err != nil {
 		return nil, fmt.Errorf("error parsing CA certificate: %v", err)
 	}
-	
+
 	if len(certs) == 0 {
 		return nil, fmt.Errorf("no certificates found in CA file")
 	}
-	
+
 	return certs[0], nil
 }
 
 // ExecuteGet performs an HTTP GET request to the specified URL
 func (c *HTTPClient) ExecuteGet(targetURL string) (string, error) {
+	return c.ExecuteGetWithTLSConfig(targetURL, nil)
+}
+
+// ExecuteGetWithTLSConfig performs an HTTP GET request to the specified URL with custom TLS configuration
+func (c *HTTPClient) ExecuteGetWithTLSConfig(targetURL string, tlsConfig *TLSConfig) (string, error) {
 	formattedURL := FormatURL(targetURL)
-	
+
 	req, err := http.NewRequest("GET", formattedURL, nil)
 	if err != nil {
 		return "", fmt.Errorf("error creating request: %v", err)
 	}
-	
+
 	// Try to add service account token for authentication
 	token, err := GetServiceAccountToken()
 	if err == nil {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	
+
 	req.Header.Set("Accept", "application/json")
-	
-	resp, err := c.client.Do(req)
+
+	// Use the default client or create a new one with custom TLS config
+	client := c.client
+	if tlsConfig != nil {
+		// Create a custom transport with the specified TLS config
+		transport := &http.Transport{
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: tlsConfig.InsecureSkipVerify,
+			},
+		}
+
+		// If we have a Kubernetes CA cert and InsecureSkipVerify is false, add it to the cert pool
+		if !tlsConfig.InsecureSkipVerify {
+			if cert, err := loadKubernetesCACert(); err == nil {
+				rootCAs, _ := x509.SystemCertPool()
+				if rootCAs == nil {
+					rootCAs = x509.NewCertPool()
+				}
+				rootCAs.AddCert(cert)
+				transport.TLSClientConfig.RootCAs = rootCAs
+			}
+		}
+
+		// Create a new client with the custom transport
+		client = &http.Client{
+			Timeout:   c.client.Timeout,
+			Transport: transport,
+		}
+	}
+
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("error executing request: %v", err)
 	}
 	defer resp.Body.Close()
-	
+
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		return "", fmt.Errorf("error reading response body: %v", err)
 	}
-	
+
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return "", fmt.Errorf("HTTP error: %d %s", resp.StatusCode, resp.Status)
 	}
-	
+
 	return string(body), nil
 }

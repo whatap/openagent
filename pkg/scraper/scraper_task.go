@@ -13,14 +13,16 @@ type ScraperTask struct {
 	JobName      string
 	TargetURL    string
 	FilterConfig map[string]interface{}
+	TLSConfig    *client.TLSConfig
 }
 
 // NewScraperTask creates a new ScraperTask instance
-func NewScraperTask(jobName, targetURL string, filterConfig map[string]interface{}) *ScraperTask {
+func NewScraperTask(jobName, targetURL string, filterConfig map[string]interface{}, tlsConfig *client.TLSConfig) *ScraperTask {
 	return &ScraperTask{
 		JobName:      jobName,
 		TargetURL:    targetURL,
 		FilterConfig: filterConfig,
+		TLSConfig:    tlsConfig,
 	}
 }
 
@@ -31,7 +33,15 @@ func (st *ScraperTask) Run() (*model.ScrapeRawData, error) {
 
 	// Execute the HTTP request
 	httpClient := client.GetInstance()
-	response, err := httpClient.ExecuteGet(formattedURL)
+	var response string
+	var err error
+
+	if st.TLSConfig != nil {
+		response, err = httpClient.ExecuteGetWithTLSConfig(formattedURL, st.TLSConfig)
+	} else {
+		response, err = httpClient.ExecuteGet(formattedURL)
+	}
+
 	if err != nil {
 		return nil, fmt.Errorf("error scraping target %s for job %s: %v", st.TargetURL, st.JobName, err)
 	}

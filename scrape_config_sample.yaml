@@ -1,0 +1,64 @@
+# Global configuration
+global:
+  scrape_interval: 15s  # Default interval between scrapes
+
+# New CR format configuration
+features:
+  openAgent:
+    enabled: true
+    # Global default settings (can be overridden in targets)
+    globalInterval: "60s"
+    globalPath: "/metrics"
+    targets:
+      # 1. PodMetrics: Pod label selector based dynamic discovery (similar to PodMonitor)
+      - targetName: my-app-pod-metrics
+        type: PodMetrics
+        namespaceSelector:
+          matchNames:
+            - "production"
+        selector:
+          matchLabels:
+            app: my-app
+        endpoints:  # Endpoints to scrape from these Pods
+          - port: "web-metrics"  # Port name defined in Pod Spec or actual port numberES
+            path: "/metrics"     # Default is /metrics, can be overridden
+            interval: "15s"      # Default is global setting, can be overridden
+            scheme: "http"
+            timeout: "10s"
+            honorLabels: false   # Similar to Prometheus honor_labels
+            metricSelector:      # List of metrics to collect (if not specified, collect all)
+              - http_requests_total
+              - http_requests_duration_seconds
+
+      # 2. ServiceMetrics: Service label selector based dynamic discovery (similar to ServiceMonitor)
+      - targetName: my-service-metrics
+        type: ServiceMetrics
+        namespaceSelector:
+          matchNames:
+            - "default"
+        selector:
+          matchLabels:
+            service: my-backend-service
+        endpoints:  # Endpoints to scrape from Pods connected to this Service
+          - port: "http-metrics"  # Service Spec port name or actual Target Port number
+            path: "/actuator/prometheus"
+            interval: "30s"
+            metricSelector:
+              - jvm_memory_used_bytes
+              - jvm_threads_live
+
+      # 3. StaticEndpoints: Fixed IP addresses and ports (similar to static_configs)
+      - targetName: my-external-db-metrics
+        type: StaticEndpoints
+        scheme: "http"  # http or https, default is http
+        addresses:  # List of target addresses (IP:PORT or HOSTNAME:PORT)
+          - "192.168.1.100:9100"
+          - "external-node-exporter.example.com:9100"
+        labels:  # Common labels to add to all these targets
+          environment: "staging"
+          component: "database-exporter"
+        path: "/metrics"  # Common path for all addresses
+        interval: "60s"   # Common interval for all addresses
+        metricSelector:   # Common metric selector for all addresses
+          - node_cpu_seconds_total
+          - node_memory_MemTotal_bytes
