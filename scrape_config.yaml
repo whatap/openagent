@@ -24,5 +24,7 @@ features:
           - port: "https"  # Port name (or number) where metrics are exposed
             path: "/metrics"
             interval: "30s"
+            tlsConfig:
+              insecureSkipVerify: true  # 인증서 검증 건너뛰기
             metricSelector:
               - apiserver_requests_total
