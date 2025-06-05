@@ -9,6 +9,8 @@ IMAGE_TAG="latest"
 REGISTRY="whatap"
 PUSH=true
 ARCH="all"  # Default to building for all architectures
+VERSION=""   # Default empty version (will be set to IMAGE_TAG if not specified)
+COMMIT_HASH="" # Default empty commit hash
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -29,6 +31,14 @@ while [[ $# -gt 0 ]]; do
       ARCH="$2"
       shift 2
       ;;
+    --version|-v)
+      VERSION="$2"
+      shift 2
+      ;;
+    --commit|-c)
+      COMMIT_HASH="$2"
+      shift 2
+      ;;
     --help|-h)
       echo "Usage: $0 [options]"
       echo "Options:"
@@ -36,6 +46,8 @@ while [[ $# -gt 0 ]]; do
       echo "  --registry, -r REG  Set the registry (e.g., docker.io/username)"
       echo "  --push, -p          Push the image to the registry"
       echo "  --arch, -a ARCH     Set the target architecture: amd64, arm64, or all (default: all)"
+      echo "  --version, -v VER   Set the agent version (default: same as tag)"
+      echo "  --commit, -c HASH   Set the commit hash (default: current git commit)"
       echo "  --help, -h          Show this help message"
       exit 0
       ;;
@@ -50,6 +62,17 @@ done
 if [[ "$ARCH" != "amd64" && "$ARCH" != "arm64" && "$ARCH" != "all" ]]; then
   echo "Error: Invalid architecture. Must be amd64, arm64, or all."
   exit 1
+fi
+
+# Set default values for VERSION and COMMIT_HASH if not specified
+if [ -z "$VERSION" ]; then
+  VERSION="$IMAGE_TAG"
+  echo "Using image tag as version: $VERSION"
+fi
+
+if [ -z "$COMMIT_HASH" ]; then
+  COMMIT_HASH=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+  echo "Using current git commit hash: $COMMIT_HASH"
 fi
 
 # Set the full image name
@@ -108,6 +131,6 @@ else
 fi
 
 # Execute the build
-docker buildx build $BUILD_ARGS -t "$FULL_IMAGE_NAME" .
+docker buildx build $BUILD_ARGS --build-arg VERSION="$VERSION" --build-arg COMMIT_HASH="$COMMIT_HASH" -t "$FULL_IMAGE_NAME" .
 
 echo "Done!"

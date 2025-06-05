@@ -17,6 +17,15 @@ go mod tidy
 
 # 에이전트 빌드
 go build -o openagent
+
+# 버전 정보를 포함한 빌드 (권장)
+go build -ldflags "-X main.version=1.0.0 -X main.commitHash=$(git rev-parse HEAD)" -o openagent
+```
+
+빌드 시 버전 정보를 포함하지 않은 경우, 실행 시 환경 변수 `WHATAP_AGENT_VERSION`을 설정하여 버전을 지정할 수 있습니다:
+
+```bash
+export WHATAP_AGENT_VERSION=1.0.0
 ```
 
 ## 실행 방법
@@ -53,9 +62,18 @@ OpenAgent는 Docker 컨테이너로 실행할 수 있습니다. 프로젝트 루
 # Docker 이미지 빌드 (기본적으로 현재 시스템 아키텍처용으로 빌드)
 docker build -t openagent:latest .
 
+# 버전 정보를 포함한 Docker 이미지 빌드 (권장)
+docker build --build-arg VERSION=1.0.0 --build-arg COMMIT_HASH=$(git rev-parse HEAD) -t openagent:1.0.0 .
+
 # (선택사항) 이미지를 컨테이너 레지스트리에 푸시
 docker tag openagent:latest <registry>/<username>/openagent:latest
 docker push <registry>/<username>/openagent:latest
+```
+
+Docker 컨테이너 실행 시 환경 변수를 통해 버전을 설정할 수도 있습니다:
+
+```bash
+docker run -e WHATAP_LICENSE=<license> -e WHATAP_HOST=<host> -e WHATAP_PORT=<port> -e WHATAP_AGENT_VERSION=1.0.0 openagent:latest
 ```
 
 또는 제공된 스크립트를 사용하여 더 쉽게 빌드하고 푸시할 수 있습니다. 이 스크립트는 Docker Buildx를 사용하여 다중 아키텍처 이미지를 빌드할 수 있습니다:
@@ -76,8 +94,14 @@ docker push <registry>/<username>/openagent:latest
 # 특정 태그로 빌드
 ./build-docker.sh --tag v1.0.0
 
+# 특정 버전 정보로 빌드
+./build-docker.sh --version 1.0.0 --commit abc1234
+
 # 레지스트리 지정 및 푸시 (다중 아키텍처 이미지 푸시 시 필요)
 ./build-docker.sh --registry docker.io/username --tag v1.0.0 --push
+
+# 버전 정보를 포함한 빌드 및 푸시
+./build-docker.sh --registry docker.io/username --tag v1.0.0 --version 1.0.0 --commit $(git rev-parse --short HEAD) --push
 
 # 도움말 보기
 ./build-docker.sh --help

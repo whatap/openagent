@@ -27,7 +27,6 @@ import (
 	"time"
 )
 
-// Version information, set during build
 var (
 	version    string // Version of the application
 	commitHash string // Git commit hash
@@ -279,6 +278,7 @@ func monitorChildHealth(childHealthChannel chan bool, logger *logfile.FileLogger
 }
 
 func main() {
+	// Check if version is set from environment variable
 	if len(os.Args) > 1 {
 		arg1 := os.Args[1]
 		if arg1 == "foreground" {

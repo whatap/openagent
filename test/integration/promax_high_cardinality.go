@@ -1,4 +1,4 @@
-package main
+package promaxhc
 
 import (
 	"fmt"
@@ -20,7 +20,9 @@ var lastHelpSendTime int64 = 0
 
 // promaxLogMessage logs a message to both the file logger and stdout
 func promaxLogMessage(logger *logfile.FileLogger, tag string, message string) {
-	logger.Println(tag, message)
+	if logger != nil {
+		logger.Println(tag, message)
+	}
 	fmt.Printf("[%s] %s\n", tag, message)
 }
 
@@ -29,9 +31,9 @@ func main() {
 	license := os.Getenv("WHATAP_LICENSE")
 	host := os.Getenv("WHATAP_HOST")
 	port := os.Getenv("WHATAP_PORT")
-	license = "x208gorb3c4c1-zvduoi0m5ajsd-x6tto2th6n1haj"
-	host = "59.13.101.109"
-	port = "61574"
+	//license = "x208gorb3c4c1-zvduoi0m5ajsd-x6tto2th6n1haj"
+	//host = "59.13.101.109"
+	//port = "61574"
 	if license == "" || host == "" || port == "" {
 		fmt.Println("Please set the following environment variables:")
 		fmt.Println("WHATAP_LICENSE - The license key for the WHATAP server")
@@ -42,7 +44,7 @@ func main() {
 
 	// Create a logger
 	logger := logfile.NewFileLogger()
-	promaxLogMessage(logger, "PromaX", "Starting PromaX sample sender")
+	promaxLogMessage(logger, "PromaX", "Starting PromaX High Cardinality sample sender")
 
 	// Initialize secure communication
 	servers := []string{fmt.Sprintf("%s:%s", host, port)}
@@ -69,7 +71,7 @@ func process(logger *logfile.FileLogger) {
 	now := time.Now().UnixMilli()
 
 	// Send help information only once per minute
-	if now-lastHelpSendTime > 5*dateutil.MILLIS_PER_SECOND {
+	if now-lastHelpSendTime > 60*dateutil.MILLIS_PER_SECOND {
 		for _, mx := range metrics {
 			helpText := model.GetMetricHelp(mx.Metric)
 			metricType := model.GetMetricType(mx.Metric)
@@ -85,7 +87,6 @@ func process(logger *logfile.FileLogger) {
 			mxh := model.NewOpenMxHelp(mx.Metric)
 			mxh.Put("help", helpText)
 			mxh.Put("type", metricType)
-			//fmt.Printf("mxh-Metric=%v\n", mxh.Metric)
 			helpItems = append(helpItems, mxh)
 		}
 		lastHelpSendTime = now
@@ -104,14 +105,9 @@ func process(logger *logfile.FileLogger) {
 		helpPack.SetOID(securityMaster.OID)
 		helpPack.SetTime(now)
 		helpPack.SetRecords(helpItems)
-		//testRe := helpPack.GetRecords()
 
-		//fmt.Printf("helpPack.GetRecords()=%v\n", testRe)
 		// Get the security master
 		promaxLogMessage(logger, "PromaX", fmt.Sprintf("Sending %d help records", len(helpItems)))
-		//for _, helpItem := range helpItems {
-		//fmt.Printf("helpItem.Metric=%v//help=%v//type=%v\n", helpItem.Metric, helpItem.Get("help"), helpItem.Get("type"))
-		//}
 		secure.Send(secure.NET_SECURE_HIDE, helpPack, true)
 		time.Sleep(1000 * time.Millisecond)
 	}
@@ -148,7 +144,7 @@ func createMetrics() []*model.OpenMx {
 
 	// Add metrics with two labels
 	promaxAddTwoLabelsMetrics(&metrics)
-
+	
 	// Add high cardinality metrics to reach 1000+ combinations
 	promaxAddHighCardinalityMetrics(&metrics)
 
@@ -369,141 +365,6 @@ func promaxAddHighCardinalityMetrics(metrics *[]*model.OpenMx) {
 
 	// Label keys
 	labelKeys := []string{
-		"service", "instance", "endpoint", "method", "status", "version",
-		"region", "zone", "cluster", "namespace", "pod", "container",
-		"host", "node", "datacenter", "environment", "tier", "job",
-	}
-
-	// Label values for each key
-	labelValues := map[string][]string{
-		"service":     {"auth", "payment", "user", "order", "catalog", "cart", "shipping", "notification", "search", "recommendation"},
-		"instance":    {"instance-1", "instance-2", "instance-3", "instance-4", "instance-5"},
-		"endpoint":    {"/api/v1/users", "/api/v1/products", "/api/v1/orders", "/api/v1/payments", "/api/v1/auth", "/health", "/metrics"},
-		"method":      {"GET", "POST", "PUT", "DELETE", "PATCH"},
-		"status":      {"200", "201", "400", "401", "403", "404", "500", "503"},
-		"version":     {"v1", "v2", "v3", "beta", "alpha"},
-		"region":      {"us-east-1", "us-west-1", "eu-west-1", "ap-northeast-1", "ap-southeast-1"},
-		"zone":        {"zone-a", "zone-b", "zone-c"},
-		"cluster":     {"cluster-1", "cluster-2", "cluster-3"},
-		"namespace":   {"default", "kube-system", "monitoring", "logging", "app"},
-		"pod":         {"pod-1", "pod-2", "pod-3", "pod-4", "pod-5"},
-		"container":   {"container-1", "container-2", "container-3"},
-		"host":        {"host-1", "host-2", "host-3", "host-4", "host-5"},
-		"node":        {"node-1", "node-2", "node-3", "node-4", "node-5"},
-		"datacenter":  {"dc-1", "dc-2", "dc-3"},
-		"environment": {"prod", "staging", "dev", "test"},
-		"tier":        {"web", "app", "db", "cache", "worker"},
-		"job":         {"scraper", "processor", "api", "worker", "scheduler"},
-	}
-
-	// Count of metrics added
-	count := 0
-	targetCount := 1000 - len(*metrics)
-
-	// Generate metrics with 1, 2, and 3 labels
-	for numLabels := 1; numLabels <= 3; numLabels++ {
-		// For each base metric
-		for _, metricName := range baseMetrics {
-			// Skip if we've reached the target
-			if count >= targetCount {
-				break
-			}
-
-			// Select random label keys for this metric
-			selectedLabelKeys := make([]string, 0, numLabels)
-			availableLabelKeys := make([]string, len(labelKeys))
-			copy(availableLabelKeys, labelKeys)
-
-			for i := 0; i < numLabels; i++ {
-				if len(availableLabelKeys) == 0 {
-					break
-				}
-				// Select a random label key
-				idx := rand.Intn(len(availableLabelKeys))
-				selectedLabelKeys = append(selectedLabelKeys, availableLabelKeys[idx])
-
-				// Remove the selected key to avoid duplicates
-				availableLabelKeys = append(availableLabelKeys[:idx], availableLabelKeys[idx+1:]...)
-			}
-
-			// Generate combinations of label values
-			numCombinations := 10 // Adjust this to control how many combinations per metric
-			for i := 0; i < numCombinations; i++ {
-				// Skip if we've reached the target
-				if count >= targetCount {
-					break
-				}
-
-				// Create labels for this metric
-				labels := make([]string, 0, numLabels)
-				for _, labelKey := range selectedLabelKeys {
-					values := labelValues[labelKey]
-					if len(values) > 0 {
-						// Select a random value for this key
-						valueIdx := rand.Intn(len(values))
-						labels = append(labels, fmt.Sprintf("%s=%s", labelKey, values[valueIdx]))
-					}
-				}
-
-				// Create a unique key for the metric with its labels
-				key := metricName
-				for _, label := range labels {
-					key += "_" + label
-				}
-
-				// Generate a random base value
-				baseValue := 100.0 + rand.Float64()*900.0
-
-				// Add a random delta to the value
-				value := addDelta(key, baseValue)
-
-				// Create the metric with the current timestamp
-				metric := model.NewOpenMxWithCurrentTime(metricName, value)
-
-				// Add labels
-				for _, labelStr := range labels {
-					parts := promaxSplitLabel(labelStr)
-					if len(parts) == 2 {
-						metric.AddLabel(parts[0], parts[1])
-					}
-				}
-
-				*metrics = append(*metrics, metric)
-				count++
-			}
-		}
-	}
-
-	promaxLogMessage(nil, "PromaX", fmt.Sprintf("Added %d high cardinality metrics", count))
-}
-
-// Helper function to split a label string in the format "key=value" into key and value
-func promaxSplitLabel(label string) []string {
-	idx := strings.Index(label, "=")
-	if idx == -1 {
-		return []string{}
-	}
-	return []string{label[:idx], label[idx+1:]}
-}
-
-// promaxAddHighCardinalityMetrics adds metrics with high cardinality to reach 1000+ combinations
-func promaxAddHighCardinalityMetrics(metrics *[]*model.OpenMx) {
-	// Base metric names
-	baseMetrics := []string{
-		"http_requests_total",
-		"http_request_duration_seconds",
-		"database_queries_total",
-		"database_query_duration_seconds",
-		"cache_hits_total",
-		"cache_misses_total",
-		"api_requests_total",
-		"api_request_duration_seconds",
-		"system_cpu_usage",
-		"system_memory_usage",
-	}
-
-	// Label keys
-	labelKeys := []string{
 		"service", "instance", "endpoint", "method", "status", "version", 
 		"region", "zone", "cluster", "namespace", "pod", "container",
 		"host", "node", "datacenter", "environment", "tier", "job",
@@ -556,7 +417,7 @@ func promaxAddHighCardinalityMetrics(metrics *[]*model.OpenMx) {
 				// Select a random label key
 				idx := rand.Intn(len(availableLabelKeys))
 				selectedLabelKeys = append(selectedLabelKeys, availableLabelKeys[idx])
-
+				
 				// Remove the selected key to avoid duplicates
 				availableLabelKeys = append(availableLabelKeys[:idx], availableLabelKeys[idx+1:]...)
 			}
@@ -588,7 +449,7 @@ func promaxAddHighCardinalityMetrics(metrics *[]*model.OpenMx) {
 
 				// Generate a random base value
 				baseValue := 100.0 + rand.Float64()*900.0
-
+				
 				// Add a random delta to the value
 				value := addDelta(key, baseValue)
 
@@ -610,4 +471,13 @@ func promaxAddHighCardinalityMetrics(metrics *[]*model.OpenMx) {
 	}
 
 	promaxLogMessage(nil, "PromaX", fmt.Sprintf("Added %d high cardinality metrics", count))
+}
+
+// Helper function to split a label string in the format "key=value" into key and value
+func promaxSplitLabel(label string) []string {
+	idx := strings.Index(label, "=")
+	if idx == -1 {
+		return []string{}
+	}
+	return []string{label[:idx], label[idx+1:]}
 }

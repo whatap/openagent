@@ -70,18 +70,12 @@ spec:
         - name: config-volume
           mountPath: /app/scrape_config.yaml
           subPath: scrape_config.yaml
-        - name: whatap-conf-volume
-          mountPath: /app/whatap.conf
-          subPath: whatap.conf
         - name: logs-volume
           mountPath: /app/logs
       volumes:
       - name: config-volume
         configMap:
           name: whatap-open-agent-config
-      - name: whatap-conf-volume
-        configMap:
-          name: whatap-conf-config
       - name: logs-volume
         emptyDir: {}
 ---
@@ -122,15 +116,4 @@ data:
                 tlsConfig:
                   insecureSkipVerify: true
                 metricSelector:
-                  - apiserver_requests_total
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: whatap-conf-config
-  namespace: whatap-monitoring
-data:
-  whatap.conf: |
-    # Whatap Agent Configuration
-    # Set debug=true to enable debug output of metrics data
-    # debug=true
+                  - apiserver_request_total
