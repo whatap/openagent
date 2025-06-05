@@ -31,8 +31,9 @@ func main() {
 	license := os.Getenv("WHATAP_LICENSE")
 	host := os.Getenv("WHATAP_HOST")
 	port := os.Getenv("WHATAP_PORT")
-	host = "http://192.168.1.176"
-	port = ""
+	license = "x22gg93735j9v-z63jpk29lgtn68-x52sdl202an6h"
+	host = "192.168.1.20"
+	port = "6600"
 	if license == "" || host == "" || port == "" {
 		fmt.Println("Please set the following environment variables:")
 		fmt.Println("WHATAP_LICENSE - The license key for the WHATAP server")
