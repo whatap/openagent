@@ -310,6 +310,24 @@ metricRelabelConfigs:
 
 이 설정은 `http_requests_total` 메트릭만 유지하고 나머지는 모두 제거합니다.
 
+**동작 예시:**
+
+원래 스크랩된 메트릭이 다음과 같다고 가정해 봅시다:
+
+```
+http_requests_total{method="GET", status="200"} 100
+http_errors_total{method="GET", status="500"} 5
+node_cpu_seconds_total{cpu="0", mode="idle"} 1000
+```
+
+위 metricRelabelConfigs를 적용하면:
+
+```
+http_requests_total{method="GET", status="200"} 100
+```
+
+`http_requests_total` 메트릭만 유지되고 다른 메트릭들은 모두 제거됩니다.
+
 #### 2. 정규식을 사용한 메트릭 필터링
 
 ```yaml
@@ -320,6 +338,26 @@ metricRelabelConfigs:
 ```
 
 이 설정은 `node_cpu`나 `node_memory`로 시작하는 메트릭만 유지합니다.
+
+**동작 예시:**
+
+원래 스크랩된 메트릭이 다음과 같다고 가정해 봅시다:
+
+```
+node_cpu_seconds_total{cpu="0", mode="idle"} 1000
+node_memory_MemTotal_bytes{} 16777216
+node_disk_io_time_seconds_total{device="sda"} 100
+http_requests_total{method="GET", status="200"} 100
+```
+
+위 metricRelabelConfigs를 적용하면:
+
+```
+node_cpu_seconds_total{cpu="0", mode="idle"} 1000
+node_memory_MemTotal_bytes{} 16777216
+```
+
+`node_cpu`나 `node_memory`로 시작하는 메트릭만 유지되고 다른 메트릭들은 모두 제거됩니다. 정규식을 사용하여 여러 메트릭 패턴을 한 번에 필터링할 수 있습니다.
 
 #### 3. 레이블 이름 변경
 
@@ -333,6 +371,24 @@ metricRelabelConfigs:
 
 이 설정은 `method` 레이블의 값을 `http_method` 레이블로 복사합니다.
 
+**동작 예시:**
+
+원래 스크랩된 메트릭이 다음과 같다고 가정해 봅시다:
+
+```
+http_requests_total{method="GET", path="/api", status="200"} 100
+http_requests_total{method="POST", path="/api/users", status="201"} 50
+```
+
+위 metricRelabelConfigs를 적용하면:
+
+```
+http_requests_total{method="GET", path="/api", status="200", http_method="GET"} 100
+http_requests_total{method="POST", path="/api/users", status="201", http_method="POST"} 50
+```
+
+각 메트릭에 `method` 레이블의 값을 복사한 `http_method` 레이블이 추가됩니다. 원래 레이블은 유지되며, 새 레이블이 추가됩니다. `${1}`은 소스 레이블의 값을 참조합니다.
+
 #### 4. 여러 소스 레이블 조합
 
 ```yaml
@@ -344,6 +400,26 @@ metricRelabelConfigs:
 
 이 설정은 `http_requests_total` 메트릭 중 `status` 레이블이 `200` 또는 `500`인 메트릭만 유지합니다.
 
+**동작 예시:**
+
+원래 스크랩된 메트릭이 다음과 같다고 가정해 봅시다:
+
+```
+http_requests_total{method="GET", path="/api", status="200"} 100
+http_requests_total{method="POST", path="/api/users", status="201"} 50
+http_requests_total{method="GET", path="/api/error", status="500"} 10
+http_requests_total{method="GET", path="/api/error", status="404"} 5
+```
+
+위 metricRelabelConfigs를 적용하면:
+
+```
+http_requests_total{method="GET", path="/api", status="200"} 100
+http_requests_total{method="GET", path="/api/error", status="500"} 10
+```
+
+`http_requests_total` 메트릭 중에서 `status` 레이블이 `200` 또는 `500`인 메트릭만 유지됩니다. 여러 소스 레이블을 조합할 때는 기본적으로 `;` 구분자로 연결되며, 이를 `separator` 필드로 변경할 수 있습니다.
+
 #### 5. 정적 레이블 추가
 
 ```yaml
@@ -354,6 +430,48 @@ metricRelabelConfigs:
 ```
 
 이 설정은 모든 메트릭에 `metric_src="whatap-open-agent"` 레이블을 추가합니다. 소스 레이블을 지정하지 않으면 `replacement` 값이 직접 레이블 값으로 사용됩니다. 이 방법을 사용하여 모든 메트릭에 환경, 리전, 애플리케이션 이름 등의 정적 레이블을 추가할 수 있습니다.
+
+**동작 예시:**
+
+원래 스크랩된 메트릭이 다음과 같다고 가정해 봅시다:
+
+```
+http_requests_total{method="GET", path="/api", status="200"} 100
+node_cpu_seconds_total{cpu="0", mode="idle"} 1000
+```
+
+위 metricRelabelConfigs를 적용하면:
+
+```
+http_requests_total{method="GET", path="/api", status="200", metric_src="whatap-open-agent"} 100
+node_cpu_seconds_total{cpu="0", mode="idle", metric_src="whatap-open-agent"} 1000
+```
+
+모든 메트릭에 `metric_src="whatap-open-agent"` 레이블이 추가됩니다. 이 방법은 메트릭의 출처를 표시하거나, 환경(예: production, staging), 리전(예: us-east, eu-west), 또는 애플리케이션 이름 등을 표시하는 데 유용합니다.
+
+### 종합적인 동작 예시
+
+원래 스크랩된 메트릭이 다음과 같다고 가정해 봅시다:
+
+```
+apiserver_request_total{code="200", resource="pods", verb="GET"} 100
+some_other_metric{label="value"} 50
+```
+
+위 metricRelabelConfigs를 적용하면:
+
+1. 첫 번째 룰(keep apiserver_request_total) 적용:
+   - apiserver_request_total 메트릭은 유지됩니다.
+   - some_other_metric 메트릭은 드롭됩니다.
+
+2. 두 번째 룰(replace verb -> http_verb) 적용:
+   - 유지된 apiserver_request_total 메트릭에 verb 레이블이 있으므로, 이 레이블의 값(GET)이 http_verb라는 새로운 레이블로 복사됩니다.
+
+따라서 Prometheus에 최종적으로 수집되는 메트릭은 다음과 같을 것입니다:
+
+```
+apiserver_request_total{code="200", resource="pods", verb="GET", http_verb="GET"} 100
+```
 
 ## 쿠버네티스 메트릭 수집 예제
 
@@ -394,4 +512,5 @@ features:
                 action: replace
 ```
 
-이 설정은 kube-system 네임스페이스에서 component=apiserver 및 provider=kubernetes 레이블을 가진 서비스를 찾아 해당 서비스의 엔드포인트에서 메트릭을 수집합니다. metricRelabelConfigs를 사용하여 apiserver_request_total 메트릭만 수집하고, verb 레이블을 http_verb 레이블로 변환하며, 모든 메트릭에 metric_src="whatap-open-agent" 정적 레이블을 추가하도록 지정할 수 있습니다.
+이 설정은 kube-system 네임스페이스에서 component=apiserver 및 provider=kubernetes 레이블을 가진 서비스를 찾아 해당 서비스의 엔드포인트에서 메트릭을 수집합니다. 
+metricRelabelConfigs를 사용하여 apiserver_request_total 메트릭만 수집하고, verb 레이블을 http_verb 레이블로 변환하며, 모든 메트릭에 metric_src="whatap-open-agent" 정적 레이블을 추가하도록 지정할 수 있습니다.
