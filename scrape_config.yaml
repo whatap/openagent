@@ -29,41 +29,40 @@ features:
           - target_label: wtp_src
             replacement: "true"
             action: replace
-#
-#      # 2. ServiceMonitor: Service label selector based dynamic discovery
-#      - targetName: kube-apiserver
-#        type: ServiceMonitor
-#        namespaceSelector:
-#          matchNames:
-#            - "default"
-#        selector:
-#          matchLabels:
-#            component: apiserver
-#            provider: kubernetes
-#        endpoints:  # Endpoints to scrape from Pods connected to this Service
-#          - port: "https"  # Port name (or number) where metrics are exposed
-#            path: "/metrics"
-#            interval: "30s"
-#            tlsConfig:
-#              insecureSkipVerify: true  # 인증서 검증 건너뛰기
-#            # metricRelabelConfigs: Prometheus-style relabeling configurations for metrics
-#            # Used to filter metrics or modify labels after scraping
-#            # - source_labels: List of label names to extract values from
-#            # - regex: Regular expression to match against the concatenated source label values
-#            # - action: What to do if the regex matches (keep, drop, replace, etc.)
-#            # - target_label: Label to modify (for replace action)
-#            # - replacement: Replacement value (for replace action)
-#            metricRelabelConfigs:
-#              # Keep only metrics with name matching "apiserver_request_total"
-#              - source_labels: [__name__]
-#                regex: "apiserver_request_total"
-#                action: keep
-#              # Create a new label "http_verb" with the value of the "verb" label
-#              - source_labels: [verb]
-#                target_label: http_verb
-#                replacement: "${1}"
-#                action: replace
-#              # Add a static label "metric_src" with the value "whatap-open-agent"
-#              - target_label: metric_src
-#                replacement: "whatap-open-agent"
-#                action: replace
+      # 2. ServiceMonitor: Service label selector based dynamic discovery
+      - targetName: kube-apiserver
+        type: ServiceMonitor
+        namespaceSelector:
+          matchNames:
+            - "default"
+        selector:
+          matchLabels:
+            component: apiserver
+            provider: kubernetes
+        endpoints:  # Endpoints to scrape from Pods connected to this Service
+          - port: "https"  # Port name (or number) where metrics are exposed
+            path: "/metrics"
+            interval: "30s"
+            tlsConfig:
+              insecureSkipVerify: true  # 인증서 검증 건너뛰기
+            # metricRelabelConfigs: Prometheus-style relabeling configurations for metrics
+            # Used to filter metrics or modify labels after scraping
+            # - source_labels: List of label names to extract values from
+            # - regex: Regular expression to match against the concatenated source label values
+            # - action: What to do if the regex matches (keep, drop, replace, etc.)
+            # - target_label: Label to modify (for replace action)
+            # - replacement: Replacement value (for replace action)
+            metricRelabelConfigs:
+              # Keep only metrics with name matching "apiserver_request_total"
+              - source_labels: [__name__]
+                regex: "apiserver_request_total"
+                action: keep
+              # Create a new label "http_verb" with the value of the "verb" label
+              - source_labels: [verb]
+                target_label: http_verb
+                replacement: "${1}"
+                action: replace
+              # Add a static label "metric_src" with the value "whatap-open-agent"
+              - target_label: metric_src
+                replacement: "whatap-open-agent"
+                action: replace
