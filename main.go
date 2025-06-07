@@ -16,10 +16,13 @@ import (
 	"log"
 	"net"
 	"open-agent/open"
+	"open-agent/pkg/client"
+	"open-agent/pkg/k8s"
 	"open-agent/util/io"
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"reflect"
 	"runtime"
 	"runtime/pprof"
@@ -284,10 +287,24 @@ func main() {
 		if arg1 == "foreground" {
 			fmt.Println("mode:foreground")
 
-			// Check if we have a second argument for debug mode
-			if len(os.Args) > 2 && os.Args[2] == "debug" {
-				fmt.Println("Debug mode: enabled")
-				os.Setenv("debug", "true")
+			// Check if we have a second argument
+			if len(os.Args) > 2 {
+				arg2 := os.Args[2]
+				if arg2 == "debug" {
+					fmt.Println("Debug mode: enabled")
+					os.Setenv("debug", "true")
+				} else if arg2 == "local-minikube" {
+					fmt.Println("Using local minikube configuration")
+					// Set the kubeconfig path to the default location
+					home := os.Getenv("HOME")
+					kubeconfigPath := filepath.Join(home, ".kube", "config")
+					k8s.SetKubeconfigPath(kubeconfigPath)
+
+					// Set up HTTP client with Minikube certificates
+					if err := client.SetupMinikubeClient(home); err != nil {
+						fmt.Printf("Warning: Failed to set up minikube client: %v\n", err)
+					}
+				}
 			}
 
 			//worker

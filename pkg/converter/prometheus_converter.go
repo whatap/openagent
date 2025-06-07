@@ -3,6 +3,7 @@ package converter
 import (
 	"fmt"
 	"math"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -16,7 +17,7 @@ const (
 )
 
 // Convert converts Prometheus metrics to OpenMx format
-func Convert(prometheusData string, whitelist []string) (*model.ConversionResult, error) {
+func Convert(prometheusData string) (*model.ConversionResult, error) {
 	openMxList := make([]*model.OpenMx, 0)
 	helpMap := make(map[string]*model.OpenMxHelp)
 
@@ -57,20 +58,6 @@ func Convert(prometheusData string, whitelist []string) (*model.ConversionResult
 				continue
 			}
 
-			// Filter by whitelist if provided
-			if len(whitelist) > 0 {
-				found := false
-				for _, w := range whitelist {
-					if w == om.Metric {
-						found = true
-						break
-					}
-				}
-				if !found {
-					continue
-				}
-			}
-
 			openMxList = append(openMxList, om)
 		}
 	}
@@ -82,6 +69,194 @@ func Convert(prometheusData string, whitelist []string) (*model.ConversionResult
 	}
 
 	return model.NewConversionResult(openMxList, openMxHelpList), nil
+}
+
+// matchMultipleWildcards checks if a string matches a pattern with multiple wildcards
+// For example, "a*b*c" would match "axbyc", "axxbyyc", etc.
+func matchMultipleWildcards(s string, parts []string) bool {
+	if len(parts) == 0 {
+		return s == ""
+	}
+
+	// Check if the string starts with the first part
+	if parts[0] != "" && !strings.HasPrefix(s, parts[0]) {
+		return false
+	}
+
+	// Check if the string ends with the last part
+	if parts[len(parts)-1] != "" && !strings.HasSuffix(s, parts[len(parts)-1]) {
+		return false
+	}
+
+	// Remove the first and last parts from the string
+	if parts[0] != "" {
+		s = s[len(parts[0]):]
+	}
+	if parts[len(parts)-1] != "" {
+		s = s[:len(s)-len(parts[len(parts)-1])]
+	}
+
+	// Check the middle parts
+	for i := 1; i < len(parts)-1; i++ {
+		if parts[i] == "" {
+			continue
+		}
+
+		idx := strings.Index(s, parts[i])
+		if idx == -1 {
+			return false
+		}
+
+		// Move past this part
+		s = s[idx+len(parts[i]):]
+	}
+
+	return true
+}
+
+// ApplyRelabelConfigs applies relabeling configurations to a list of OpenMx objects
+func ApplyRelabelConfigs(metrics []*model.OpenMx, configs model.RelabelConfigs) {
+	if len(configs) == 0 {
+		return
+	}
+
+	for _, metric := range metrics {
+		for _, config := range configs {
+			applyRelabelConfig(metric, config)
+		}
+	}
+}
+
+// applyRelabelConfig applies a single relabeling configuration to an OpenMx object
+func applyRelabelConfig(metric *model.OpenMx, config *model.RelabelConfig) {
+	// Skip if no action is specified
+	if config.Action == "" {
+		return
+	}
+
+	// Handle different actions
+	switch config.Action {
+	case "keep":
+		// Keep metrics that match the regex
+		if !matchesRegex(metric, config) {
+			// Mark for removal by setting Value to NaN
+			metric.Value = math.NaN()
+		}
+	case "drop":
+		// Drop metrics that match the regex
+		if matchesRegex(metric, config) {
+			// Mark for removal by setting Value to NaN
+			metric.Value = math.NaN()
+		}
+	case "replace":
+		// Replace the value of the target label with the regex replacement
+		if config.TargetLabel != "" {
+			replacement := getReplacementValue(metric, config)
+			// Find and update existing label or add a new one
+			found := false
+			for i, label := range metric.Labels {
+				if label.Key == config.TargetLabel {
+					metric.Labels[i].Value = replacement
+					found = true
+					break
+				}
+			}
+			if !found {
+				metric.AddLabel(config.TargetLabel, replacement)
+			}
+		}
+	case "labelmap":
+		// Map labels that match the regex to new labels
+		// Not implemented yet
+	case "labelkeep":
+		// Keep labels that match the regex
+		// Not implemented yet
+	case "labeldrop":
+		// Drop labels that match the regex
+		// Not implemented yet
+	}
+}
+
+// matchesRegex checks if a metric matches the regex in the relabel config
+func matchesRegex(metric *model.OpenMx, config *model.RelabelConfig) bool {
+	// If no source labels are specified, use the metric name
+	if len(config.SourceLabels) == 0 {
+		re, err := regexp.Compile(config.Regex)
+		if err != nil {
+			return false
+		}
+		return re.MatchString(metric.Metric)
+	}
+
+	// Extract values from source labels
+	var values []string
+	for _, sourceLabel := range config.SourceLabels {
+		if sourceLabel == "__name__" {
+			values = append(values, metric.Metric)
+		} else {
+			// Find the label value
+			found := false
+			for _, label := range metric.Labels {
+				if label.Key == sourceLabel {
+					values = append(values, label.Value)
+					found = true
+					break
+				}
+			}
+			if !found {
+				values = append(values, "")
+			}
+		}
+	}
+
+	// Concatenate values with separator
+	value := strings.Join(values, config.Separator)
+
+	// Match against regex
+	re, err := regexp.Compile(config.Regex)
+	if err != nil {
+		return false
+	}
+	return re.MatchString(value)
+}
+
+// getReplacementValue gets the replacement value for a label
+func getReplacementValue(metric *model.OpenMx, config *model.RelabelConfig) string {
+	// If no source labels are specified, use the replacement value directly
+	if len(config.SourceLabels) == 0 {
+		return config.Replacement
+	}
+
+	// Extract values from source labels
+	var values []string
+	for _, sourceLabel := range config.SourceLabels {
+		if sourceLabel == "__name__" {
+			values = append(values, metric.Metric)
+		} else {
+			// Find the label value
+			found := false
+			for _, label := range metric.Labels {
+				if label.Key == sourceLabel {
+					values = append(values, label.Value)
+					found = true
+					break
+				}
+			}
+			if !found {
+				values = append(values, "")
+			}
+		}
+	}
+
+	// Concatenate values with separator
+	value := strings.Join(values, config.Separator)
+
+	// Apply regex replacement
+	re, err := regexp.Compile(config.Regex)
+	if err != nil {
+		return config.Replacement
+	}
+	return re.ReplaceAllString(value, config.Replacement)
 }
 
 // parseRecordLine parses a single line of Prometheus metrics data

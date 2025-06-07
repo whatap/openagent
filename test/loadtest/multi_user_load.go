@@ -9,17 +9,29 @@ import (
 	"open-agent/pkg/model"
 	"os"
 	"strings"
+	"sync"
 	"time"
 )
 
+const (
+	// Configuration constants
+	NUM_USERS           = 100  // Number of simulated users
+	METRICS_PER_USER    = 1000 // Number of metrics per user
+	SAMPLING_PERIOD_SEC = 30   // Sampling period in seconds
+)
+
 // Map to store the last value for each metric to calculate deltas
-var loadTestDeltaMap = make(map[string]int64)
+// Using a mutex to protect the map during concurrent access
+var (
+	multiUserDeltaMapMutex sync.Mutex
+	multiUserDeltaMap      = make(map[string]int64)
+)
 
 // Last time help information was sent
-var loadTestLastHelpSendTime int64 = 0
+var multiUserLastHelpSendTime int64 = 0
 
-// logMessage logs a message to both the file logger and stdout
-func logMessage(logger *logfile.FileLogger, tag string, message string) {
+// multiUserLogMessage logs a message to both the file logger and stdout
+func multiUserLogMessage(logger *logfile.FileLogger, tag string, message string) {
 	if logger != nil {
 		logger.Println(tag, message)
 	}
@@ -44,34 +56,66 @@ func main() {
 
 	// Create a logger
 	logger := logfile.NewFileLogger()
-	logMessage(logger, "LoadTest", "Starting Load Test with 1000+ metric combinations")
+	multiUserLogMessage(logger, "MultiUserLoadTest", fmt.Sprintf("Starting Multi-User Load Test with %d users, each sending %d metrics every %d seconds",
+		NUM_USERS, METRICS_PER_USER, SAMPLING_PERIOD_SEC))
 
 	// Initialize secure communication
 	servers := []string{fmt.Sprintf("%s:%s", host, port)}
-	secure.StartNet(secure.WithLogger(logger), secure.WithAccessKey(license), secure.WithServers(servers), secure.WithOname("load-test"))
+	secure.StartNet(secure.WithLogger(logger), secure.WithAccessKey(license), secure.WithServers(servers), secure.WithOname("multi-user-load-test"))
 
 	// Initialize random number generator
 	rand.Seed(time.Now().UnixNano())
 
+	// Create a wait group to wait for all users to finish
+	var wg sync.WaitGroup
+	wg.Add(NUM_USERS)
+
+	// Start the simulated users
+	for i := 0; i < NUM_USERS; i++ {
+		userID := i
+		go func() {
+			defer wg.Done()
+			simulateUser(logger, userID)
+		}()
+	}
+
+	// Wait for all users to finish (which they won't in this case, as they run indefinitely)
+	wg.Wait()
+}
+
+// simulateUser simulates a single user sending metrics
+func simulateUser(logger *logfile.FileLogger, userID int) {
+	multiUserLogMessage(logger, "MultiUserLoadTest", fmt.Sprintf("User %d started", userID))
+
 	// Process metrics periodically
 	for {
-		processLoadTest(logger)
-		time.Sleep(30 * time.Second)
+		processUserMetrics(logger, userID)
+		time.Sleep(time.Duration(SAMPLING_PERIOD_SEC) * time.Second)
 	}
 }
 
-// processLoadTest creates and sends metrics and help information
-func processLoadTest(logger *logfile.FileLogger) {
-	// Create metrics
-	metrics := createLoadTestMetrics()
-	logMessage(logger, "LoadTest", fmt.Sprintf("Created %d metrics", len(metrics)))
+// processUserMetrics creates and sends metrics for a single user
+func processUserMetrics(logger *logfile.FileLogger, userID int) {
+	// Create metrics for this user
+	metrics := createUserMetrics(userID)
+	multiUserLogMessage(logger, "MultiUserLoadTest", fmt.Sprintf("User %d created %d metrics", userID, len(metrics)))
 
-	// Create help information if needed
+	// Create help information if needed (only done by user 0 to avoid duplication)
+	if userID == 0 {
+		sendHelpInformation(logger, metrics)
+	}
+
+	// Send metrics
+	sendMetrics(logger, metrics, userID)
+}
+
+// sendHelpInformation sends help information for metrics
+func sendHelpInformation(logger *logfile.FileLogger, metrics []*model.OpenMx) {
 	helpItems := make([]*model.OpenMxHelp, 0)
 	now := time.Now().UnixMilli()
 
 	// Send help information only once per minute
-	if now-loadTestLastHelpSendTime > 60*dateutil.MILLIS_PER_SECOND {
+	if now-multiUserLastHelpSendTime > 60*dateutil.MILLIS_PER_SECOND {
 		for _, mx := range metrics {
 			helpText := model.GetMetricHelp(mx.Metric)
 			metricType := model.GetMetricType(mx.Metric)
@@ -89,30 +133,33 @@ func processLoadTest(logger *logfile.FileLogger) {
 			mxh.Put("type", metricType)
 			helpItems = append(helpItems, mxh)
 		}
-		loadTestLastHelpSendTime = now
-	}
+		multiUserLastHelpSendTime = now
 
-	// Send help information if available
-	if len(helpItems) > 0 {
-		helpPack := model.NewOpenMxHelpPack()
-		securityMaster := secure.GetSecurityMaster()
-		if securityMaster == nil {
-			logMessage(logger, "LoadTest", "No security master available")
-			return
+		// Send help information if available
+		if len(helpItems) > 0 {
+			helpPack := model.NewOpenMxHelpPack()
+			securityMaster := secure.GetSecurityMaster()
+			if securityMaster == nil {
+				multiUserLogMessage(logger, "MultiUserLoadTest", "No security master available")
+				return
+			}
+			// Set PCODE and OID
+			helpPack.SetPCODE(securityMaster.PCODE)
+			helpPack.SetOID(securityMaster.OID)
+			helpPack.SetTime(now)
+			helpPack.SetRecords(helpItems)
+
+			multiUserLogMessage(logger, "MultiUserLoadTest", fmt.Sprintf("Sending %d help records", len(helpItems)))
+			secure.Send(secure.NET_SECURE_HIDE, helpPack, true)
 		}
-		// Set PCODE and OID
-		helpPack.SetPCODE(securityMaster.PCODE)
-		helpPack.SetOID(securityMaster.OID)
-		helpPack.SetTime(now)
-		helpPack.SetRecords(helpItems)
-
-		// Get the security master
-		logMessage(logger, "LoadTest", fmt.Sprintf("Sending %d help records", len(helpItems)))
-		secure.Send(secure.NET_SECURE_HIDE, helpPack, true)
-		time.Sleep(1000 * time.Millisecond)
 	}
+}
 
-	//Send metrics
+// sendMetrics sends metrics to the server
+func sendMetrics(logger *logfile.FileLogger, metrics []*model.OpenMx, userID int) {
+	now := time.Now().UnixMilli()
+
+	// Create metrics package
 	metricsPack := model.NewOpenMxPack()
 	metricsPack.SetTime(now)
 	metricsPack.SetRecords(metrics)
@@ -120,45 +167,49 @@ func processLoadTest(logger *logfile.FileLogger) {
 	// Get the security master
 	securityMaster := secure.GetSecurityMaster()
 	if securityMaster == nil {
-		logMessage(logger, "LoadTest", "No security master available")
+		multiUserLogMessage(logger, "MultiUserLoadTest", fmt.Sprintf("User %d: No security master available", userID))
 		return
 	}
 
-	//Set PCODE and OID
+	// Set PCODE and OID
 	metricsPack.SetPCODE(securityMaster.PCODE)
 	metricsPack.SetOID(securityMaster.OID)
 
-	logMessage(logger, "LoadTest", fmt.Sprintf("Sending %d metrics", len(metrics)))
+	multiUserLogMessage(logger, "MultiUserLoadTest", fmt.Sprintf("User %d: Sending %d metrics", userID, len(metrics)))
 	secure.Send(secure.NET_SECURE_HIDE, metricsPack, true)
 }
 
-// createLoadTestMetrics creates sample metrics data with high cardinality
-func createLoadTestMetrics() []*model.OpenMx {
-	metrics := make([]*model.OpenMx, 0, 1100)
+// createUserMetrics creates metrics for a single user
+func createUserMetrics(userID int) []*model.OpenMx {
+	metrics := make([]*model.OpenMx, 0, METRICS_PER_USER+100) // Add some buffer
 
-	// Generate 1000+ high cardinality metrics
-	generateHighCardinalityMetrics(&metrics, 1000)
+	// Generate metrics with high cardinality
+	generateUserMetrics(&metrics, METRICS_PER_USER, userID)
 
 	return metrics
 }
 
-// addDeltaValue adds a random delta to the value for a metric
-func addDeltaValue(metricName string, value float64) float64 {
+// multiUserAddDeltaValue adds a random delta to the value for a metric
+func multiUserAddDeltaValue(metricName string, value float64) float64 {
 	// Generate a random delta between 0 and 99
 	delta := rand.Int63n(100)
 
+	// Protect concurrent access to the map
+	multiUserDeltaMapMutex.Lock()
+	defer multiUserDeltaMapMutex.Unlock()
+
 	// Add the delta to the stored value for this metric
-	if _, ok := loadTestDeltaMap[metricName]; !ok {
-		loadTestDeltaMap[metricName] = 0
+	if _, ok := multiUserDeltaMap[metricName]; !ok {
+		multiUserDeltaMap[metricName] = 0
 	}
-	loadTestDeltaMap[metricName] += delta
+	multiUserDeltaMap[metricName] += delta
 
 	// Return the value plus the accumulated delta
-	return value + float64(loadTestDeltaMap[metricName])
+	return value + float64(multiUserDeltaMap[metricName])
 }
 
-// splitLabel splits a label string in the format "key=value" into key and value
-func splitLabel(label string) []string {
+// multiUserSplitLabel splits a label string in the format "key=value" into key and value
+func multiUserSplitLabel(label string) []string {
 	idx := strings.Index(label, "=")
 	if idx == -1 {
 		return []string{}
@@ -166,8 +217,8 @@ func splitLabel(label string) []string {
 	return []string{label[:idx], label[idx+1:]}
 }
 
-// generateHighCardinalityMetrics adds metrics with high cardinality to reach the target count
-func generateHighCardinalityMetrics(metrics *[]*model.OpenMx, targetCount int) {
+// generateUserMetrics adds metrics with high cardinality for a specific user
+func generateUserMetrics(metrics *[]*model.OpenMx, targetCount int, userID int) {
 	// Base metric names
 	baseMetrics := []string{
 		"http_requests_total",
@@ -198,6 +249,7 @@ func generateHighCardinalityMetrics(metrics *[]*model.OpenMx, targetCount int) {
 		"region", "zone", "cluster", "namespace", "pod", "container",
 		"host", "node", "datacenter", "environment", "tier", "job",
 		"app", "team", "owner", "component", "shard", "partition", "replica",
+		"user_id", // Add user_id as a label to differentiate between users
 	}
 
 	// Label values for each key
@@ -227,6 +279,7 @@ func generateHighCardinalityMetrics(metrics *[]*model.OpenMx, targetCount int) {
 		"shard":       {"shard-1", "shard-2", "shard-3", "shard-4", "shard-5"},
 		"partition":   {"partition-1", "partition-2", "partition-3", "partition-4", "partition-5"},
 		"replica":     {"replica-1", "replica-2", "replica-3", "replica-4", "replica-5"},
+		"user_id":     {fmt.Sprintf("%d", userID)}, // Always use the current user ID
 	}
 
 	// Count of metrics added
@@ -242,9 +295,12 @@ func generateHighCardinalityMetrics(metrics *[]*model.OpenMx, targetCount int) {
 			}
 
 			// Select random label keys for this metric
-			selectedLabelKeys := make([]string, 0, numLabels)
-			availableLabelKeys := make([]string, len(labelKeys))
-			copy(availableLabelKeys, labelKeys)
+			selectedLabelKeys := make([]string, 0, numLabels+1)    // +1 for user_id
+			availableLabelKeys := make([]string, len(labelKeys)-1) // Exclude user_id from random selection
+			copy(availableLabelKeys, labelKeys[:len(labelKeys)-1])
+
+			// Always add user_id as a label
+			selectedLabelKeys = append(selectedLabelKeys, "user_id")
 
 			for i := 0; i < numLabels; i++ {
 				if len(availableLabelKeys) == 0 {
@@ -267,7 +323,7 @@ func generateHighCardinalityMetrics(metrics *[]*model.OpenMx, targetCount int) {
 				}
 
 				// Create labels for this metric
-				labels := make([]string, 0, numLabels)
+				labels := make([]string, 0, len(selectedLabelKeys))
 				for _, labelKey := range selectedLabelKeys {
 					values := labelValues[labelKey]
 					if len(values) > 0 {
@@ -278,7 +334,7 @@ func generateHighCardinalityMetrics(metrics *[]*model.OpenMx, targetCount int) {
 				}
 
 				// Create a unique key for the metric with its labels
-				key := metricName
+				key := fmt.Sprintf("%s_user%d_%d", metricName, userID, i)
 				for _, label := range labels {
 					key += "_" + label
 				}
@@ -287,14 +343,14 @@ func generateHighCardinalityMetrics(metrics *[]*model.OpenMx, targetCount int) {
 				baseValue := 100.0 + rand.Float64()*900.0
 
 				// Add a random delta to the value
-				value := addDeltaValue(key, baseValue)
+				value := multiUserAddDeltaValue(key, baseValue)
 
 				// Create the metric with the current timestamp
 				metric := model.NewOpenMxWithCurrentTime(metricName, value)
 
 				// Add labels
 				for _, labelStr := range labels {
-					parts := splitLabel(labelStr)
+					parts := multiUserSplitLabel(labelStr)
 					if len(parts) == 2 {
 						metric.AddLabel(parts[0], parts[1])
 					}
@@ -305,6 +361,4 @@ func generateHighCardinalityMetrics(metrics *[]*model.OpenMx, targetCount int) {
 			}
 		}
 	}
-
-	logMessage(nil, "LoadTest", fmt.Sprintf("Generated %d high cardinality metrics", count))
 }

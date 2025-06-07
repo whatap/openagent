@@ -54,7 +54,6 @@ func GetAppLogger() *logfile.FileLogger {
 func BootOpenAgent(version, commitHash string, logger *logfile.FileLogger) {
 	// Store the logger in the global variable for centralized access
 	SetAppLogger(logger)
-
 	GetAppLogger().Println("BootOpenAgent", fmt.Sprintf("Starting OpenAgent version=%s, commitHash=%s", version, commitHash))
 
 	// Check if environment variables are set
@@ -62,9 +61,6 @@ func BootOpenAgent(version, commitHash string, logger *logfile.FileLogger) {
 	license := os.Getenv("WHATAP_LICENSE")
 	hosts := os.Getenv("WHATAP_HOST")
 	port := os.Getenv("WHATAP_PORT")
-	license = "x22gg93735j9v-z63jpk29lgtn68-x52sdl202an6h"
-	hosts = "192.168.1.20"
-	port = "61574"
 	if license == "" || hosts == "" || port == "" {
 		fmt.Println("Please set the following environment variables:")
 		fmt.Println("WHATAP_LICENSE - The license key for the WHATAP server")

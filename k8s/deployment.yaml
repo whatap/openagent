@@ -48,7 +48,7 @@ spec:
       serviceAccountName: whatap-open-agent-sa
       containers:
       - name: whatap-open-agent
-        image: whatap/open_agent:arm64
+        image: whatap/open_agent:arm64-test
         imagePullPolicy: Always
         env:
         - name: WHATAP_LICENSE
@@ -115,5 +115,14 @@ data:
                 scheme: "https"
                 tlsConfig:
                   insecureSkipVerify: true
-                metricSelector:
-                  - apiserver_request_total
+            metricRelabelConfigs:
+              - source_labels: [__name__]
+                regex: "apiserver_request_total"
+                action: keep
+              - source_labels: [verb]
+                target_label: http_verb
+                replacement: "${1}"
+                action: replace
+              - target_label: metric_src
+                replacement: "whatap-open-agent"
+                action: replace

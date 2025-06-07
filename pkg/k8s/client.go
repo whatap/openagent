@@ -37,7 +37,14 @@ type K8sClient struct {
 var (
 	instance *K8sClient
 	once     sync.Once
+	// kubeconfigPath is the path to the kubeconfig file
+	kubeconfigPath string
 )
+
+// SetKubeconfigPath sets the path to the kubeconfig file
+func SetKubeconfigPath(path string) {
+	kubeconfigPath = path
+}
 
 // GetInstance returns the singleton instance of K8sClient
 func GetInstance() *K8sClient {
@@ -60,11 +67,15 @@ func (c *K8sClient) initialize() {
 	config, err = rest.InClusterConfig()
 	if err != nil {
 		// Fall back to kubeconfig
-		kubeconfig := os.Getenv("KUBECONFIG")
+		kubeconfig := kubeconfigPath
 		if kubeconfig == "" {
-			home := os.Getenv("HOME")
-			kubeconfig = filepath.Join(home, ".kube", "config")
+			kubeconfig = os.Getenv("KUBECONFIG")
+			if kubeconfig == "" {
+				home := os.Getenv("HOME")
+				kubeconfig = filepath.Join(home, ".kube", "config")
+			}
 		}
+		log.Printf("Using kubeconfig: %s", kubeconfig)
 		config, err = clientcmd.BuildConfigFromFlags("", kubeconfig)
 		if err != nil {
 			log.Printf("Error building kubeconfig: %v", err)

@@ -13,14 +13,16 @@ import (
 )
 
 // ScraperManager is responsible for managing scraper tasks
-// 
+//
 // Scheme Determination Logic:
 // 1. For PodMonitor and ServiceMonitor targets:
-//    - If port name is "https", default to HTTPS
-//    - Otherwise, default to HTTP
+//   - If port name is "https", default to HTTPS
+//   - Otherwise, default to HTTP
+//
 // 2. For StaticEndpoints targets:
-//    - If TLS config is present, default to HTTPS
-//    - Otherwise, default to HTTP
+//   - If TLS config is present, default to HTTPS
+//   - Otherwise, default to HTTP
+//
 // 3. In all cases, explicit scheme configuration in the endpoint or target overrides the default
 type ScraperManager struct {
 	configManager *config.ConfigManager
@@ -424,189 +426,29 @@ func (sm *ScraperManager) StartScraping() {
 
 			// Handle the target based on its type
 			switch targetType {
-			case "PodMonitor", "PodMetrics": // Support both new and old names
+			case "PodMonitor": // Support both new and old names
 				sm.handlePodMonitorTarget(targetName, scrapeConfig, time.Duration(scrapeIntervalSeconds)*time.Second)
-			case "ServiceMonitor", "ServiceMetrics": // Support both new and old names
+			case "ServiceMonitor": // Support both new and old names
 				sm.handleServiceMonitorTarget(targetName, scrapeConfig, time.Duration(scrapeIntervalSeconds)*time.Second)
 			case "StaticEndpoints":
 				sm.handleStaticEndpointsTarget(targetName, scrapeConfig, time.Duration(scrapeIntervalSeconds)*time.Second)
 			default:
 				log.Printf("Unknown target type: %s for target: %s", targetType, targetName)
 			}
-		} else if jobName, ok := scrapeConfig["jobName"].(string); ok {
-			// This is the old CR format config
-			sm.handleCRFormatConfig(jobName, scrapeConfig, time.Duration(scrapeIntervalSeconds)*time.Second)
-		} else if jobName, ok := scrapeConfig["job_name"].(string); ok {
-			// This is the original format config
-			sm.handleOriginalFormatConfig(jobName, scrapeConfig, time.Duration(scrapeIntervalSeconds)*time.Second)
 		} else {
-			log.Println("Skipping scrape config with no job name or target type.")
+			log.Println("Skipping scrape config with no target type.")
 			continue
 		}
-	}
-}
-
-// handleCRFormatConfig handles a scrape config in the CR format
-func (sm *ScraperManager) handleCRFormatConfig(jobName string, scrapeConfig map[string]interface{}, interval time.Duration) {
-	// Get the endpoints
-	endpoints, ok := scrapeConfig["endpoints"].([]interface{})
-	if !ok {
-		log.Printf("No endpoints found in scrape config for job %s.", jobName)
-		return
-	}
-
-	// Get the namespace selector
-	var namespaces []string
-	if namespaceSelector, ok := scrapeConfig["namespaceSelector"].(map[string]interface{}); ok {
-		if matchNames, ok := namespaceSelector["matchNames"].([]interface{}); ok {
-			for _, ns := range matchNames {
-				if nsStr, ok := ns.(string); ok {
-					namespaces = append(namespaces, nsStr)
-				}
-			}
-		}
-	}
-
-	// Get the pod selector
-	var podLabels map[string]string
-	if podSelector, ok := scrapeConfig["podSelector"].(map[string]interface{}); ok {
-		if matchLabels, ok := podSelector["matchLabels"].(map[string]interface{}); ok {
-			podLabels = make(map[string]string)
-			for key, v := range matchLabels {
-				if val, ok := v.(string); ok {
-					podLabels[key] = val
-				}
-			}
-		}
-
-		// Extract matchExpressions if present
-		// Note: We don't need to do anything special here because the matchPodSelector function
-		// already handles matchExpressions from the podSelector map
-	}
-
-	// Process each endpoint
-	for _, endpoint := range endpoints {
-		endpointMap, ok := endpoint.(map[string]interface{})
-		if !ok {
-			continue
-		}
-
-		// Get the port
-		port, ok := endpointMap["port"].(string)
-		if !ok {
-			continue
-		}
-
-		// Get the path
-		path, ok := endpointMap["path"].(string)
-		if !ok {
-			log.Printf("No path found in endpoint for job %s, skipping", jobName)
-			continue
-		}
-
-		// Get the interval
-		endpointInterval := interval
-		if intervalStr, ok := endpointMap["interval"].(string); ok {
-			if intervalSeconds, err := sm.configManager.ParseInterval(intervalStr); err == nil {
-				endpointInterval = time.Duration(intervalSeconds) * time.Second
-			}
-		}
-
-		// Check if scrape timeout is provided (for future use)
-		if _, ok := endpointMap["scrapeTimeout"].(string); !ok {
-			log.Printf("No scrapeTimeout found in endpoint for job %s", jobName)
-		}
-
-		// Use the namespace selector and pod selector to determine if this target should be scraped
-		// In a real implementation, you would get the actual namespace and pod labels from Kubernetes
-		// For now, we'll use empty values to ensure that only explicitly configured selectors match
-		namespace := ""
-		namespaceLabels := make(map[string]string)
-		podLabels := make(map[string]string)
-
-		// Check if the namespace matches the selector
-		namespaceSelector, nsOk := scrapeConfig["namespaceSelector"].(map[string]interface{})
-		if nsOk && !sm.matchNamespaceSelector(namespace, namespaceLabels, namespaceSelector) {
-			log.Printf("Namespace %s does not match selector for job %s", namespace, jobName)
-			continue
-		}
-
-		// Check if the pod labels match the selector
-		podSelector, podOk := scrapeConfig["podSelector"].(map[string]interface{})
-		if podOk && !sm.matchPodSelector(podLabels, podSelector) {
-			log.Printf("Pod labels do not match selector for job %s", jobName)
-			continue
-		}
-
-		// Create a target URL
-		target := fmt.Sprintf("localhost:%s%s", port, path)
-
-		// Create a filter config
-		filterConfig := make(map[string]interface{})
-		filterConfig["enabled"] = true
-
-		// Add whitelist from the CR format if present
-		if metricSelector, ok := endpointMap["metricSelector"].([]interface{}); ok && len(metricSelector) > 0 {
-			whitelist := make([]interface{}, 0, len(metricSelector))
-			for _, metric := range metricSelector {
-				if metricStr, ok := metric.(string); ok {
-					whitelist = append(whitelist, metricStr)
-				}
-			}
-			filterConfig["whitelist"] = whitelist
-		}
-
-		// Extract TLS configuration
-		var tlsConfig *client.TLSConfig
-		if tlsConfigMap, ok := endpointMap["tlsConfig"].(map[string]interface{}); ok {
-			tlsConfig = &client.TLSConfig{}
-			if insecureSkipVerify, ok := tlsConfigMap["insecureSkipVerify"].(bool); ok {
-				tlsConfig.InsecureSkipVerify = insecureSkipVerify
-			}
-		}
-
-		// Schedule a scraper task for the target
-		go sm.scheduleScraper(jobName, target, filterConfig, endpointInterval, tlsConfig)
-	}
-}
-
-// handleOriginalFormatConfig handles a scrape config in the original format
-func (sm *ScraperManager) handleOriginalFormatConfig(jobName string, scrapeConfig map[string]interface{}, interval time.Duration) {
-	staticConfig, ok := scrapeConfig["static_config"].(map[string]interface{})
-	if !ok {
-		log.Printf("No static_config found in scrape config for job %s.", jobName)
-		return
-	}
-
-	targets, ok := staticConfig["targets"].([]interface{})
-	if !ok {
-		log.Printf("No targets found in scrape config for job %s.", jobName)
-		return
-	}
-
-	var filterConfig map[string]interface{}
-	if filter, ok := staticConfig["filter"].(map[string]interface{}); ok {
-		filterConfig = filter
-	}
-
-	// Schedule a scraper task for each target
-	for _, target := range targets {
-		targetStr, ok := target.(string)
-		if !ok {
-			continue
-		}
-
-		go sm.scheduleScraper(jobName, targetStr, filterConfig, interval, nil)
 	}
 }
 
 // scheduleScraper schedules a scraper task to run at regular intervals
-func (sm *ScraperManager) scheduleScraper(jobName, target string, filterConfig map[string]interface{}, interval time.Duration, tlsConfig *client.TLSConfig) {
+func (sm *ScraperManager) scheduleScraper(jobName, target string, metricRelabelConfigs model.RelabelConfigs, interval time.Duration, tlsConfig *client.TLSConfig) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	// Create a scraper task
-	scraperTask := NewScraperTask(jobName, target, filterConfig, tlsConfig)
+	scraperTask := NewScraperTask(jobName, target, metricRelabelConfigs, tlsConfig)
 
 	// Run the scraper task immediately
 	sm.runScraperTask(scraperTask)
@@ -615,6 +457,20 @@ func (sm *ScraperManager) scheduleScraper(jobName, target string, filterConfig m
 	for range ticker.C {
 		sm.runScraperTask(scraperTask)
 	}
+}
+
+// scheduleScraperWithFilterConfig schedules a scraper task to run at regular intervals using filterConfig (for backward compatibility)
+func (sm *ScraperManager) scheduleScraperWithFilterConfig(jobName, target string, filterConfig map[string]interface{}, interval time.Duration, tlsConfig *client.TLSConfig) {
+	// Extract metricRelabelConfigs from filterConfig
+	var metricRelabelConfigs model.RelabelConfigs
+	if filterConfig != nil {
+		if relabelConfigs, ok := filterConfig["metricRelabelConfigs"].([]interface{}); ok {
+			metricRelabelConfigs = model.ParseRelabelConfigs(relabelConfigs)
+		}
+	}
+
+	// Call the new scheduleScraper function with the extracted metricRelabelConfigs
+	sm.scheduleScraper(jobName, target, metricRelabelConfigs, interval, tlsConfig)
 }
 
 // runScraperTask runs a scraper task and adds the result to the raw queue
@@ -741,41 +597,29 @@ func (sm *ScraperManager) handlePodMonitorTarget(targetName string, targetConfig
 				}
 			}
 
-				// Get the scheme
-				scheme := "http"
-				// Check if port name indicates HTTPS
-				if strings.ToLower(portName) == "https" {
-					scheme = "https"
-				}
-				// Override with explicit configuration if provided
-				if schemeStr, ok := endpointMap["scheme"].(string); ok {
-					scheme = schemeStr
-				} else if schemeStr, ok := targetConfig["scheme"].(string); ok {
-					scheme = schemeStr
-				}
+			// Get the scheme
+			scheme := "http"
+			// Check if port name indicates HTTPS
+			if strings.ToLower(portName) == "https" {
+				scheme = "https"
+			}
+			// Override with explicit configuration if provided
+			if schemeStr, ok := endpointMap["scheme"].(string); ok {
+				scheme = schemeStr
+			} else if schemeStr, ok := targetConfig["scheme"].(string); ok {
+				scheme = schemeStr
+			}
 
-			// Create a filter config
-			filterConfig := make(map[string]interface{})
-			filterConfig["enabled"] = true
+			// Create a metric selector config
+			metricSelectorConfig := make(map[string]interface{})
+			metricSelectorConfig["enabled"] = true
 
-			// Add metricSelector if present
-			if metricSelector, ok := endpointMap["metricSelector"].([]interface{}); ok && len(metricSelector) > 0 {
-				whitelist := make([]interface{}, 0, len(metricSelector))
-				for _, metric := range metricSelector {
-					if metricStr, ok := metric.(string); ok {
-						whitelist = append(whitelist, metricStr)
-					}
-				}
-				filterConfig["whitelist"] = whitelist
-			} else if metricSelector, ok := targetConfig["metricSelector"].([]interface{}); ok && len(metricSelector) > 0 {
-				// Check if metricSelector is defined at the target level
-				whitelist := make([]interface{}, 0, len(metricSelector))
-				for _, metric := range metricSelector {
-					if metricStr, ok := metric.(string); ok {
-						whitelist = append(whitelist, metricStr)
-					}
-				}
-				filterConfig["whitelist"] = whitelist
+			// Add metricRelabelConfigs if present
+			if metricRelabelConfigs, ok := endpointMap["metricRelabelConfigs"].([]interface{}); ok && len(metricRelabelConfigs) > 0 {
+				metricSelectorConfig["metricRelabelConfigs"] = metricRelabelConfigs
+			} else if metricRelabelConfigs, ok := targetConfig["metricRelabelConfigs"].([]interface{}); ok && len(metricRelabelConfigs) > 0 {
+				// Check if metricRelabelConfigs is defined at the target level
+				metricSelectorConfig["metricRelabelConfigs"] = metricRelabelConfigs
 			}
 
 			// Process each pod
@@ -812,7 +656,7 @@ func (sm *ScraperManager) handlePodMonitorTarget(targetName string, targetConfig
 				}
 
 				// Schedule a scraper task for the target
-				go sm.scheduleScraper(targetName, target, filterConfig, endpointInterval, tlsConfig)
+				go sm.scheduleScraperWithFilterConfig(targetName, target, metricSelectorConfig, endpointInterval, tlsConfig)
 			}
 		}
 	}
@@ -894,32 +738,20 @@ func (sm *ScraperManager) handlePodMonitorTargetWithDummyTarget(targetName strin
 		// Create a dummy target URL
 		target := fmt.Sprintf("%s://localhost:%s%s", scheme, port, path)
 
-		// Create a filter config
-		filterConfig := make(map[string]interface{})
-		filterConfig["enabled"] = true
+		// Create a metric selector config
+		metricSelectorConfig := make(map[string]interface{})
+		metricSelectorConfig["enabled"] = true
 
-		// Add metricSelector if present
-		if metricSelector, ok := endpointMap["metricSelector"].([]interface{}); ok && len(metricSelector) > 0 {
-			whitelist := make([]interface{}, 0, len(metricSelector))
-			for _, metric := range metricSelector {
-				if metricStr, ok := metric.(string); ok {
-					whitelist = append(whitelist, metricStr)
-				}
-			}
-			filterConfig["whitelist"] = whitelist
-		} else if metricSelector, ok := targetConfig["metricSelector"].([]interface{}); ok && len(metricSelector) > 0 {
-			// Check if metricSelector is defined at the target level
-			whitelist := make([]interface{}, 0, len(metricSelector))
-			for _, metric := range metricSelector {
-				if metricStr, ok := metric.(string); ok {
-					whitelist = append(whitelist, metricStr)
-				}
-			}
-			filterConfig["whitelist"] = whitelist
+		// Add metricRelabelConfigs if present
+		if metricRelabelConfigs, ok := endpointMap["metricRelabelConfigs"].([]interface{}); ok && len(metricRelabelConfigs) > 0 {
+			metricSelectorConfig["metricRelabelConfigs"] = metricRelabelConfigs
+		} else if metricRelabelConfigs, ok := targetConfig["metricRelabelConfigs"].([]interface{}); ok && len(metricRelabelConfigs) > 0 {
+			// Check if metricRelabelConfigs is defined at the target level
+			metricSelectorConfig["metricRelabelConfigs"] = metricRelabelConfigs
 		}
 
 		// Schedule a scraper task for the target
-		go sm.scheduleScraper(targetName, target, filterConfig, endpointInterval, tlsConfig)
+		go sm.scheduleScraperWithFilterConfig(targetName, target, metricSelectorConfig, endpointInterval, tlsConfig)
 	}
 }
 
@@ -1057,28 +889,16 @@ func (sm *ScraperManager) handleServiceMonitorTarget(targetName string, targetCo
 					scheme = schemeStr
 				}
 
-				// Create a filter config
-				filterConfig := make(map[string]interface{})
-				filterConfig["enabled"] = true
+				// Create a metric selector config
+				metricSelectorConfig := make(map[string]interface{})
+				metricSelectorConfig["enabled"] = true
 
-				// Add metricSelector if present
-				if metricSelector, ok := endpointMap["metricSelector"].([]interface{}); ok && len(metricSelector) > 0 {
-					whitelist := make([]interface{}, 0, len(metricSelector))
-					for _, metric := range metricSelector {
-						if metricStr, ok := metric.(string); ok {
-							whitelist = append(whitelist, metricStr)
-						}
-					}
-					filterConfig["whitelist"] = whitelist
-				} else if metricSelector, ok := targetConfig["metricSelector"].([]interface{}); ok && len(metricSelector) > 0 {
-					// Check if metricSelector is defined at the target level
-					whitelist := make([]interface{}, 0, len(metricSelector))
-					for _, metric := range metricSelector {
-						if metricStr, ok := metric.(string); ok {
-							whitelist = append(whitelist, metricStr)
-						}
-					}
-					filterConfig["whitelist"] = whitelist
+				// Add metricRelabelConfigs if present
+				if metricRelabelConfigs, ok := endpointMap["metricRelabelConfigs"].([]interface{}); ok && len(metricRelabelConfigs) > 0 {
+					metricSelectorConfig["metricRelabelConfigs"] = metricRelabelConfigs
+				} else if metricRelabelConfigs, ok := targetConfig["metricRelabelConfigs"].([]interface{}); ok && len(metricRelabelConfigs) > 0 {
+					// Check if metricRelabelConfigs is defined at the target level
+					metricSelectorConfig["metricRelabelConfigs"] = metricRelabelConfigs
 				}
 
 				// Process each endpoint subset
@@ -1103,7 +923,7 @@ func (sm *ScraperManager) handleServiceMonitorTarget(targetName string, targetCo
 								}
 
 								// Schedule a scraper task for the target
-								go sm.scheduleScraper(targetName, target, filterConfig, endpointInterval, tlsConfig)
+								go sm.scheduleScraperWithFilterConfig(targetName, target, metricSelectorConfig, endpointInterval, tlsConfig)
 							}
 						}
 					}
@@ -1180,28 +1000,16 @@ func (sm *ScraperManager) handleServiceMonitorTargetWithDummyTarget(targetName s
 		// Create a dummy target URL
 		target := fmt.Sprintf("%s://localhost:%s%s", scheme, port, path)
 
-		// Create a filter config
-		filterConfig := make(map[string]interface{})
-		filterConfig["enabled"] = true
+		// Create a metric selector config
+		metricSelectorConfig := make(map[string]interface{})
+		metricSelectorConfig["enabled"] = true
 
-		// Add metricSelector if present
-		if metricSelector, ok := endpointMap["metricSelector"].([]interface{}); ok && len(metricSelector) > 0 {
-			whitelist := make([]interface{}, 0, len(metricSelector))
-			for _, metric := range metricSelector {
-				if metricStr, ok := metric.(string); ok {
-					whitelist = append(whitelist, metricStr)
-				}
-			}
-			filterConfig["whitelist"] = whitelist
-		} else if metricSelector, ok := targetConfig["metricSelector"].([]interface{}); ok && len(metricSelector) > 0 {
-			// Check if metricSelector is defined at the target level
-			whitelist := make([]interface{}, 0, len(metricSelector))
-			for _, metric := range metricSelector {
-				if metricStr, ok := metric.(string); ok {
-					whitelist = append(whitelist, metricStr)
-				}
-			}
-			filterConfig["whitelist"] = whitelist
+		// Add metricRelabelConfigs if present
+		if metricRelabelConfigs, ok := endpointMap["metricRelabelConfigs"].([]interface{}); ok && len(metricRelabelConfigs) > 0 {
+			metricSelectorConfig["metricRelabelConfigs"] = metricRelabelConfigs
+		} else if metricRelabelConfigs, ok := targetConfig["metricRelabelConfigs"].([]interface{}); ok && len(metricRelabelConfigs) > 0 {
+			// Check if metricRelabelConfigs is defined at the target level
+			metricSelectorConfig["metricRelabelConfigs"] = metricRelabelConfigs
 		}
 
 		// Extract TLS configuration
@@ -1214,7 +1022,7 @@ func (sm *ScraperManager) handleServiceMonitorTargetWithDummyTarget(targetName s
 		}
 
 		// Schedule a scraper task for the target
-		go sm.scheduleScraper(targetName, target, filterConfig, endpointInterval, tlsConfig)
+		go sm.scheduleScraperWithFilterConfig(targetName, target, metricSelectorConfig, endpointInterval, tlsConfig)
 	}
 }
 
@@ -1275,19 +1083,13 @@ func (sm *ScraperManager) handleStaticEndpointsTarget(targetName string, targetC
 		}
 	}
 
-	// Create a filter config
-	filterConfig := make(map[string]interface{})
-	filterConfig["enabled"] = true
+	// Create a metric selector config
+	metricSelectorConfig := make(map[string]interface{})
+	metricSelectorConfig["enabled"] = true
 
-	// Add metricSelector if present
-	if metricSelector, ok := targetConfig["metricSelector"].([]interface{}); ok && len(metricSelector) > 0 {
-		whitelist := make([]interface{}, 0, len(metricSelector))
-		for _, metric := range metricSelector {
-			if metricStr, ok := metric.(string); ok {
-				whitelist = append(whitelist, metricStr)
-			}
-		}
-		filterConfig["whitelist"] = whitelist
+	// Add metricRelabelConfigs if present
+	if metricRelabelConfigs, ok := targetConfig["metricRelabelConfigs"].([]interface{}); ok && len(metricRelabelConfigs) > 0 {
+		metricSelectorConfig["metricRelabelConfigs"] = metricRelabelConfigs
 	}
 
 	// Process each address
@@ -1301,6 +1103,6 @@ func (sm *ScraperManager) handleStaticEndpointsTarget(targetName string, targetC
 		target := fmt.Sprintf("%s://%s%s", scheme, addressStr, path)
 
 		// Schedule a scraper task for the target
-		go sm.scheduleScraper(targetName, target, filterConfig, interval, tlsConfig)
+		go sm.scheduleScraperWithFilterConfig(targetName, target, metricSelectorConfig, interval, tlsConfig)
 	}
 }

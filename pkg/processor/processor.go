@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 
 	"open-agent/pkg/config"
 	"open-agent/pkg/converter"
@@ -48,32 +49,30 @@ func (p *Processor) processLoop() {
 func (p *Processor) processRawData(rawData *model.ScrapeRawData) {
 	log.Printf("Processing raw data from target: %s", rawData.TargetURL)
 
-	// Extract whitelist from filter config if present
-	var whitelist []string
-	if rawData.FilterConfig != nil {
-		if enabled, ok := rawData.FilterConfig["enabled"].(bool); ok && enabled {
-			if whitelistObj, ok := rawData.FilterConfig["whitelist"].([]interface{}); ok {
-				whitelist = make([]string, 0, len(whitelistObj))
-				for _, item := range whitelistObj {
-					if str, ok := item.(string); ok {
-						whitelist = append(whitelist, str)
-					}
-				}
-			}
-		}
-	}
-
 	// Convert the raw data to OpenMx format
-	conversionResult, err := converter.Convert(rawData.RawData, whitelist)
+	conversionResult, err := converter.Convert(rawData.RawData)
 	if err != nil {
 		log.Printf("Error converting raw data: %v", err)
 		return
 	}
 
-	// Add instance label to each OpenMx
-	for _, openMx := range conversionResult.GetOpenMxList() {
-		openMx.AddLabel("instance", rawData.TargetURL)
+	// Apply metric relabeling if configured
+	if len(rawData.MetricRelabelConfigs) > 0 {
+		log.Printf("Applying metric relabeling with %d configs", len(rawData.MetricRelabelConfigs))
+		converter.ApplyRelabelConfigs(conversionResult.GetOpenMxList(), rawData.MetricRelabelConfigs)
 	}
+
+	// Filter out metrics with NaN values
+	filteredOpenMxList := make([]*model.OpenMx, 0, len(conversionResult.GetOpenMxList()))
+	for _, openMx := range conversionResult.GetOpenMxList() {
+		if !math.IsNaN(openMx.Value) {
+			// Add instance label to each valid OpenMx
+			openMx.AddLabel("instance", rawData.TargetURL)
+			filteredOpenMxList = append(filteredOpenMxList, openMx)
+		}
+	}
+	// Replace the original list with the filtered list
+	conversionResult.OpenMxList = filteredOpenMxList
 
 	// Add instance property to each OpenMxHelp
 	for _, openMxHelp := range conversionResult.GetOpenMxHelpList() {
@@ -88,6 +87,12 @@ func (p *Processor) processRawData(rawData *model.ScrapeRawData) {
 		// Print OpenMx list
 		fmt.Printf("OpenMx List (%d items):\n", len(conversionResult.GetOpenMxList()))
 		for i, openMx := range conversionResult.GetOpenMxList() {
+			// Skip metrics with NaN values
+			if math.IsNaN(openMx.Value) {
+				fmt.Printf("[%d] Skipped (NaN value)\n", i)
+				continue
+			}
+
 			// Convert to JSON for better readability
 			jsonData, err := json.MarshalIndent(openMx, "", "  ")
 			if err != nil {
