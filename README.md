@@ -68,7 +68,6 @@ whatap.conf 파일은 Docker 이미지에 직접 포함되어 있습니다. 디�
 
 ## 설치 및 실행
 
-OpenAgent를 설치하고 실행하는 방법에 대한 자세한 내용은 [DEVELOPMENT.md](DEVELOPMENT.md) 파일을 참조하세요.
 
 ### 필수 환경 변수
 
@@ -78,98 +77,9 @@ OpenAgent를 실행하려면 다음 환경 변수를 설정해야 합니다:
 - `WHATAP_HOST`: 와탭 서버 호스트 주소
 - `WHATAP_PORT`: 와탭 서버 포트 (기본값: 6600)
 
-선택적으로 다음 환경 변수를 설정할 수 있습니다:
-
-- `WHATAP_HOME`: 와탭 홈 디렉토리 (기본값: 현재 디렉토리)
-- `KUBECONFIG`: 쿠버네티스 설정 파일 경로 (쿠버네티스 환경에서 실행 시)
-
-## Docker 및 Kubernetes 배포
-
-OpenAgent는 Docker 컨테이너로 실행하거나 Kubernetes 클러스터에 배포할 수 있습니다. 
-
-Docker 이미지 빌드 및 Kubernetes 배포에 대한 자세한 내용은 [DEVELOPMENT.md](DEVELOPMENT.md) 파일을 참조하세요.
-
-### Kubernetes 배포
-
-OpenAgent를 Kubernetes 클러스터에 배포하기 위한 매니페스트 파일이 `k8s` 디렉토리에 제공됩니다. 자세한 배포 방법은 `k8s/README.md` 파일을 참조하세요.
-
-#### 디버그 모드 설정
-
-쿠버네티스 환경에서 디버그 모드는 Docker 이미지에 포함된 whatap.conf 파일에 의해 제어됩니다. 기본적으로 디버그 모드는 활성화되어 있습니다.
-
-디버그 모드를 변경하려면 다음 단계를 따르세요:
-
-1. 소스 코드의 whatap.conf 파일을 수정합니다.
-2. Docker 이미지를 다시 빌드합니다.
-3. 새 이미지를 사용하도록 Kubernetes 배포를 업데이트합니다.
-
-```bash
-# 1. whatap.conf 파일 수정 (디버그 모드 비활성화 예시)
-echo "# Whatap Agent Configuration" > whatap.conf
-echo "# Set debug=true to enable debug output of metrics data" >> whatap.conf
-echo "debug=false" >> whatap.conf
-
-# 2. Docker 이미지 다시 빌드
-./build-docker.sh
-
-# 3. Kubernetes 배포 업데이트
-kubectl apply -f k8s/deployment.yaml
-```
-
-#### 에이전트 버전 설정
-
-쿠버네티스 환경에서 에이전트 버전을 설정하려면 deployment.yaml 파일의 환경 변수 섹션에서 `WHATAP_AGENT_VERSION` 값을 수정합니다:
-
-```yaml
-env:
-- name: WHATAP_LICENSE
-  valueFrom:
-    secretKeyRef:
-      name: whatap-credentials
-      key: license
-- name: WHATAP_HOST
-  valueFrom:
-    secretKeyRef:
-      name: whatap-credentials
-      key: host
-- name: WHATAP_PORT
-  valueFrom:
-    secretKeyRef:
-      name: whatap-credentials
-      key: port
-- name: WHATAP_AGENT_VERSION
-  value: "1.0.0"  # 에이전트 버전 설정
-```
-
-버전 정보는 로그 및 메트릭에 표시되며, 에이전트 식별 및 문제 해결에 유용합니다.
-
-Kubernetes 배포에 대한 자세한 내용은 [DEVELOPMENT.md](DEVELOPMENT.md) 파일을 참조하세요.
-
 ## 설정
 
-에이전트는 `$WHATAP_HOME/scrape_config.yaml` 위치의 YAML 파일을 통해 설정됩니다. 두 가지 형식의 설정을 지원합니다:
-
-### 1. 기본 형식
-
-```yaml
-global:
-  scrape_interval: 15s  # 스크래핑 간격
-
-scrape_configs:
-  - job_name: prometheus  # 작업 이름
-    static_config:
-      targets:
-        - localhost:9090  # 스크래핑 대상 URL
-      filter:
-        enabled: true     # 필터 활성화 여부
-        whitelist:        # 수집할 메트릭 목록
-          - http_requests_total
-          - http_requests_duration_seconds
-```
-
-### 2. CR(Custom Resource) 형식
-
-쿠버네티스 환경에서 사용되는 CR 형식도 지원합니다. 새로운 CR 형식은 다음과 같은 타겟 유형을 지원합니다:
+에이전트는 `$WHATAP_HOME/scrape_config.yaml` 위치의 YAML 파일을 통해 설정됩니다. 
 
 1. **PodMonitor**: Pod 레이블 셀렉터를 이용한 동적 디스커버리 (Prometheus Operator의 PodMonitor와 유사)
 2. **ServiceMonitor**: Service 레이블 셀렉터를 이용한 동적 디스커버리 (Prometheus Operator의 ServiceMonitor와 유사)
@@ -509,7 +419,3 @@ features:
 ```
 
 이 설정은 kube-system 네임스페이스에서 component=apiserver 및 provider=kubernetes 레이블을 가진 서비스를 찾아 해당 서비스의 엔드포인트에서 메트릭을 수집합니다. metricRelabelConfigs를 사용하여 apiserver_request_total 메트릭만 수집하고, verb 레이블을 http_verb 레이블로 변환하며, 모든 메트릭에 metric_src="whatap-open-agent" 정적 레이블을 추가하도록 지정할 수 있습니다.
-
-## 라이센스
-
-이 프로젝트는 MIT 라이센스를 따릅니다 - 자세한 내용은 LICENSE 파일을 참조하세요.
