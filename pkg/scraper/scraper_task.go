@@ -202,13 +202,10 @@ func (st *ScraperTask) ResolveEndpoint() (string, error) {
 		// Use the first endpoint address
 		endpointAddress := endpoints.Subsets[0].Addresses[0].IP
 
-		// Get the port number
-		var port int32
-		for _, p := range service.Spec.Ports {
-			if p.Name == st.Port || fmt.Sprintf("%d", p.Port) == st.Port {
-				port = p.Port
-				break
-			}
+		// Get the target port number using GetServicePort
+		port, err := k8sClient.GetServicePort(service, st.Port)
+		if err != nil {
+			return "", fmt.Errorf("error getting target port for service %s port %s: %v", service.Name, st.Port, err)
 		}
 
 		if port == 0 {

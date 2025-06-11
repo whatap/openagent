@@ -12,7 +12,7 @@ import (
 	"sync"
 
 	corev1 "k8s.io/api/core/v1"
-	k8sclient "open-agent/pkg/k8s"
+	"open-agent/pkg/k8s"
 )
 
 // ConfigManager is responsible for loading and parsing the scrape configuration
@@ -39,7 +39,7 @@ func NewConfigManager() *ConfigManager {
 
 	// Register ConfigMap change handler if k8s client is initialized
 	if cm.k8sClient.IsInitialized() {
-		cm.k8sClient.RegisterConfigMapHandler(func(configMap *k8s.ConfigMap) {
+		cm.k8sClient.RegisterConfigMapHandler(func(configMap *corev1.ConfigMap) {
 			// Only handle our specific ConfigMap
 			if configMap.Namespace == cm.configMapNamespace && configMap.Name == cm.configMapName {
 				log.Printf("ConfigMap %s/%s changed, reloading configuration", configMap.Namespace, configMap.Name)

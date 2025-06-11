@@ -10,7 +10,7 @@ features:
     globalInterval: "60s"
     globalPath: "/metrics"
     targets:
-      # 1. StaticEndpoints: Direct URL for metrics collection
+#     1. StaticEndpoints: Direct URL for metrics collection
       - targetName: local-minikube-api
         type: StaticEndpoints
         scheme: "https"
