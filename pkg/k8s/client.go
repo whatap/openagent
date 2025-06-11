@@ -20,18 +20,21 @@ import (
 
 // K8sClient is a wrapper around the Kubernetes client
 type K8sClient struct {
-	clientset         *kubernetes.Clientset
-	podInformer       cache.SharedIndexInformer
-	endpointInformer  cache.SharedIndexInformer
-	serviceInformer   cache.SharedIndexInformer
-	namespaceInformer cache.SharedIndexInformer
-	podStore          cache.Store
-	endpointStore     cache.Store
-	serviceStore      cache.Store
-	namespaceStore    cache.Store
-	stopCh            chan struct{}
-	initialized       bool
-	mu                sync.RWMutex
+	clientset          *kubernetes.Clientset
+	podInformer        cache.SharedIndexInformer
+	endpointInformer   cache.SharedIndexInformer
+	serviceInformer    cache.SharedIndexInformer
+	namespaceInformer  cache.SharedIndexInformer
+	configMapInformer  cache.SharedIndexInformer
+	podStore           cache.Store
+	endpointStore      cache.Store
+	serviceStore       cache.Store
+	namespaceStore     cache.Store
+	configMapStore     cache.Store
+	stopCh             chan struct{}
+	initialized        bool
+	mu                 sync.RWMutex
+	configMapHandlers  []func(*corev1.ConfigMap)
 }
 
 var (
@@ -109,14 +112,37 @@ func (c *K8sClient) initialize() {
 	c.namespaceInformer = factory.Core().V1().Namespaces().Informer()
 	c.namespaceStore = c.namespaceInformer.GetStore()
 
+	// Create configmap informer
+	c.configMapInformer = factory.Core().V1().ConfigMaps().Informer()
+	c.configMapStore = c.configMapInformer.GetStore()
+
+	// Add event handler for ConfigMap changes
+	c.configMapInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+		UpdateFunc: func(oldObj, newObj interface{}) {
+			oldConfigMap := oldObj.(*corev1.ConfigMap)
+			newConfigMap := newObj.(*corev1.ConfigMap)
+
+			// Only trigger handlers if the ConfigMap data has changed
+			if !configMapsEqual(oldConfigMap, newConfigMap) {
+				c.handleConfigMapChange(newConfigMap)
+			}
+		},
+	})
+
 	// Start the informers
 	go c.podInformer.Run(c.stopCh)
 	go c.endpointInformer.Run(c.stopCh)
 	go c.serviceInformer.Run(c.stopCh)
 	go c.namespaceInformer.Run(c.stopCh)
+	go c.configMapInformer.Run(c.stopCh)
 
 	// Wait for the caches to sync
-	if !cache.WaitForCacheSync(c.stopCh, c.podInformer.HasSynced, c.endpointInformer.HasSynced, c.serviceInformer.HasSynced, c.namespaceInformer.HasSynced) {
+	if !cache.WaitForCacheSync(c.stopCh, 
+		c.podInformer.HasSynced, 
+		c.endpointInformer.HasSynced, 
+		c.serviceInformer.HasSynced, 
+		c.namespaceInformer.HasSynced,
+		c.configMapInformer.HasSynced) {
 		log.Println("Timed out waiting for caches to sync")
 		return
 	}
@@ -138,6 +164,55 @@ func (c *K8sClient) IsInitialized() bool {
 // Stop stops the informers
 func (c *K8sClient) Stop() {
 	close(c.stopCh)
+}
+
+// configMapsEqual checks if two ConfigMaps have the same data
+func configMapsEqual(cm1, cm2 *corev1.ConfigMap) bool {
+	if len(cm1.Data) != len(cm2.Data) {
+		return false
+	}
+
+	for k, v1 := range cm1.Data {
+		if v2, ok := cm2.Data[k]; !ok || v1 != v2 {
+			return false
+		}
+	}
+
+	return true
+}
+
+// handleConfigMapChange calls all registered handlers for ConfigMap changes
+func (c *K8sClient) handleConfigMapChange(configMap *corev1.ConfigMap) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	for _, handler := range c.configMapHandlers {
+		handler(configMap)
+	}
+}
+
+// RegisterConfigMapHandler registers a handler function to be called when a ConfigMap changes
+func (c *K8sClient) RegisterConfigMapHandler(handler func(*corev1.ConfigMap)) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.configMapHandlers = append(c.configMapHandlers, handler)
+}
+
+// GetConfigMap returns a ConfigMap by name and namespace
+func (c *K8sClient) GetConfigMap(namespace, name string) (*corev1.ConfigMap, error) {
+	if !c.IsInitialized() {
+		return nil, fmt.Errorf("kubernetes client not initialized")
+	}
+
+	for _, obj := range c.configMapStore.List() {
+		cm := obj.(*corev1.ConfigMap)
+		if cm.Namespace == namespace && cm.Name == name {
+			return cm, nil
+		}
+	}
+
+	return nil, fmt.Errorf("configmap %s/%s not found", namespace, name)
 }
 
 // GetPodsInNamespace returns all pods in the specified namespace

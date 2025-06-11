@@ -7,6 +7,7 @@ import (
 	"github.com/whatap/golib/util/dateutil"
 	"math/rand"
 	"open-agent/pkg/config"
+	"open-agent/pkg/k8s"
 	"open-agent/pkg/model"
 	"open-agent/pkg/processor"
 	"open-agent/pkg/scraper"
@@ -14,6 +15,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	corev1 "k8s.io/api/core/v1"
 )
 
 const (
@@ -102,6 +105,25 @@ func BootOpenAgent(version, commitHash string, logger *logfile.FileLogger) {
 
 	// Create and start the scraper manager with error recovery and shutdown handling
 	scraperManager := scraper.NewScraperManager(configManager, rawQueue)
+
+	// Set up ConfigMap watcher for configuration changes
+	k8sClient := k8s.GetInstance()
+	if k8sClient.IsInitialized() {
+		logger.Println("BootOpenAgent", "Setting up ConfigMap watcher for configuration changes")
+		k8sClient.RegisterConfigMapHandler(func(configMap *corev1.ConfigMap) {
+			// Only handle our specific ConfigMap
+			if configMap.Namespace == "whatap-monitoring" && configMap.Name == "whatap-open-agent-config" {
+				logger.Println("BootOpenAgent", fmt.Sprintf("ConfigMap %s/%s changed, reloading configuration", configMap.Namespace, configMap.Name))
+				// Reload the configuration
+				configManager.LoadConfig()
+				// Reload the scraper manager
+				scraperManager.ReloadConfig()
+			}
+		})
+	} else {
+		logger.Println("BootOpenAgent", "Kubernetes client not initialized, ConfigMap watcher not set up")
+	}
+
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {

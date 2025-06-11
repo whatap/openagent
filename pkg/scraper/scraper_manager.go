@@ -485,6 +485,20 @@ func (sm *ScraperManager) runScraperTask(scraperTask *ScraperTask) {
 	sm.rawQueue <- rawData
 }
 
+// scheduleScraperTask schedules a scraper task to run at regular intervals
+func (sm *ScraperManager) scheduleScraperTask(scraperTask *ScraperTask, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	// Run the scraper task immediately
+	sm.runScraperTask(scraperTask)
+
+	// Run the scraper task at regular intervals
+	for range ticker.C {
+		sm.runScraperTask(scraperTask)
+	}
+}
+
 // AddRawData adds raw data to the queue
 func (sm *ScraperManager) AddRawData(data *model.ScrapeRawData) {
 	sm.rawQueue <- data
@@ -635,16 +649,8 @@ func (sm *ScraperManager) handlePodMonitorTarget(targetName string, targetConfig
 					continue
 				}
 
-				// Get the port number
-				port, err := k8sClient.GetPodPort(pod, portName)
-				if err != nil {
-					log.Printf("Error getting port %s for pod %s: %v", portName, pod.Name, err)
-					continue
-				}
-
-				// Create the target URL
-				target := fmt.Sprintf("%s://%s:%d%s", scheme, podIP, port, path)
-				log.Printf("Created target URL for pod %s: %s", pod.Name, target)
+				// We don't need to get the port number here since it will be resolved dynamically
+				// when the scraper task runs
 
 				// Extract TLS configuration
 				var tlsConfig *client.TLSConfig
@@ -655,8 +661,28 @@ func (sm *ScraperManager) handlePodMonitorTarget(targetName string, targetConfig
 					}
 				}
 
-				// Schedule a scraper task for the target
-				go sm.scheduleScraperWithFilterConfig(targetName, target, metricSelectorConfig, endpointInterval, tlsConfig)
+				// Extract metricRelabelConfigs from metricSelectorConfig
+				var metricRelabelConfigs model.RelabelConfigs
+				if metricSelectorConfig != nil {
+					if relabelConfigs, ok := metricSelectorConfig["metricRelabelConfigs"].([]interface{}); ok {
+						metricRelabelConfigs = model.ParseRelabelConfigs(relabelConfigs)
+					}
+				}
+
+				// Create a PodMonitor scraper task
+				scraperTask := NewPodMonitorScraperTask(
+					targetName,
+					namespace,
+					podLabels,
+					portName,
+					path,
+					scheme,
+					metricRelabelConfigs,
+					tlsConfig,
+				)
+
+				// Schedule the scraper task
+				go sm.scheduleScraperTask(scraperTask, endpointInterval)
 			}
 		}
 	}
@@ -738,20 +764,20 @@ func (sm *ScraperManager) handlePodMonitorTargetWithDummyTarget(targetName strin
 		// Create a dummy target URL
 		target := fmt.Sprintf("%s://localhost:%s%s", scheme, port, path)
 
-		// Create a metric selector config
-		metricSelectorConfig := make(map[string]interface{})
-		metricSelectorConfig["enabled"] = true
-
-		// Add metricRelabelConfigs if present
-		if metricRelabelConfigs, ok := endpointMap["metricRelabelConfigs"].([]interface{}); ok && len(metricRelabelConfigs) > 0 {
-			metricSelectorConfig["metricRelabelConfigs"] = metricRelabelConfigs
-		} else if metricRelabelConfigs, ok := targetConfig["metricRelabelConfigs"].([]interface{}); ok && len(metricRelabelConfigs) > 0 {
+		// Extract metricRelabelConfigs
+		var metricRelabelConfigs model.RelabelConfigs
+		if relabelConfigs, ok := endpointMap["metricRelabelConfigs"].([]interface{}); ok && len(relabelConfigs) > 0 {
+			metricRelabelConfigs = model.ParseRelabelConfigs(relabelConfigs)
+		} else if relabelConfigs, ok := targetConfig["metricRelabelConfigs"].([]interface{}); ok && len(relabelConfigs) > 0 {
 			// Check if metricRelabelConfigs is defined at the target level
-			metricSelectorConfig["metricRelabelConfigs"] = metricRelabelConfigs
+			metricRelabelConfigs = model.ParseRelabelConfigs(relabelConfigs)
 		}
 
-		// Schedule a scraper task for the target
-		go sm.scheduleScraperWithFilterConfig(targetName, target, metricSelectorConfig, endpointInterval, tlsConfig)
+		// Create a scraper task for the target
+		scraperTask := NewScraperTask(targetName, target, metricRelabelConfigs, tlsConfig)
+
+		// Schedule the scraper task
+		go sm.scheduleScraperTask(scraperTask, endpointInterval)
 	}
 }
 
@@ -901,33 +927,37 @@ func (sm *ScraperManager) handleServiceMonitorTarget(targetName string, targetCo
 					metricSelectorConfig["metricRelabelConfigs"] = metricRelabelConfigs
 				}
 
-				// Process each endpoint subset
-				for _, subset := range k8sEndpoints.Subsets {
-					// Process each address in the subset
-					for _, address := range subset.Addresses {
-						// Process each port in the subset
-						for _, port := range subset.Ports {
-							// Check if this is the port we're looking for
-							if port.Name == portName || fmt.Sprintf("%d", port.Port) == portName {
-								// Create the target URL
-								target := fmt.Sprintf("%s://%s:%d%s", scheme, address.IP, port.Port, path)
-								log.Printf("Created target URL for service %s endpoint: %s", service.Name, target)
-
-								// Extract TLS configuration
-								var tlsConfig *client.TLSConfig
-								if tlsConfigMap, ok := endpointMap["tlsConfig"].(map[string]interface{}); ok {
-									tlsConfig = &client.TLSConfig{}
-									if insecureSkipVerify, ok := tlsConfigMap["insecureSkipVerify"].(bool); ok {
-										tlsConfig.InsecureSkipVerify = insecureSkipVerify
-									}
-								}
-
-								// Schedule a scraper task for the target
-								go sm.scheduleScraperWithFilterConfig(targetName, target, metricSelectorConfig, endpointInterval, tlsConfig)
-							}
-						}
+				// Extract TLS configuration
+				var tlsConfig *client.TLSConfig
+				if tlsConfigMap, ok := endpointMap["tlsConfig"].(map[string]interface{}); ok {
+					tlsConfig = &client.TLSConfig{}
+					if insecureSkipVerify, ok := tlsConfigMap["insecureSkipVerify"].(bool); ok {
+						tlsConfig.InsecureSkipVerify = insecureSkipVerify
 					}
 				}
+
+				// Extract metricRelabelConfigs from metricSelectorConfig
+				var metricRelabelConfigs model.RelabelConfigs
+				if metricSelectorConfig != nil {
+					if relabelConfigs, ok := metricSelectorConfig["metricRelabelConfigs"].([]interface{}); ok {
+						metricRelabelConfigs = model.ParseRelabelConfigs(relabelConfigs)
+					}
+				}
+
+				// Create a ServiceMonitor scraper task
+				scraperTask := NewServiceMonitorScraperTask(
+					targetName,
+					namespace,
+					serviceLabels,
+					portName,
+					path,
+					scheme,
+					metricRelabelConfigs,
+					tlsConfig,
+				)
+
+				// Schedule the scraper task
+				go sm.scheduleScraperTask(scraperTask, endpointInterval)
 			}
 		}
 	}
@@ -1000,18 +1030,6 @@ func (sm *ScraperManager) handleServiceMonitorTargetWithDummyTarget(targetName s
 		// Create a dummy target URL
 		target := fmt.Sprintf("%s://localhost:%s%s", scheme, port, path)
 
-		// Create a metric selector config
-		metricSelectorConfig := make(map[string]interface{})
-		metricSelectorConfig["enabled"] = true
-
-		// Add metricRelabelConfigs if present
-		if metricRelabelConfigs, ok := endpointMap["metricRelabelConfigs"].([]interface{}); ok && len(metricRelabelConfigs) > 0 {
-			metricSelectorConfig["metricRelabelConfigs"] = metricRelabelConfigs
-		} else if metricRelabelConfigs, ok := targetConfig["metricRelabelConfigs"].([]interface{}); ok && len(metricRelabelConfigs) > 0 {
-			// Check if metricRelabelConfigs is defined at the target level
-			metricSelectorConfig["metricRelabelConfigs"] = metricRelabelConfigs
-		}
-
 		// Extract TLS configuration
 		var tlsConfig *client.TLSConfig
 		if tlsConfigMap, ok := endpointMap["tlsConfig"].(map[string]interface{}); ok {
@@ -1021,8 +1039,20 @@ func (sm *ScraperManager) handleServiceMonitorTargetWithDummyTarget(targetName s
 			}
 		}
 
-		// Schedule a scraper task for the target
-		go sm.scheduleScraperWithFilterConfig(targetName, target, metricSelectorConfig, endpointInterval, tlsConfig)
+		// Extract metricRelabelConfigs
+		var metricRelabelConfigs model.RelabelConfigs
+		if relabelConfigs, ok := endpointMap["metricRelabelConfigs"].([]interface{}); ok && len(relabelConfigs) > 0 {
+			metricRelabelConfigs = model.ParseRelabelConfigs(relabelConfigs)
+		} else if relabelConfigs, ok := targetConfig["metricRelabelConfigs"].([]interface{}); ok && len(relabelConfigs) > 0 {
+			// Check if metricRelabelConfigs is defined at the target level
+			metricRelabelConfigs = model.ParseRelabelConfigs(relabelConfigs)
+		}
+
+		// Create a scraper task for the target
+		scraperTask := NewScraperTask(targetName, target, metricRelabelConfigs, tlsConfig)
+
+		// Schedule the scraper task
+		go sm.scheduleScraperTask(scraperTask, endpointInterval)
 	}
 }
 
@@ -1099,10 +1129,25 @@ func (sm *ScraperManager) handleStaticEndpointsTarget(targetName string, targetC
 			continue
 		}
 
-		// Create a target URL
-		target := fmt.Sprintf("%s://%s%s", scheme, addressStr, path)
+		// Extract metricRelabelConfigs from metricSelectorConfig
+		var metricRelabelConfigs model.RelabelConfigs
+		if metricSelectorConfig != nil {
+			if relabelConfigs, ok := metricSelectorConfig["metricRelabelConfigs"].([]interface{}); ok {
+				metricRelabelConfigs = model.ParseRelabelConfigs(relabelConfigs)
+			}
+		}
 
-		// Schedule a scraper task for the target
-		go sm.scheduleScraperWithFilterConfig(targetName, target, metricSelectorConfig, interval, tlsConfig)
+		// Create a StaticEndpoints scraper task
+		scraperTask := NewStaticEndpointsScraperTask(
+			targetName,
+			addressStr,
+			path,
+			scheme,
+			metricRelabelConfigs,
+			tlsConfig,
+		)
+
+		// Schedule the scraper task
+		go sm.scheduleScraperTask(scraperTask, interval)
 	}
 }

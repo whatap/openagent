@@ -10,7 +10,7 @@ metadata:
   name: whatap-open-agent-role
 rules:
 - apiGroups: ["*"]
-  resources: ["pods", "services", "endpoints", "namespaces", "configmaps"]
+  resources: ["pods", "services", "endpoints", "namespaces"]
   verbs: ["get", "list", "watch"]
 - nonResourceURLs: [ "/metrics" ]
   verbs: ["*"]
@@ -86,19 +86,34 @@ metadata:
   namespace: whatap-monitoring
 data:
   scrape_config.yaml: |
-    # Global configuration
-    global:
-      scrape_interval: 15s  # Default interval between scrapes
-
     # New CR format configuration
     features:
       openAgent:
         enabled: true
         # Global default settings (can be overridden in targets)
-        globalInterval: "60s"
+        globalInterval: "30s"
         globalPath: "/metrics"
         targets:
           # Example ServiceMonitor for kube-apiserver
+          - targetName: dcgm-exporter
+            type: PodMonitor
+            namespaceSelector:
+              matchNames:
+                - "whatap-monitoring"
+            selector:
+              matchLabels:
+                name: whatap-node-agent
+            endpoints:
+              - port: "http"
+                path: "/metrics"
+                interval: "30s"
+                scheme: "http"
+                tlsConfig:
+                  insecureSkipVerify: true
+            metricRelabelConfigs:
+              - target_label: wtp_src
+                replacement: "true"
+                action: replace
           - targetName: kube-apiserver
             type: ServiceMonitor
             namespaceSelector:
@@ -123,6 +138,6 @@ data:
                 target_label: http_verb
                 replacement: "${1}"
                 action: replace
-              - target_label: metric_src
-                replacement: "whatap-open-agent"
+              - target_label: wtp_src
+                replacement: "true"
                 action: replace

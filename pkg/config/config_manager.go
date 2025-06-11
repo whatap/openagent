@@ -10,23 +10,71 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	corev1 "k8s.io/api/core/v1"
+	k8sclient "open-agent/pkg/k8s"
 )
 
 // ConfigManager is responsible for loading and parsing the scrape configuration
 type ConfigManager struct {
-	config      map[string]interface{}
-	configFile  string
-	mu          sync.RWMutex
+	config              map[string]interface{}
+	configFile          string
+	mu                  sync.RWMutex
+	k8sClient           *k8s.K8sClient
+	configMapNamespace  string
+	configMapName       string
+	onConfigReload      []func()
 }
 
 // NewConfigManager creates a new ConfigManager instance
 func NewConfigManager() *ConfigManager {
-	cm := &ConfigManager{}
+	cm := &ConfigManager{
+		configMapNamespace: "whatap-monitoring",
+		configMapName:      "whatap-open-agent-config",
+		onConfigReload:     make([]func(), 0),
+	}
+
+	// Initialize k8s client
+	cm.k8sClient = k8s.GetInstance()
+
+	// Register ConfigMap change handler if k8s client is initialized
+	if cm.k8sClient.IsInitialized() {
+		cm.k8sClient.RegisterConfigMapHandler(func(configMap *k8s.ConfigMap) {
+			// Only handle our specific ConfigMap
+			if configMap.Namespace == cm.configMapNamespace && configMap.Name == cm.configMapName {
+				log.Printf("ConfigMap %s/%s changed, reloading configuration", configMap.Namespace, configMap.Name)
+
+				// Get the scrape_config.yaml data from the ConfigMap
+				if configData, ok := configMap.Data["scrape_config.yaml"]; ok {
+					// Parse the YAML data
+					var config map[string]interface{}
+					err := yaml.Unmarshal([]byte(configData), &config)
+					if err != nil {
+						log.Printf("Error parsing ConfigMap data: %v", err)
+						return
+					}
+
+					// Update the config with a lock to ensure thread safety
+					cm.mu.Lock()
+					cm.config = config
+					cm.mu.Unlock()
+
+					// Notify all registered handlers
+					for _, handler := range cm.onConfigReload {
+						handler()
+					}
+				}
+			}
+		})
+	}
+
+	// Load initial configuration
 	err := cm.LoadConfig()
 	if err != nil {
 		log.Printf("Failed to load configuration: %v", err)
 		return nil
 	}
+
 	return cm
 }
 

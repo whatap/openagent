@@ -2,12 +2,14 @@ package scraper
 
 import (
 	"fmt"
+	corev1 "k8s.io/api/core/v1"
 	"log"
 	"strings"
 	"time"
 
 	"open-agent/pkg/client"
 	"open-agent/pkg/config"
+	"open-agent/pkg/k8s"
 	"open-agent/pkg/model"
 )
 
@@ -19,32 +21,232 @@ func init() {
 	whatapConfig = config.NewWhatapConfig()
 }
 
+// TargetType represents the type of target to scrape
+type TargetType string
+
+const (
+	// PodMonitorType represents a PodMonitor target
+	PodMonitorType TargetType = "PodMonitor"
+	// ServiceMonitorType represents a ServiceMonitor target
+	ServiceMonitorType TargetType = "ServiceMonitor"
+	// StaticEndpointsType represents a StaticEndpoints target
+	StaticEndpointsType TargetType = "StaticEndpoints"
+	// DirectURLType represents a direct URL target
+	DirectURLType TargetType = "DirectURL"
+)
+
 // ScraperTask represents a task to scrape metrics from a target
 type ScraperTask struct {
 	JobName              string
-	TargetURL            string
+	TargetType           TargetType
+	TargetURL            string // Used for DirectURLType and as a fallback for other types
+	Namespace            string // Used for PodMonitorType and ServiceMonitorType
+	Selector             map[string]string // Used for PodMonitorType and ServiceMonitorType
+	Port                 string // Used for PodMonitorType and ServiceMonitorType
+	Path                 string // Used for all types
+	Scheme               string // Used for all types
 	MetricRelabelConfigs model.RelabelConfigs
 	TLSConfig            *client.TLSConfig
 }
 
 // NewScraperTask creates a new ScraperTask instance
 func NewScraperTask(jobName, targetURL string, metricRelabelConfigs model.RelabelConfigs, tlsConfig *client.TLSConfig) *ScraperTask {
+	// For backward compatibility, create a DirectURL type task
 	return &ScraperTask{
 		JobName:              jobName,
+		TargetType:           DirectURLType,
 		TargetURL:            targetURL,
 		MetricRelabelConfigs: metricRelabelConfigs,
 		TLSConfig:            tlsConfig,
 	}
 }
 
+// NewPodMonitorScraperTask creates a new ScraperTask instance for a PodMonitor target
+func NewPodMonitorScraperTask(jobName string, namespace string, selector map[string]string, port string, path string, scheme string, metricRelabelConfigs model.RelabelConfigs, tlsConfig *client.TLSConfig) *ScraperTask {
+	return &ScraperTask{
+		JobName:              jobName,
+		TargetType:           PodMonitorType,
+		Namespace:            namespace,
+		Selector:             selector,
+		Port:                 port,
+		Path:                 path,
+		Scheme:               scheme,
+		MetricRelabelConfigs: metricRelabelConfigs,
+		TLSConfig:            tlsConfig,
+	}
+}
+
+// NewServiceMonitorScraperTask creates a new ScraperTask instance for a ServiceMonitor target
+func NewServiceMonitorScraperTask(jobName string, namespace string, selector map[string]string, port string, path string, scheme string, metricRelabelConfigs model.RelabelConfigs, tlsConfig *client.TLSConfig) *ScraperTask {
+	return &ScraperTask{
+		JobName:              jobName,
+		TargetType:           ServiceMonitorType,
+		Namespace:            namespace,
+		Selector:             selector,
+		Port:                 port,
+		Path:                 path,
+		Scheme:               scheme,
+		MetricRelabelConfigs: metricRelabelConfigs,
+		TLSConfig:            tlsConfig,
+	}
+}
+
+// NewStaticEndpointsScraperTask creates a new ScraperTask instance for a StaticEndpoints target
+func NewStaticEndpointsScraperTask(jobName string, targetURL string, path string, scheme string, metricRelabelConfigs model.RelabelConfigs, tlsConfig *client.TLSConfig) *ScraperTask {
+	return &ScraperTask{
+		JobName:              jobName,
+		TargetType:           StaticEndpointsType,
+		TargetURL:            targetURL,
+		Path:                 path,
+		Scheme:               scheme,
+		MetricRelabelConfigs: metricRelabelConfigs,
+		TLSConfig:            tlsConfig,
+	}
+}
+
+// ResolveEndpoint resolves the endpoint URL based on the target information
+func (st *ScraperTask) ResolveEndpoint() (string, error) {
+	// If it's a direct URL, just return it
+	if st.TargetType == DirectURLType {
+		return st.TargetURL, nil
+	}
+
+	// If it's a static endpoint, just return the target URL with the path
+	if st.TargetType == StaticEndpointsType {
+		if st.Path != "" && !strings.HasPrefix(st.Path, "/") {
+			return fmt.Sprintf("%s/%s", st.TargetURL, st.Path), nil
+		}
+		return fmt.Sprintf("%s%s", st.TargetURL, st.Path), nil
+	}
+
+	// For PodMonitor and ServiceMonitor, we need to resolve the endpoint dynamically
+	k8sClient := k8s.GetInstance()
+	if !k8sClient.IsInitialized() {
+		return "", fmt.Errorf("kubernetes client not initialized")
+	}
+
+	// For PodMonitor, get the pod IP and port
+	if st.TargetType == PodMonitorType {
+		// Get pods matching the selector in the namespace
+		pods, err := k8sClient.GetPodsByLabels(st.Namespace, st.Selector)
+		if err != nil {
+			return "", fmt.Errorf("error getting pods in namespace %s: %v", st.Namespace, err)
+		}
+
+		if len(pods) == 0 {
+			return "", fmt.Errorf("no pods found in namespace %s matching selector", st.Namespace)
+		}
+
+		// Use the first running pod
+		var runningPod *corev1.Pod
+		for _, p := range pods {
+			if p.Status.Phase == "Running" {
+				runningPod = p
+				break
+			}
+		}
+
+		if runningPod == nil {
+			return "", fmt.Errorf("no running pods found in namespace %s matching selector", st.Namespace)
+		}
+
+		// Get the pod's IP
+		podIP := runningPod.Status.PodIP
+		if podIP == "" {
+			return "", fmt.Errorf("pod %s has no IP", runningPod.Name)
+		}
+
+		// Get the port number
+		port, err := k8sClient.GetPodPort(runningPod, st.Port)
+		if err != nil {
+			return "", fmt.Errorf("error getting port %s for pod %s: %v", st.Port, runningPod.Name, err)
+		}
+
+		// Create the target URL
+		scheme := st.Scheme
+		if scheme == "" {
+			scheme = "http"
+		}
+
+		if st.Path != "" && !strings.HasPrefix(st.Path, "/") {
+			return fmt.Sprintf("%s://%s:%d/%s", scheme, podIP, port, st.Path), nil
+		}
+		return fmt.Sprintf("%s://%s:%d%s", scheme, podIP, port, st.Path), nil
+	}
+
+	// For ServiceMonitor, get the service endpoints
+	if st.TargetType == ServiceMonitorType {
+		// Get services matching the selector in the namespace
+		services, err := k8sClient.GetServicesByLabels(st.Namespace, st.Selector)
+		if err != nil {
+			return "", fmt.Errorf("error getting services in namespace %s: %v", st.Namespace, err)
+		}
+
+		if len(services) == 0 {
+			return "", fmt.Errorf("no services found in namespace %s matching selector", st.Namespace)
+		}
+
+		// Use the first service
+		service := services[0]
+
+		// Get the endpoints for the service
+		endpoints, err := k8sClient.GetEndpointsForService(st.Namespace, service.Name)
+		if err != nil {
+			return "", fmt.Errorf("error getting endpoints for service %s in namespace %s: %v", service.Name, st.Namespace, err)
+		}
+
+		if endpoints == nil || len(endpoints.Subsets) == 0 || len(endpoints.Subsets[0].Addresses) == 0 {
+			return "", fmt.Errorf("no endpoints found for service %s in namespace %s", service.Name, st.Namespace)
+		}
+
+		// Use the first endpoint address
+		endpointAddress := endpoints.Subsets[0].Addresses[0].IP
+
+		// Get the port number
+		var port int32
+		for _, p := range service.Spec.Ports {
+			if p.Name == st.Port || fmt.Sprintf("%d", p.Port) == st.Port {
+				port = p.Port
+				break
+			}
+		}
+
+		if port == 0 {
+			return "", fmt.Errorf("port %s not found in service %s", st.Port, service.Name)
+		}
+
+		// Create the target URL
+		scheme := st.Scheme
+		if scheme == "" {
+			scheme = "http"
+		}
+
+		if st.Path != "" && !strings.HasPrefix(st.Path, "/") {
+			return fmt.Sprintf("%s://%s:%d/%s", scheme, endpointAddress, port, st.Path), nil
+		}
+		return fmt.Sprintf("%s://%s:%d%s", scheme, endpointAddress, port, st.Path), nil
+	}
+
+	return "", fmt.Errorf("unsupported target type: %s", st.TargetType)
+}
+
 // Run executes the scraper task
 func (st *ScraperTask) Run() (*model.ScrapeRawData, error) {
+	// Resolve the endpoint
+	targetURL, resolveErr := st.ResolveEndpoint()
+	if resolveErr != nil {
+		if whatapConfig.IsDebugEnabled() {
+			log.Printf("[DEBUG] Error resolving endpoint for job %s: %v", st.JobName, resolveErr)
+		}
+		return nil, fmt.Errorf("error resolving endpoint for job %s: %v", st.JobName, resolveErr)
+	}
+
 	// Format the URL
-	formattedURL := client.FormatURL(st.TargetURL)
+	formattedURL := client.FormatURL(targetURL)
 
 	// Log detailed information if debug is enabled
 	if whatapConfig.IsDebugEnabled() {
-		log.Printf("[DEBUG] Starting scraper task for job [%s], target [%s]", st.JobName, st.TargetURL)
+		log.Printf("[DEBUG] Starting scraper task for job [%s], target [%s]", st.JobName, targetURL)
 		log.Printf("[DEBUG] Formatted URL: %s", formattedURL)
 		if st.TLSConfig != nil {
 			log.Printf("[DEBUG] Using TLS config with InsecureSkipVerify=%v", st.TLSConfig.InsecureSkipVerify)
@@ -67,28 +269,28 @@ func (st *ScraperTask) Run() (*model.ScrapeRawData, error) {
 	// Execute the HTTP request
 	httpClient := client.GetInstance()
 	var response string
-	var err error
+	var httpErr error
 
 	if st.TLSConfig != nil {
-		response, err = httpClient.ExecuteGetWithTLSConfig(formattedURL, st.TLSConfig)
+		response, httpErr = httpClient.ExecuteGetWithTLSConfig(formattedURL, st.TLSConfig)
 	} else {
-		response, err = httpClient.ExecuteGet(formattedURL)
+		response, httpErr = httpClient.ExecuteGet(formattedURL)
 	}
 
-	if err != nil {
+	if httpErr != nil {
 		if whatapConfig.IsDebugEnabled() {
-			log.Printf("[DEBUG] Error scraping target %s for job %s: %v", st.TargetURL, st.JobName, err)
+			log.Printf("[DEBUG] Error scraping target %s for job %s: %v", targetURL, st.JobName, httpErr)
 		}
-		return nil, fmt.Errorf("error scraping target %s for job %s: %v", st.TargetURL, st.JobName, err)
+		return nil, fmt.Errorf("error scraping target %s for job %s: %v", targetURL, st.JobName, httpErr)
 	}
 
 	// Create a ScrapeRawData instance with the response
-	rawData := model.NewScrapeRawData(st.TargetURL, response, st.MetricRelabelConfigs)
+	rawData := model.NewScrapeRawData(targetURL, response, st.MetricRelabelConfigs)
 
 	// Log detailed information if debug is enabled
 	if whatapConfig.IsDebugEnabled() {
 		duration := time.Since(startTime)
-		log.Printf("[DEBUG] Scraper task completed for job [%s], target [%s] in %v", st.JobName, st.TargetURL, duration)
+		log.Printf("[DEBUG] Scraper task completed for job [%s], target [%s] in %v", st.JobName, targetURL, duration)
 		log.Printf("[DEBUG] Response length: %d bytes", len(response))
 
 		// Log a preview of the response (first 500 characters)
