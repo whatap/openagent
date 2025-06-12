@@ -624,6 +624,14 @@ func (sm *ScraperManager) handlePodMonitorTarget(targetName string, targetConfig
 				scheme = schemeStr
 			}
 
+			// Get addNodeLabel configuration (default to false)
+			addNodeLabel := false
+			if addNodeLabelVal, ok := endpointMap["addNodeLabel"].(bool); ok {
+				addNodeLabel = addNodeLabelVal
+			} else if addNodeLabelVal, ok := targetConfig["addNodeLabel"].(bool); ok {
+				addNodeLabel = addNodeLabelVal
+			}
+
 			// Create a metric selector config
 			metricSelectorConfig := make(map[string]interface{})
 			metricSelectorConfig["enabled"] = true
@@ -679,6 +687,7 @@ func (sm *ScraperManager) handlePodMonitorTarget(targetName string, targetConfig
 					scheme,
 					metricRelabelConfigs,
 					tlsConfig,
+					addNodeLabel,
 				)
 
 				// Schedule the scraper task

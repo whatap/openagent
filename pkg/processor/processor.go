@@ -68,6 +68,12 @@ func (p *Processor) processRawData(rawData *model.ScrapeRawData) {
 		if !math.IsNaN(openMx.Value) {
 			// Add instance label to each valid OpenMx
 			openMx.AddLabel("instance", rawData.TargetURL)
+
+			// Add node label if available and enabled
+			if rawData.NodeName != "" && rawData.AddNodeLabel {
+				openMx.AddLabel("node", rawData.NodeName)
+			}
+
 			filteredOpenMxList = append(filteredOpenMxList, openMx)
 		}
 	}
@@ -77,6 +83,11 @@ func (p *Processor) processRawData(rawData *model.ScrapeRawData) {
 	// Add instance property to each OpenMxHelp
 	for _, openMxHelp := range conversionResult.GetOpenMxHelpList() {
 		openMxHelp.Put("instance", rawData.TargetURL)
+
+		// Add node property if available and enabled
+		if rawData.NodeName != "" && rawData.AddNodeLabel {
+			openMxHelp.Put("node", rawData.NodeName)
+		}
 	}
 
 	// Check if debug is enabled in whatap.conf

@@ -47,6 +47,8 @@ type ScraperTask struct {
 	Scheme               string // Used for all types
 	MetricRelabelConfigs model.RelabelConfigs
 	TLSConfig            *client.TLSConfig
+	NodeName             string // Used to store the node name for PodMonitor targets
+	AddNodeLabel         bool   // Controls whether to add node label to metrics
 }
 
 // NewScraperTask creates a new ScraperTask instance
@@ -62,7 +64,7 @@ func NewScraperTask(jobName, targetURL string, metricRelabelConfigs model.Relabe
 }
 
 // NewPodMonitorScraperTask creates a new ScraperTask instance for a PodMonitor target
-func NewPodMonitorScraperTask(jobName string, namespace string, selector map[string]string, port string, path string, scheme string, metricRelabelConfigs model.RelabelConfigs, tlsConfig *client.TLSConfig) *ScraperTask {
+func NewPodMonitorScraperTask(jobName string, namespace string, selector map[string]string, port string, path string, scheme string, metricRelabelConfigs model.RelabelConfigs, tlsConfig *client.TLSConfig, addNodeLabel bool) *ScraperTask {
 	return &ScraperTask{
 		JobName:              jobName,
 		TargetType:           PodMonitorType,
@@ -73,6 +75,7 @@ func NewPodMonitorScraperTask(jobName string, namespace string, selector map[str
 		Scheme:               scheme,
 		MetricRelabelConfigs: metricRelabelConfigs,
 		TLSConfig:            tlsConfig,
+		AddNodeLabel:         addNodeLabel,
 	}
 }
 
@@ -155,6 +158,9 @@ func (st *ScraperTask) ResolveEndpoint() (string, error) {
 		if podIP == "" {
 			return "", fmt.Errorf("pod %s has no IP", runningPod.Name)
 		}
+
+		// Get the node name
+		st.NodeName = runningPod.Spec.NodeName
 
 		// Get the port number
 		port, err := k8sClient.GetPodPort(runningPod, st.Port)
@@ -282,7 +288,12 @@ func (st *ScraperTask) Run() (*model.ScrapeRawData, error) {
 	}
 
 	// Create a ScrapeRawData instance with the response
-	rawData := model.NewScrapeRawData(targetURL, response, st.MetricRelabelConfigs)
+	var rawData *model.ScrapeRawData
+	if st.NodeName != "" && st.AddNodeLabel {
+		rawData = model.NewScrapeRawDataWithNodeName(targetURL, response, st.MetricRelabelConfigs, st.NodeName, st.AddNodeLabel)
+	} else {
+		rawData = model.NewScrapeRawData(targetURL, response, st.MetricRelabelConfigs)
+	}
 
 	// Log detailed information if debug is enabled
 	if whatapConfig.IsDebugEnabled() {

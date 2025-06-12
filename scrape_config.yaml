@@ -52,6 +52,13 @@ features:
             # - action: What to do if the regex matches (keep, drop, replace, etc.)
             # - target_label: Label to modify (for replace action)
             # - replacement: Replacement value (for replace action)
+            #
+            # For PodMonitor targets, you can enable the 'node' label with the addNodeLabel option
+            # When enabled, the node name will be added as a 'node' label to all metrics
+            # You can then use this label in relabeling configurations, for example:
+            # - source_labels: [node]
+            #   target_label: kubernetes_node
+            #   action: replace
             metricRelabelConfigs:
               # Keep only metrics with name matching "apiserver_request_total"
               - source_labels: [__name__]
@@ -65,4 +72,24 @@ features:
               # Add a static label "metric_src" with the value "whatap-open-agent"
               - target_label: metric_src
                 replacement: "whatap-open-agent"
+                action: replace
+      # 3. PodMonitor: Example for DaemonSet like dcgm-exporter with node label
+      - targetName: dcgm-exporter
+        type: PodMonitor
+        namespaceSelector:
+          matchNames:
+            - "kube-system"
+        selector:
+          matchLabels:
+            app: dcgm-exporter
+        endpoints:
+          - port: "metrics"
+            path: "/metrics"
+            interval: "30s"
+            # You can also set addNodeLabel at the endpoint level to override the target level
+            # addNodeLabel: false
+            metricRelabelConfigs:
+              # Use the node label in relabeling
+              - source_labels: [node]
+                target_label: kubernetes_node
                 action: replace
