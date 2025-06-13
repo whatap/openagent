@@ -1,54 +1,33 @@
-# OpenAgent Kubernetes Deployment Guide
+# OpenAgent 쿠버네티스 배포 가이드
 
-This guide provides instructions for deploying the OpenAgent to a Kubernetes cluster.
+이 가이드는 OpenAgent를 쿠버네티스 클러스터에 배포하는 방법을 제공합니다.
 
-## Prerequisites
+## 사전 요구 사항
 
-- Docker installed on your local machine
-- Access to a Kubernetes cluster
-- `kubectl` command-line tool configured to communicate with your cluster
-- WHATAP account with license key, host, and port information
+- 로컬 머신에 Docker 설치
+- 쿠버네티스 클러스터 접근 권한
+- 클러스터와 통신하도록 구성된 `kubectl` 명령줄 도구
+- 라이센스 키, 호스트, 포트 정보가 있는 WHATAP 계정
 
-## Building the Docker Image
+## 배포 구성
 
-1. Clone the repository:
-   ```bash
-   git clone <repository-url>
-   cd openagent
-   ```
+### 옵션 1: create-whatap-secret.sh 스크립트 사용 (권장)
 
-2. Build the Docker image:
-   ```bash
-   docker build -t openagent:latest .
-   ```
-
-3. (Optional) Push the image to a container registry:
-   ```bash
-   docker tag openagent:latest <registry>/<username>/openagent:latest
-   docker push <registry>/<username>/openagent:latest
-   ```
-
-   If you push to a private registry, you'll need to update the image reference in the deployment.yaml file and create a Kubernetes secret for pulling the image.
-
-## Configuring the Deployment
-
-### Option 1: Using the create-whatap-secret.sh script (Recommended)
-
-1. Use the provided script to create the secret:
+1. 제공된 스크립트를 사용하여 시크릿 생성:
    ```bash
    ./k8s/create-whatap-secret.sh <WHATAP_LICENSE> <WHATAP_HOST> <WHATAP_PORT>
    ```
 
-   Example:
+   예시:
    ```bash
    ./k8s/create-whatap-secret.sh x41pl22ek7jhv-z43cebasdv4il7-z62p3l35fj5502 15.165.146.117 6600
    ```
 
-   This script creates a Kubernetes secret named `whatap-credentials` with the provided values.
+   이 스크립트는 제공된 값으로 `whatap-credentials`라는 쿠버네티스 시크릿을 생성합니다.
 
-### Option 2: Manual Secret Creation
+### 옵션 2: 수동 시크릿 생성
 
-1. Create the secret directly using kubectl:
+1. kubectl을 사용하여 직접 시크릿 생성:
    ```bash
    kubectl create secret generic whatap-credentials \
        --from-literal=license=<WHATAP_LICENSE> \
@@ -56,95 +35,99 @@ This guide provides instructions for deploying the OpenAgent to a Kubernetes clu
        --from-literal=port=<WHATAP_PORT>
    ```
 
-(Optional) Customize the ConfigMap in `deployment.yaml` to adjust the scraping configuration.
+(선택 사항) 스크래핑 구성을 조정하기 위해 `deployment.yaml`의 ConfigMap을 사용자 정의합니다.
 
-## Deploying to Kubernetes
+## 쿠버네티스에 배포
 
-### Option 1: Using the deploy-openagent.sh script (Recommended)
+### 옵션 1: deploy-openagent.sh 스크립트 사용 (권장)
 
-The easiest way to deploy OpenAgent is to use the provided deploy-openagent.sh script:
+OpenAgent를 배포하는 가장 쉬운 방법은 제공된 deploy-openagent.sh 스크립트를 사용하는 것입니다:
 
 ```bash
 ./k8s/deploy-openagent.sh <WHATAP_LICENSE> <WHATAP_HOST> <WHATAP_PORT>
 ```
 
-Example:
+예시:
 ```bash
 ./k8s/deploy-openagent.sh x41pl22ek7jhv-z43cebasdv4il7-z62p3l35fj5502 15.165.146.117 6600
 ```
 
-This script will:
-1. Create the Whatap credentials secret
-2. Deploy the OpenAgent
-3. Wait for the deployment to be ready
+이 스크립트는 다음을 수행합니다:
+1. Whatap 자격 증명 시크릿 생성
+2. OpenAgent 배포
+3. 배포가 준비될 때까지 대기
 
-### Option 2: Manual Deployment
+### 옵션 2: 수동 배포
 
-If you prefer to deploy manually, follow these steps:
+수동으로 배포하려면 다음 단계를 따르세요:
 
-1. Create the Whatap credentials secret (see "Configuring the Deployment" section above)
+1. Whatap 자격 증명 시크릿 생성 (위의 "배포 구성" 섹션 참조)
 
-2. Apply the Kubernetes manifests:
+2. 쿠버네티스 매니페스트 적용:
    ```bash
    kubectl apply -f k8s/deployment.yaml
    ```
 
-3. Verify the deployment:
+3. 배포 확인:
    ```bash
    kubectl get pods -l app=openagent
    ```
 
-4. Check the logs:
+4. 로그 확인:
    ```bash
    kubectl logs -l app=openagent
    ```
 
-## Customizing the Configuration
+## 구성 사용자 정의
 
-The OpenAgent uses a configuration file (`scrape_config.yaml`) to determine what metrics to scrape. This configuration is stored in a ConfigMap and mounted into the container.
+OpenAgent는 메트릭을 스크래핑할 대상을 결정하기 위해 구성 파일(`scrape_config.yaml`)을 사용합니다. 이 구성은 ConfigMap에 저장되어 컨테이너에 마운트됩니다.
 
-To update the configuration:
+구성을 업데이트하려면:
 
-1. Edit the ConfigMap in `deployment.yaml`
-2. Apply the changes:
+1. `deployment.yaml`의 ConfigMap 편집
+2. 변경 사항 적용:
    ```bash
    kubectl apply -f k8s/deployment.yaml
    ```
-3. Restart the deployment to pick up the changes:
+3. 변경 사항을 적용하기 위해 배포 재시작:
    ```bash
    kubectl rollout restart deployment openagent
    ```
 
-## Troubleshooting
+## 문제 해결
 
-If you encounter issues with the deployment, check the following:
+배포에 문제가 발생하면 다음을 확인하세요:
 
-1. Pod status:
+1. 파드 상태:
    ```bash
    kubectl describe pod -l app=openagent
    ```
 
-2. Container logs:
+2. 컨테이너 로그:
    ```bash
    kubectl logs -l app=openagent
    ```
 
-3. Check if the ServiceAccount has the correct permissions:
+3. ServiceAccount에 올바른 권한이 있는지 확인:
    ```bash
    kubectl auth can-i get pods --as=system:serviceaccount:default:openagent-sa
    kubectl auth can-i list services --as=system:serviceaccount:default:openagent-sa
    kubectl auth can-i watch endpoints --as=system:serviceaccount:default:openagent-sa
    ```
 
-4. Verify the Secret exists and contains the correct values:
+4. 시크릿이 존재하고 올바른 값을 포함하는지 확인:
    ```bash
    kubectl get secret whatap-credentials -o yaml
    ```
 
-## Uninstalling
+## 제거
 
-To remove the OpenAgent from your cluster:
+클러스터에서 OpenAgent를 제거하려면:
 
 ```bash
 kubectl delete -f k8s/deployment.yaml
 ```
+
+## Docker 이미지 빌드
+
+Docker 이미지 빌드에 관한 자세한 내용은 [docker-build.md](docker-build.md) 파일을 참조하세요.
