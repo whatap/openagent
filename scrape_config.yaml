@@ -13,6 +13,8 @@ features:
 #     1. StaticEndpoints: Direct URL for metrics collection
       - targetName: local-minikube-api
         type: StaticEndpoints
+        # Target is enabled by default (enabled: true), this can be omitted
+        enabled: true
         scheme: "https"
         addresses:
           - "127.0.0.1:52684"
@@ -32,6 +34,8 @@ features:
       # 2. ServiceMonitor: Service label selector based dynamic discovery
       - targetName: kube-apiserver
         type: ServiceMonitor
+        # Target is enabled (this is the default, can be omitted)
+        enabled: true
         namespaceSelector:
           matchNames:
             - "default"
@@ -76,6 +80,8 @@ features:
       # 3. PodMonitor: Example for DaemonSet like dcgm-exporter with node label
       - targetName: dcgm-exporter
         type: PodMonitor
+        # This target is enabled (default behavior)
+        enabled: true
         namespaceSelector:
           matchNames:
             - "kube-system"
@@ -93,3 +99,13 @@ features:
               - source_labels: [node]
                 target_label: kubernetes_node
                 action: replace
+
+      # 4. Example of a disabled target (will be skipped during scraping)
+      - targetName: disabled-example
+        type: StaticEndpoints
+        # Set enabled to false to disable this target
+        enabled: false
+        addresses:
+          - "example.com:9100"
+        path: "/metrics"
+        interval: "60s"

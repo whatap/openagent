@@ -424,6 +424,18 @@ func (sm *ScraperManager) StartScraping() {
 				continue
 			}
 
+			// Check if the target is enabled (default to true if not specified)
+			enabled := true
+			if enabledVal, ok := scrapeConfig["enabled"].(bool); ok {
+				enabled = enabledVal
+			}
+
+			// Skip disabled targets
+			if !enabled {
+				log.Printf("Skipping disabled target: %s", targetName)
+				continue
+			}
+
 			// Handle the target based on its type
 			switch targetType {
 			case "PodMonitor": // Support both new and old names

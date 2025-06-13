@@ -72,6 +72,7 @@ features:
       # 1. PodMonitor: Pod 레이블 셀렉터를 이용한 동적 디스커버리
       - targetName: my-app-pod-metrics
         type: PodMonitor
+        # enabled: true  # 타겟 활성화 여부 (기본값: true, 생략 가능)
         namespaceSelector:
           matchNames:
             - "production"
@@ -97,6 +98,7 @@ features:
       # 2. ServiceMonitor: Service 레이블 셀렉터를 이용한 동적 디스커버리
       - targetName: my-service-metrics
         type: ServiceMonitor
+        # enabled: true  # 타겟 활성화 여부 (기본값: true, 생략 가능)
         namespaceSelector:
           matchNames:
             - "default"
@@ -119,6 +121,7 @@ features:
       # 3. StaticEndpoints: 고정된 IP 주소와 포트를 직접 입력
       - targetName: my-external-db-metrics
         type: StaticEndpoints
+        # enabled: true  # 타겟 활성화 여부 (기본값: true, 생략 가능)
         scheme: "http"  # http 또는 https, 기본값 http
         addresses:  # 대상의 주소 목록 (IP:PORT 또는 HOSTNAME:PORT)
           - "192.168.1.100:9100"
@@ -136,12 +139,31 @@ features:
             target_label: server
             replacement: "${1}"
             action: replace
+
+      # 비활성화된 타겟 예시 (스크래핑 시 건너뜀)
+      - targetName: disabled-target-example
+        type: StaticEndpoints
+        # 타겟을 비활성화하려면 enabled를 false로 설정
+        enabled: false
+        addresses:
+          - "disabled-example.com:9100"
+        path: "/metrics"
+        interval: "60s"
 ```
 
 #### CR 형식 공통 설정 요소
 
 - **globalInterval**: 모든 타겟에 적용되는 기본 스크래핑 간격 (타겟 또는 엔드포인트에서 재정의 가능)
 - **globalPath**: 모든 타겟에 적용되는 기본 메트릭 경로 (타겟 또는 엔드포인트에서 재정의 가능)
+
+#### 타겟 공통 설정 요소
+
+- **targetName**: 타겟의 이름 (필수)
+- **type**: 타겟의 유형 (PodMonitor, ServiceMonitor, StaticEndpoints) (필수)
+- **enabled**: 타겟 활성화 여부 (기본값: true, 생략 가능). false로 설정하면 해당 타겟은 스크래핑 시 건너뜀
+- **interval**: 타겟의 스크래핑 간격 (기본값: globalInterval)
+- **path**: 타겟의 메트릭 경로 (기본값: globalPath)
+- **metricRelabelConfigs**: 메트릭 재라벨링 설정
 
 #### PodMetrics 및 ServiceMetrics 설정 요소
 
