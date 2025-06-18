@@ -53,6 +53,42 @@ OpenAgent를 실행하려면 다음 환경 변수를 설정해야 합니다:
 - `WHATAP_HOST`: 와탭 서버 호스트 주소
 - `WHATAP_PORT`: 와탭 서버 포트 (기본값: 6600)
 
+### Docker 이미지 빌드
+
+#### 기본 Docker 빌드
+
+Docker를 사용하여 OpenAgent 이미지를 빌드할 수 있습니다:
+
+```bash
+# 기본 빌드
+docker build -t openagent:latest .
+
+# 버전 지정 빌드
+docker build -t openagent:1.0.0 --build-arg VERSION="1.0.0" --build-arg COMMIT_HASH="$(git rev-parse --short HEAD)" .
+```
+
+`VERSION` 및 `COMMIT_HASH` 빌드 인자는 애플리케이션 내부에서 사용되며, 로그 및 메트릭에 표시됩니다.
+
+#### build-docker.sh 스크립트 사용 (권장)
+
+더 편리한 빌드를 위해 제공된 `build-docker.sh` 스크립트를 사용할 수 있습니다:
+
+```bash
+# 버전 지정 빌드
+./build-docker.sh --tag 1.0.0 --version "1.0.0" --commit "$(git rev-parse --short HEAD)"
+
+# 레지스트리에 푸시
+./build-docker.sh --tag 1.0.0 --registry whatap --push --version "1.0.0"
+```
+
+스크립트 옵션:
+- `--tag`, `-t`: 이미지 태그 (기본값: latest)
+- `--registry`, `-r`: 레지스트리 (예: whatap)
+- `--push`, `-p`: 빌드 후 이미지 푸시
+- `--arch`, `-a`: 대상 아키텍처 (amd64, arm64, all)
+- `--version`, `-v`: 애플리케이션 버전 (기본값: 태그와 동일)
+- `--commit`, `-c`: 커밋 해시 (기본값: 현재 git 커밋)
+
 ## 설정
 
 에이전트는 `$WHATAP_HOME/scrape_config.yaml` 위치의 YAML 파일을 통해 설정됩니다. 

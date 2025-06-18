@@ -115,7 +115,11 @@ func BootOpenAgent(version, commitHash string, logger *logfile.FileLogger) {
 			if configMap.Namespace == "whatap-monitoring" && configMap.Name == "whatap-open-agent-config" {
 				logger.Println("BootOpenAgent", fmt.Sprintf("ConfigMap %s/%s changed, reloading configuration", configMap.Namespace, configMap.Name))
 				// Reload the configuration
-				configManager.LoadConfig()
+				err := configManager.LoadConfig()
+				if err != nil {
+					logger.Println("BootOpenAgent", fmt.Sprintf("Error reloading configuration: %v", err))
+					return
+				}
 				// Reload the scraper manager
 				scraperManager.ReloadConfig()
 			}
