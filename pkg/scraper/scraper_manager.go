@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	"open-agent/pkg/client"
@@ -27,6 +28,8 @@ import (
 type ScraperManager struct {
 	configManager *config.ConfigManager
 	rawQueue      chan *model.ScrapeRawData
+	scrapers      map[string]chan struct{}
+	scrapersMutex sync.Mutex
 }
 
 // matchNamespaceSelector checks if a namespace matches the namespace selector
@@ -378,6 +381,7 @@ func NewScraperManager(configManager *config.ConfigManager, rawQueue chan *model
 	sm := &ScraperManager{
 		configManager: configManager,
 		rawQueue:      rawQueue,
+		scrapers:      make(map[string]chan struct{}),
 	}
 
 	return sm
@@ -386,6 +390,9 @@ func NewScraperManager(configManager *config.ConfigManager, rawQueue chan *model
 // ReloadConfig reloads the configuration and restarts scraping
 func (sm *ScraperManager) ReloadConfig() {
 	log.Println("Reloading scraper configuration...")
+	// Stop all existing scrapers before starting new ones
+	sm.StopAllScrapers()
+	// Start new scrapers with the updated configuration
 	sm.StartScraping()
 }
 
@@ -454,37 +461,6 @@ func (sm *ScraperManager) StartScraping() {
 	}
 }
 
-// scheduleScraper schedules a scraper task to run at regular intervals
-func (sm *ScraperManager) scheduleScraper(jobName, target string, metricRelabelConfigs model.RelabelConfigs, interval time.Duration, tlsConfig *client.TLSConfig) {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	// Create a scraper task
-	scraperTask := NewScraperTask(jobName, target, metricRelabelConfigs, tlsConfig)
-
-	// Run the scraper task immediately
-	sm.runScraperTask(scraperTask)
-
-	// Run the scraper task at regular intervals
-	for range ticker.C {
-		sm.runScraperTask(scraperTask)
-	}
-}
-
-// scheduleScraperWithFilterConfig schedules a scraper task to run at regular intervals using filterConfig (for backward compatibility)
-func (sm *ScraperManager) scheduleScraperWithFilterConfig(jobName, target string, filterConfig map[string]interface{}, interval time.Duration, tlsConfig *client.TLSConfig) {
-	// Extract metricRelabelConfigs from filterConfig
-	var metricRelabelConfigs model.RelabelConfigs
-	if filterConfig != nil {
-		if relabelConfigs, ok := filterConfig["metricRelabelConfigs"].([]interface{}); ok {
-			metricRelabelConfigs = model.ParseRelabelConfigs(relabelConfigs)
-		}
-	}
-
-	// Call the new scheduleScraper function with the extracted metricRelabelConfigs
-	sm.scheduleScraper(jobName, target, metricRelabelConfigs, interval, tlsConfig)
-}
-
 // runScraperTask runs a scraper task and adds the result to the raw queue
 func (sm *ScraperManager) runScraperTask(scraperTask *ScraperTask) {
 	rawData, err := scraperTask.Run()
@@ -499,21 +475,71 @@ func (sm *ScraperManager) runScraperTask(scraperTask *ScraperTask) {
 
 // scheduleScraperTask schedules a scraper task to run at regular intervals
 func (sm *ScraperManager) scheduleScraperTask(scraperTask *ScraperTask, interval time.Duration) {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	// Run the scraper task immediately
-	sm.runScraperTask(scraperTask)
-
-	// Run the scraper task at regular intervals
-	for range ticker.C {
-		sm.runScraperTask(scraperTask)
+	// Create a unique key for this scraper based on its type and relevant fields
+	var scraperKey string
+	switch scraperTask.TargetType {
+	case DirectURLType, StaticEndpointsType:
+		// For direct URL and static endpoints, use TargetName, TargetType, and TargetURL
+		scraperKey = fmt.Sprintf("%s-%s-%s", scraperTask.TargetName, scraperTask.TargetType, scraperTask.TargetURL)
+	case PodMonitorType, ServiceMonitorType:
+		// For pod and service monitors, use TargetName, TargetType, Namespace, and Port
+		scraperKey = fmt.Sprintf("%s-%s-%s-%s", scraperTask.TargetName, scraperTask.TargetType, scraperTask.Namespace, scraperTask.Port)
+	default:
+		// Fallback to a simple key
+		scraperKey = fmt.Sprintf("%s-%s", scraperTask.TargetName, scraperTask.TargetType)
 	}
+
+	// Create a stop channel for this scraper
+	stopCh := make(chan struct{})
+
+	// Register the scraper in the map
+	sm.scrapersMutex.Lock()
+	// If there's already a scraper with this key, stop it first
+	if existingStopCh, exists := sm.scrapers[scraperKey]; exists {
+		log.Printf("Replacing existing scraper: %s", scraperKey)
+		close(existingStopCh)
+	}
+	sm.scrapers[scraperKey] = stopCh
+	sm.scrapersMutex.Unlock()
+
+	// Start the scraper in a goroutine
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		// Run the scraper task immediately
+		sm.runScraperTask(scraperTask)
+
+		// Run the scraper task at regular intervals or until stopped
+		for {
+			select {
+			case <-ticker.C:
+				sm.runScraperTask(scraperTask)
+			case <-stopCh:
+				log.Printf("Stopping scraper task: %s", scraperKey)
+				return
+			}
+		}
+	}()
 }
 
 // AddRawData adds raw data to the queue
 func (sm *ScraperManager) AddRawData(data *model.ScrapeRawData) {
 	sm.rawQueue <- data
+}
+
+// StopAllScrapers stops all running scrapers
+func (sm *ScraperManager) StopAllScrapers() {
+	sm.scrapersMutex.Lock()
+	defer sm.scrapersMutex.Unlock()
+
+	log.Println("Stopping all scrapers...")
+	for key, stopCh := range sm.scrapers {
+		log.Printf("Stopping scraper: %s", key)
+		close(stopCh)
+		delete(sm.scrapers, key)
+	}
+	log.Println("All scrapers stopped")
 }
 
 // handlePodMonitorTarget handles a PodMonitor target

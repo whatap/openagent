@@ -77,6 +77,10 @@ features:
               - target_label: metric_src
                 replacement: "whatap-open-agent"
                 action: replace
+              - source_labels: [ __name__ ]
+                regex: "apiserver_request_total"
+                action: keep
+
       # 3. PodMonitor: Example for DaemonSet like dcgm-exporter with node label
       - targetName: dcgm-exporter
         type: PodMonitor

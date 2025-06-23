@@ -37,7 +37,7 @@ const (
 
 // ScraperTask represents a task to scrape metrics from a target
 type ScraperTask struct {
-	JobName              string
+	TargetName           string
 	TargetType           TargetType
 	TargetURL            string // Used for DirectURLType and as a fallback for other types
 	Namespace            string // Used for PodMonitorType and ServiceMonitorType
@@ -52,10 +52,10 @@ type ScraperTask struct {
 }
 
 // NewScraperTask creates a new ScraperTask instance
-func NewScraperTask(jobName, targetURL string, metricRelabelConfigs model.RelabelConfigs, tlsConfig *client.TLSConfig) *ScraperTask {
+func NewScraperTask(targetName, targetURL string, metricRelabelConfigs model.RelabelConfigs, tlsConfig *client.TLSConfig) *ScraperTask {
 	// For backward compatibility, create a DirectURL type task
 	return &ScraperTask{
-		JobName:              jobName,
+		TargetName:           targetName,
 		TargetType:           DirectURLType,
 		TargetURL:            targetURL,
 		MetricRelabelConfigs: metricRelabelConfigs,
@@ -64,9 +64,9 @@ func NewScraperTask(jobName, targetURL string, metricRelabelConfigs model.Relabe
 }
 
 // NewPodMonitorScraperTask creates a new ScraperTask instance for a PodMonitor target
-func NewPodMonitorScraperTask(jobName string, namespace string, selector map[string]string, port string, path string, scheme string, metricRelabelConfigs model.RelabelConfigs, tlsConfig *client.TLSConfig, addNodeLabel bool) *ScraperTask {
+func NewPodMonitorScraperTask(targetName string, namespace string, selector map[string]string, port string, path string, scheme string, metricRelabelConfigs model.RelabelConfigs, tlsConfig *client.TLSConfig, addNodeLabel bool) *ScraperTask {
 	return &ScraperTask{
-		JobName:              jobName,
+		TargetName:           targetName,
 		TargetType:           PodMonitorType,
 		Namespace:            namespace,
 		Selector:             selector,
@@ -80,9 +80,9 @@ func NewPodMonitorScraperTask(jobName string, namespace string, selector map[str
 }
 
 // NewServiceMonitorScraperTask creates a new ScraperTask instance for a ServiceMonitor target
-func NewServiceMonitorScraperTask(jobName string, namespace string, selector map[string]string, port string, path string, scheme string, metricRelabelConfigs model.RelabelConfigs, tlsConfig *client.TLSConfig) *ScraperTask {
+func NewServiceMonitorScraperTask(targetName string, namespace string, selector map[string]string, port string, path string, scheme string, metricRelabelConfigs model.RelabelConfigs, tlsConfig *client.TLSConfig) *ScraperTask {
 	return &ScraperTask{
-		JobName:              jobName,
+		TargetName:           targetName,
 		TargetType:           ServiceMonitorType,
 		Namespace:            namespace,
 		Selector:             selector,
@@ -95,9 +95,9 @@ func NewServiceMonitorScraperTask(jobName string, namespace string, selector map
 }
 
 // NewStaticEndpointsScraperTask creates a new ScraperTask instance for a StaticEndpoints target
-func NewStaticEndpointsScraperTask(jobName string, targetURL string, path string, scheme string, metricRelabelConfigs model.RelabelConfigs, tlsConfig *client.TLSConfig) *ScraperTask {
+func NewStaticEndpointsScraperTask(targetName string, targetURL string, path string, scheme string, metricRelabelConfigs model.RelabelConfigs, tlsConfig *client.TLSConfig) *ScraperTask {
 	return &ScraperTask{
-		JobName:              jobName,
+		TargetName:           targetName,
 		TargetType:           StaticEndpointsType,
 		TargetURL:            targetURL,
 		Path:                 path,
@@ -239,9 +239,9 @@ func (st *ScraperTask) Run() (*model.ScrapeRawData, error) {
 	targetURL, resolveErr := st.ResolveEndpoint()
 	if resolveErr != nil {
 		if whatapConfig.IsDebugEnabled() {
-			log.Printf("[DEBUG] Error resolving endpoint for job %s: %v", st.JobName, resolveErr)
+			log.Printf("[DEBUG] Error resolving endpoint for target %s: %v", st.TargetName, resolveErr)
 		}
-		return nil, fmt.Errorf("error resolving endpoint for job %s: %v", st.JobName, resolveErr)
+		return nil, fmt.Errorf("error resolving endpoint for target %s: %v", st.TargetName, resolveErr)
 	}
 
 	// Format the URL
@@ -249,7 +249,7 @@ func (st *ScraperTask) Run() (*model.ScrapeRawData, error) {
 
 	// Log detailed information if debug is enabled
 	if whatapConfig.IsDebugEnabled() {
-		log.Printf("[DEBUG] Starting scraper task for job [%s], target [%s]", st.JobName, targetURL)
+		log.Printf("[DEBUG] Starting scraper task for target [%s], URL [%s]", st.TargetName, targetURL)
 		log.Printf("[DEBUG] Formatted URL: %s", formattedURL)
 		if st.TLSConfig != nil {
 			log.Printf("[DEBUG] Using TLS config with InsecureSkipVerify=%v", st.TLSConfig.InsecureSkipVerify)
@@ -282,9 +282,9 @@ func (st *ScraperTask) Run() (*model.ScrapeRawData, error) {
 
 	if httpErr != nil {
 		if whatapConfig.IsDebugEnabled() {
-			log.Printf("[DEBUG] Error scraping target %s for job %s: %v", targetURL, st.JobName, httpErr)
+			log.Printf("[DEBUG] Error scraping target %s for target %s: %v", targetURL, st.TargetName, httpErr)
 		}
-		return nil, fmt.Errorf("error scraping target %s for job %s: %v", targetURL, st.JobName, httpErr)
+		return nil, fmt.Errorf("error scraping target %s for target %s: %v", targetURL, st.TargetName, httpErr)
 	}
 
 	// Create a ScrapeRawData instance with the response
@@ -298,7 +298,7 @@ func (st *ScraperTask) Run() (*model.ScrapeRawData, error) {
 	// Log detailed information if debug is enabled
 	if whatapConfig.IsDebugEnabled() {
 		duration := time.Since(startTime)
-		log.Printf("[DEBUG] Scraper task completed for job [%s], target [%s] in %v", st.JobName, targetURL, duration)
+		log.Printf("[DEBUG] Scraper task completed for target [%s], URL [%s] in %v", st.TargetName, targetURL, duration)
 		log.Printf("[DEBUG] Response length: %d bytes", len(response))
 
 		// Log a preview of the response (first 500 characters)
@@ -320,7 +320,7 @@ func (st *ScraperTask) Run() (*model.ScrapeRawData, error) {
 		log.Printf("[DEBUG] Approximate number of metrics: %d", metricCount)
 	}
 
-	log.Printf("ScraperTask: job [%s] fetched target %s (length=%d)", st.JobName, st.TargetURL, len(response))
+	log.Printf("ScraperTask: target [%s] fetched URL %s (length=%d)", st.TargetName, st.TargetURL, len(response))
 
 	return rawData, nil
 }

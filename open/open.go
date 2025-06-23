@@ -103,10 +103,20 @@ func BootOpenAgent(version, commitHash string, logger *logfile.FileLogger) {
 	// Create the configuration manager
 	configManager := config.NewConfigManager()
 
+	// Check if configManager is nil (which happens if the configuration file is missing)
+	if configManager == nil {
+		logger.Println("BootOpenAgent", "Failed to create configuration manager. Please ensure scrape_config.yaml exists.")
+		return
+	}
+
 	// Create and start the scraper manager with error recovery and shutdown handling
 	scraperManager := scraper.NewScraperManager(configManager, rawQueue)
 
-	// Set up ConfigMap watcher for configuration changes
+	// Register the scraper manager's reload handler with the config manager
+	configManager.RegisterReloadHandler(scraperManager.ReloadConfig)
+	logger.Println("BootOpenAgent", "Registered scraper manager reload handler with config manager")
+
+	// Set up ConfigMap watcher for configuration changes in Kubernetes environments
 	k8sClient := k8s.GetInstance()
 	if k8sClient.IsInitialized() {
 		logger.Println("BootOpenAgent", "Setting up ConfigMap watcher for configuration changes")
@@ -115,17 +125,18 @@ func BootOpenAgent(version, commitHash string, logger *logfile.FileLogger) {
 			if configMap.Namespace == "whatap-monitoring" && configMap.Name == "whatap-open-agent-config" {
 				logger.Println("BootOpenAgent", fmt.Sprintf("ConfigMap %s/%s changed, reloading configuration", configMap.Namespace, configMap.Name))
 				// Reload the configuration
+				// The ConfigManager will notify all registered handlers after reloading
 				err := configManager.LoadConfig()
 				if err != nil {
 					logger.Println("BootOpenAgent", fmt.Sprintf("Error reloading configuration: %v", err))
 					return
 				}
-				// Reload the scraper manager
-				scraperManager.ReloadConfig()
+				// No need to manually call scraperManager.ReloadConfig() here
+				// It will be called automatically by the ConfigManager
 			}
 		})
 	} else {
-		logger.Println("BootOpenAgent", "Kubernetes client not initialized, ConfigMap watcher not set up")
+		logger.Println("BootOpenAgent", "Kubernetes client not initialized, using file watcher for configuration changes")
 	}
 
 	go func() {

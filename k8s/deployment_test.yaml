@@ -68,10 +68,16 @@ spec:
               key: port
         volumeMounts:
         - name: config-volume
-          mountPath: /app/scrape_config.yaml
-          subPath: scrape_config.yaml
+          mountPath: /app/config
         - name: logs-volume
           mountPath: /app/logs
+      initContainers:
+      - name: init-symlink
+        image: busybox
+        command: ['sh', '-c', 'ln -sf /app/config/scrape_config.yaml /app/scrape_config.yaml']
+        volumeMounts:
+        - name: config-volume
+          mountPath: /app/config
       volumes:
       - name: config-volume
         configMap:

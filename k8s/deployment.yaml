@@ -67,9 +67,6 @@ spec:
               name: whatap-credentials
               key: port
         volumeMounts:
-        - name: config-volume
-          mountPath: /app/scrape_config.yaml
-          subPath: scrape_config.yaml
         - name: logs-volume
           mountPath: /app/logs
       volumes:
