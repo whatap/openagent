@@ -61,14 +61,14 @@ func BootOpenAgent(version, commitHash string, logger *logfile.FileLogger) {
 
 	// Get configuration values using the config package
 	servers := make([]string, 0)
-	license := config.Get("license")
-	hosts := config.Get("host")
-	port := config.GetIntWithDefault("port", 6600)
+	license := config.Get("WHATAP_LICENSE")
+	hosts := config.Get("WHATAP_HOST")
+	port := config.GetIntWithDefault("WHATAP_PORT", 6600)
 	if license == "" || hosts == "" {
 		fmt.Println("Please set the following configuration values:")
-		fmt.Println("license - The license key for the WHATAP server")
-		fmt.Println("host - The hostname or IP address of the WHATAP server")
-		fmt.Println("port - The port number of the WHATAP server (default: 6600)")
+		fmt.Println("WHATAP_LICENSE - The license key for the WHATAP server")
+		fmt.Println("WHATAP_HOST - The hostname or IP address of the WHATAP server")
+		fmt.Println("WHATAP_PORT - The port number of the WHATAP server (default: 6600)")
 		os.Exit(1)
 	}
 
