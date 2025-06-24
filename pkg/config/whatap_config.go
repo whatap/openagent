@@ -228,6 +228,9 @@ func (wc *WhatapConfig) GetBoolWithDefault(key string, defaultValue bool) bool {
 // Config represents the configuration values from whatap.conf as a struct.
 // This allows for dot notation access to configuration values.
 type Config struct {
+	WHATAP_LICENSE string
+	WHATAP_HOST    string
+	WHATAP_PORT    string
 	Debug          bool
 	ScrapeInterval string
 	ScrapeTimeout  string
@@ -264,6 +267,9 @@ func (wc *WhatapConfig) GetConfig() *Config {
 	}
 
 	config := &Config{
+		WHATAP_LICENSE: wc.Get("WHATAP_LICENSE"),
+		WHATAP_HOST:    wc.Get("WHATAP_HOST"),
+		WHATAP_PORT:    wc.Get("WHATAP_PORT"),
 		Debug:          isTruthy(wc.Get("debug")),
 		ScrapeInterval: wc.Get("scrape_interval"),
 		ScrapeTimeout:  wc.Get("scrape_timeout"),
