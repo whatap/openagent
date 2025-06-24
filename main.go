@@ -281,6 +281,15 @@ func monitorChildHealth(childHealthChannel chan bool, logger *logfile.FileLogger
 }
 
 func main() {
+	printWhatap := fmt.Sprint("\n" +
+		" _      ____       ______WHATAP-OPEN-AGENT\n" +
+		"| | /| / / /  ___ /_  __/__ ____\n" +
+		"| |/ |/ / _ \\/ _ `// / / _ `/ _ \\\n" +
+		"|__/|__/_//_/\\_,_//_/  \\_,_/ .__/\n" +
+		"                          /_/\n" +
+		"Just Tap, Always Monitoring\n")
+	fmt.Println(printWhatap)
+
 	// Check if version is set from environment variable
 	if len(os.Args) > 1 {
 		arg1 := os.Args[1]
@@ -292,7 +301,10 @@ func main() {
 				arg2 := os.Args[2]
 				if arg2 == "debug" {
 					fmt.Println("Debug mode: enabled")
-					os.Setenv("debug", "true")
+					err := os.Setenv("debug", "true")
+					if err != nil {
+						fmt.Println("error: failed to set env:debug ")
+					}
 				} else if arg2 == "local-minikube" {
 					fmt.Println("Using local minikube configuration")
 					// Set the kubeconfig path to the default location

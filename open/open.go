@@ -59,23 +59,23 @@ func BootOpenAgent(version, commitHash string, logger *logfile.FileLogger) {
 	SetAppLogger(logger)
 	GetAppLogger().Println("BootOpenAgent", fmt.Sprintf("Starting OpenAgent version=%s, commitHash=%s", version, commitHash))
 
-	// Check if environment variables are set
+	// Get configuration values using the config package
 	servers := make([]string, 0)
-	license := os.Getenv("WHATAP_LICENSE")
-	hosts := os.Getenv("WHATAP_HOST")
-	port := os.Getenv("WHATAP_PORT")
-	if license == "" || hosts == "" || port == "" {
-		fmt.Println("Please set the following environment variables:")
-		fmt.Println("WHATAP_LICENSE - The license key for the WHATAP server")
-		fmt.Println("WHATAP_HOST - The hostname or IP address of the WHATAP server")
-		fmt.Println("WHATAP_PORT - The port number of the WHATAP server")
+	license := config.Get("license")
+	hosts := config.Get("host")
+	port := config.GetIntWithDefault("port", 6600)
+	if license == "" || hosts == "" {
+		fmt.Println("Please set the following configuration values:")
+		fmt.Println("license - The license key for the WHATAP server")
+		fmt.Println("host - The hostname or IP address of the WHATAP server")
+		fmt.Println("port - The port number of the WHATAP server (default: 6600)")
 		os.Exit(1)
 	}
 
 	hostSlice := strings.Split(hosts, "/")
 	// Parse server list
 	for _, hostSliced := range hostSlice {
-		servers = append(servers, fmt.Sprintf("%s:%s", hostSliced, port))
+		servers = append(servers, fmt.Sprintf("%s:%d", hostSliced, port))
 	}
 
 	// Initialize secure communication

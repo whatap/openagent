@@ -28,13 +28,8 @@ type TLSConfig struct {
 	InsecureSkipVerify bool
 }
 
-// Global WhatapConfig instance
-var whatapConfig *config.WhatapConfig
-
-func init() {
-	// Initialize the WhatapConfig
-	whatapConfig = config.NewWhatapConfig()
-}
+// Use the package-level functions provided by the config package
+// instead of creating our own instance of WhatapConfig
 
 // HTTPClient is responsible for making HTTP requests to scrape metrics from targets
 type HTTPClient struct {
@@ -143,7 +138,7 @@ func (c *HTTPClient) ExecuteGetWithTLSConfig(targetURL string, tlsConfig *TLSCon
 	formattedURL := FormatURL(targetURL)
 
 	// Log the request if debug is enabled
-	if whatapConfig.IsDebugEnabled() {
+	if config.IsDebugEnabled() {
 		if c.isMinikube {
 			log.Printf("[DEBUG] HTTP Request (Minikube client): GET %s", formattedURL)
 		} else {
@@ -162,13 +157,13 @@ func (c *HTTPClient) ExecuteGetWithTLSConfig(targetURL string, tlsConfig *TLSCon
 		token, err := GetServiceAccountToken()
 		if err == nil {
 			req.Header.Set("Authorization", "Bearer "+token)
-			if whatapConfig.IsDebugEnabled() {
+			if config.IsDebugEnabled() {
 				log.Printf("[DEBUG] Added Authorization header with Bearer token")
 			}
-		} else if whatapConfig.IsDebugEnabled() {
+		} else if config.IsDebugEnabled() {
 			log.Printf("[DEBUG] No service account token available: %v", err)
 		}
-	} else if whatapConfig.IsDebugEnabled() {
+	} else if config.IsDebugEnabled() {
 		log.Printf("[DEBUG] Skipping token authentication for Minikube")
 	}
 
@@ -180,11 +175,11 @@ func (c *HTTPClient) ExecuteGetWithTLSConfig(targetURL string, tlsConfig *TLSCon
 	// For Minikube, we already have a client with the correct TLS config
 	// We don't need to create a new one unless a custom TLS config is provided
 	if c.isMinikube {
-		if whatapConfig.IsDebugEnabled() {
+		if config.IsDebugEnabled() {
 			log.Printf("[DEBUG] Using existing Minikube client with client certificates")
 		}
 	} else if tlsConfig != nil {
-		if whatapConfig.IsDebugEnabled() {
+		if config.IsDebugEnabled() {
 			log.Printf("[DEBUG] Using custom TLS config with InsecureSkipVerify=%v", tlsConfig.InsecureSkipVerify)
 		}
 
@@ -205,10 +200,10 @@ func (c *HTTPClient) ExecuteGetWithTLSConfig(targetURL string, tlsConfig *TLSCon
 				rootCAs.AddCert(cert)
 				transport.TLSClientConfig.RootCAs = rootCAs
 
-				if whatapConfig.IsDebugEnabled() {
+				if config.IsDebugEnabled() {
 					log.Printf("[DEBUG] Added Kubernetes CA cert to root CA pool")
 				}
-			} else if whatapConfig.IsDebugEnabled() {
+			} else if config.IsDebugEnabled() {
 				log.Printf("[DEBUG] Failed to load Kubernetes CA cert: %v", err)
 			}
 		}
@@ -222,14 +217,14 @@ func (c *HTTPClient) ExecuteGetWithTLSConfig(targetURL string, tlsConfig *TLSCon
 
 	// Log the request start time if debug is enabled
 	var startTime time.Time
-	if whatapConfig.IsDebugEnabled() {
+	if config.IsDebugEnabled() {
 		startTime = time.Now()
 		log.Printf("[DEBUG] Sending HTTP request to %s", formattedURL)
 	}
 
 	resp, err := client.Do(req)
 	if err != nil {
-		if whatapConfig.IsDebugEnabled() {
+		if config.IsDebugEnabled() {
 			log.Printf("[DEBUG] HTTP request failed: %v", err)
 		}
 		return "", fmt.Errorf("error executing request: %v", err)
@@ -237,7 +232,7 @@ func (c *HTTPClient) ExecuteGetWithTLSConfig(targetURL string, tlsConfig *TLSCon
 	defer resp.Body.Close()
 
 	// Log the response if debug is enabled
-	if whatapConfig.IsDebugEnabled() {
+	if config.IsDebugEnabled() {
 		duration := time.Since(startTime)
 		log.Printf("[DEBUG] HTTP Response: %d %s (took %v)", resp.StatusCode, resp.Status, duration)
 		log.Printf("[DEBUG] Response Headers: %v", resp.Header)
@@ -245,14 +240,14 @@ func (c *HTTPClient) ExecuteGetWithTLSConfig(targetURL string, tlsConfig *TLSCon
 
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		if whatapConfig.IsDebugEnabled() {
+		if config.IsDebugEnabled() {
 			log.Printf("[DEBUG] Error reading response body: %v", err)
 		}
 		return "", fmt.Errorf("error reading response body: %v", err)
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		if whatapConfig.IsDebugEnabled() {
+		if config.IsDebugEnabled() {
 			log.Printf("[DEBUG] HTTP error: %d %s", resp.StatusCode, resp.Status)
 			log.Printf("[DEBUG] Response body: %s", string(body))
 		}
@@ -260,7 +255,7 @@ func (c *HTTPClient) ExecuteGetWithTLSConfig(targetURL string, tlsConfig *TLSCon
 	}
 
 	// Log the response body length if debug is enabled
-	if whatapConfig.IsDebugEnabled() {
+	if config.IsDebugEnabled() {
 		log.Printf("[DEBUG] Response body length: %d bytes", len(body))
 		// Log a preview of the response body (first 500 characters)
 		preview := string(body)

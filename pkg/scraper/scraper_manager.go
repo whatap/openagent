@@ -11,6 +11,7 @@ import (
 	"open-agent/pkg/config"
 	"open-agent/pkg/k8s"
 	"open-agent/pkg/model"
+	"open-agent/tools/util/logutil"
 )
 
 // ScraperManager is responsible for managing scraper tasks
@@ -42,7 +43,7 @@ func (sm *ScraperManager) matchNamespaceSelector(namespaceName string, namespace
 	// Get the K8s client
 	k8sClient := k8s.GetInstance()
 	if !k8sClient.IsInitialized() {
-		log.Printf("Kubernetes client not initialized, falling back to direct matching")
+		logutil.Printf("INFO", "Kubernetes client not initialized, falling back to direct matching")
 		return sm.matchNamespaceSelectorDirect(namespaceName, namespaceLabels, namespaceSelector)
 	}
 
@@ -64,7 +65,7 @@ func (sm *ScraperManager) matchNamespaceSelector(namespaceName string, namespace
 		// Get namespaces with the specified names
 		namespaces, err := k8sClient.GetNamespacesByNames(matchNamesStr)
 		if err != nil {
-			log.Printf("Error getting namespaces by names: %v", err)
+			logutil.Printf("ERROR", "Error getting namespaces by names: %v", err)
 			return false
 		}
 
@@ -96,7 +97,7 @@ func (sm *ScraperManager) matchNamespaceSelector(namespaceName string, namespace
 		// Get namespaces with the specified labels
 		namespaces, err := k8sClient.GetNamespacesByLabels(matchLabelsStr)
 		if err != nil {
-			log.Printf("Error getting namespaces by labels: %v", err)
+			logutil.Printf("ERROR", "Error getting namespaces by labels: %v", err)
 			return false
 		}
 
@@ -389,7 +390,7 @@ func NewScraperManager(configManager *config.ConfigManager, rawQueue chan *model
 
 // ReloadConfig reloads the configuration and restarts scraping
 func (sm *ScraperManager) ReloadConfig() {
-	log.Println("Reloading scraper configuration...")
+	logutil.Println("INFO", "Reloading scraper configuration...")
 	// Stop all existing scrapers before starting new ones
 	sm.StopAllScrapers()
 	// Start new scrapers with the updated configuration
@@ -401,7 +402,7 @@ func (sm *ScraperManager) StartScraping() {
 	// Get the configuration
 	cm := sm.configManager.GetConfig()
 	if cm == nil {
-		log.Println("No configuration loaded.")
+		logutil.Println("INFO", "No configuration loaded.")
 		return
 	}
 
@@ -409,14 +410,14 @@ func (sm *ScraperManager) StartScraping() {
 	scrapeIntervalStr := sm.configManager.GetScrapeInterval()
 	scrapeIntervalSeconds, err := sm.configManager.ParseInterval(scrapeIntervalStr)
 	if err != nil {
-		log.Printf("Error parsing scrape interval: %v. Using default of 15 seconds.", err)
+		logutil.Printf("WARN", "Error parsing scrape interval: %v. Using default of 15 seconds.", err)
 		scrapeIntervalSeconds = 15
 	}
 
 	// Get the scrape configs
 	scrapeConfigs := sm.configManager.GetScrapeConfigs()
 	if scrapeConfigs == nil {
-		log.Println("No scrape_configs found in configuration.")
+		logutil.Println("INFO", "No scrape_configs found in configuration.")
 		return
 	}
 
@@ -427,7 +428,7 @@ func (sm *ScraperManager) StartScraping() {
 			// Get the target name
 			targetName, ok := scrapeConfig["targetName"].(string)
 			if !ok {
-				log.Println("Skipping target with no targetName.")
+				logutil.Println("INFO", "Skipping target with no targetName.")
 				continue
 			}
 
@@ -439,7 +440,7 @@ func (sm *ScraperManager) StartScraping() {
 
 			// Skip disabled targets
 			if !enabled {
-				log.Printf("Skipping disabled target: %s", targetName)
+				logutil.Printf("INFO", "Skipping disabled target: %s", targetName)
 				continue
 			}
 
@@ -452,10 +453,10 @@ func (sm *ScraperManager) StartScraping() {
 			case "StaticEndpoints":
 				sm.handleStaticEndpointsTarget(targetName, scrapeConfig, time.Duration(scrapeIntervalSeconds)*time.Second)
 			default:
-				log.Printf("Unknown target type: %s for target: %s", targetType, targetName)
+				logutil.Printf("WARN", "Unknown target type: %s for target: %s", targetType, targetName)
 			}
 		} else {
-			log.Println("Skipping scrape config with no target type.")
+			logutil.Println("INFO", "Skipping scrape config with no target type.")
 			continue
 		}
 	}
@@ -465,7 +466,7 @@ func (sm *ScraperManager) StartScraping() {
 func (sm *ScraperManager) runScraperTask(scraperTask *ScraperTask) {
 	rawData, err := scraperTask.Run()
 	if err != nil {
-		log.Printf("Error running scraper task: %v", err)
+		logutil.Printf("ERROR", "Error running scraper task: %v", err)
 		return
 	}
 
@@ -496,7 +497,7 @@ func (sm *ScraperManager) scheduleScraperTask(scraperTask *ScraperTask, interval
 	sm.scrapersMutex.Lock()
 	// If there's already a scraper with this key, stop it first
 	if existingStopCh, exists := sm.scrapers[scraperKey]; exists {
-		log.Printf("Replacing existing scraper: %s", scraperKey)
+		logutil.Printf("INFO", "Replacing existing scraper: %s", scraperKey)
 		close(existingStopCh)
 	}
 	sm.scrapers[scraperKey] = stopCh
@@ -516,7 +517,7 @@ func (sm *ScraperManager) scheduleScraperTask(scraperTask *ScraperTask, interval
 			case <-ticker.C:
 				sm.runScraperTask(scraperTask)
 			case <-stopCh:
-				log.Printf("Stopping scraper task: %s", scraperKey)
+				logutil.Printf("INFO", "Stopping scraper task: %s", scraperKey)
 				return
 			}
 		}
@@ -533,44 +534,44 @@ func (sm *ScraperManager) StopAllScrapers() {
 	sm.scrapersMutex.Lock()
 	defer sm.scrapersMutex.Unlock()
 
-	log.Println("Stopping all scrapers...")
+	logutil.Println("INFO", "Stopping all scrapers...")
 	for key, stopCh := range sm.scrapers {
-		log.Printf("Stopping scraper: %s", key)
+		logutil.Printf("INFO", "Stopping scraper: %s", key)
 		close(stopCh)
 		delete(sm.scrapers, key)
 	}
-	log.Println("All scrapers stopped")
+	logutil.Println("INFO", "All scrapers stopped")
 }
 
 // handlePodMonitorTarget handles a PodMonitor target
 func (sm *ScraperManager) handlePodMonitorTarget(targetName string, targetConfig map[string]interface{}, defaultInterval time.Duration) {
-	log.Printf("Processing PodMonitor target: %s", targetName)
+	logutil.Printf("INFO", "Processing PodMonitor target: %s", targetName)
 
 	// Get the namespace selector
 	namespaceSelector, nsOk := targetConfig["namespaceSelector"].(map[string]interface{})
 	if !nsOk {
-		log.Printf("No namespaceSelector found for PodMonitor target: %s", targetName)
+		logutil.Printf("INFO", "No namespaceSelector found for PodMonitor target: %s", targetName)
 		return
 	}
 
 	// Get the pod selector (called 'selector' in the new format)
 	podSelector, podOk := targetConfig["selector"].(map[string]interface{})
 	if !podOk {
-		log.Printf("No selector found for PodMonitor target: %s", targetName)
+		logutil.Printf("INFO", "No selector found for PodMonitor target: %s", targetName)
 		return
 	}
 
 	// Get the endpoints
 	endpoints, ok := targetConfig["endpoints"].([]interface{})
 	if !ok {
-		log.Printf("No endpoints found for PodMonitor target: %s", targetName)
+		logutil.Printf("INFO", "No endpoints found for PodMonitor target: %s", targetName)
 		return
 	}
 
 	// Get the K8s client
 	k8sClient := k8s.GetInstance()
 	if !k8sClient.IsInitialized() {
-		log.Printf("Kubernetes client not initialized, using dummy target for PodMonitor: %s", targetName)
+		logutil.Printf("INFO", "Kubernetes client not initialized, using dummy target for PodMonitor: %s", targetName)
 		// Fall back to dummy target
 		sm.handlePodMonitorTargetWithDummyTarget(targetName, targetConfig, defaultInterval)
 		return
@@ -601,12 +602,12 @@ func (sm *ScraperManager) handlePodMonitorTarget(targetName string, targetConfig
 		// Get pods matching the selector in this namespace
 		pods, err := k8sClient.GetPodsByLabels(namespace, podLabels)
 		if err != nil {
-			log.Printf("Error getting pods in namespace %s for PodMonitor %s: %v", namespace, targetName, err)
+			logutil.Printf("ERROR", "Error getting pods in namespace %s for PodMonitor %s: %v", namespace, targetName, err)
 			continue
 		}
 
 		if len(pods) == 0 {
-			log.Printf("No pods found in namespace %s matching selector for PodMonitor %s", namespace, targetName)
+			logutil.Printf("INFO", "No pods found in namespace %s matching selector for PodMonitor %s", namespace, targetName)
 			continue
 		}
 
@@ -620,7 +621,7 @@ func (sm *ScraperManager) handlePodMonitorTarget(targetName string, targetConfig
 			// Get the port
 			portName, ok := endpointMap["port"].(string)
 			if !ok {
-				log.Printf("No port found in endpoint for PodMonitor target: %s", targetName)
+				logutil.Printf("INFO", "No port found in endpoint for PodMonitor target: %s", targetName)
 				continue
 			}
 
@@ -631,7 +632,7 @@ func (sm *ScraperManager) handlePodMonitorTarget(targetName string, targetConfig
 				if targetPath, ok := targetConfig["path"].(string); ok {
 					path = targetPath
 				} else {
-					log.Printf("No path found in endpoint for PodMonitor target: %s", targetName)
+					logutil.Printf("INFO", "No path found in endpoint for PodMonitor target: %s", targetName)
 					continue
 				}
 			}
@@ -738,12 +739,12 @@ func (sm *ScraperManager) handlePodMonitorTarget(targetName string, targetConfig
 // handlePodMonitorTargetWithDummyTarget handles a PodMonitor target with a dummy target
 // This is used when the Kubernetes client is not initialized
 func (sm *ScraperManager) handlePodMonitorTargetWithDummyTarget(targetName string, targetConfig map[string]interface{}, defaultInterval time.Duration) {
-	log.Printf("Using dummy target for PodMonitor: %s", targetName)
+	logutil.Printf("INFO", "Using dummy target for PodMonitor: %s", targetName)
 
 	// Get the endpoints
 	endpoints, ok := targetConfig["endpoints"].([]interface{})
 	if !ok {
-		log.Printf("No endpoints found for PodMonitor target: %s", targetName)
+		logutil.Printf("INFO", "No endpoints found for PodMonitor target: %s", targetName)
 		return
 	}
 
@@ -754,24 +755,24 @@ func (sm *ScraperManager) handlePodMonitorTargetWithDummyTarget(targetName strin
 			continue
 		}
 
-		// Get the port
-		port, ok := endpointMap["port"].(string)
-		if !ok {
-			log.Printf("No port found in endpoint for PodMonitor target: %s", targetName)
-			continue
-		}
-
-		// Get the path
-		path, ok := endpointMap["path"].(string)
-		if !ok {
-			// Check if path is defined at the target level
-			if targetPath, ok := targetConfig["path"].(string); ok {
-				path = targetPath
-			} else {
-				log.Printf("No path found in endpoint for PodMonitor target: %s", targetName)
+			// Get the port
+			port, ok := endpointMap["port"].(string)
+			if !ok {
+				logutil.Printf("INFO", "No port found in endpoint for PodMonitor target: %s", targetName)
 				continue
 			}
-		}
+
+			// Get the path
+			path, ok := endpointMap["path"].(string)
+			if !ok {
+				// Check if path is defined at the target level
+				if targetPath, ok := targetConfig["path"].(string); ok {
+					path = targetPath
+				} else {
+					logutil.Printf("INFO", "No path found in endpoint for PodMonitor target: %s", targetName)
+					continue
+				}
+			}
 
 		// Get the interval
 		endpointInterval := defaultInterval
@@ -830,33 +831,33 @@ func (sm *ScraperManager) handlePodMonitorTargetWithDummyTarget(targetName strin
 
 // handleServiceMonitorTarget handles a ServiceMonitor target
 func (sm *ScraperManager) handleServiceMonitorTarget(targetName string, targetConfig map[string]interface{}, defaultInterval time.Duration) {
-	log.Printf("Processing ServiceMonitor target: %s", targetName)
+	logutil.Printf("INFO", "Processing ServiceMonitor target: %s", targetName)
 
 	// Get the namespace selector
 	namespaceSelector, nsOk := targetConfig["namespaceSelector"].(map[string]interface{})
 	if !nsOk {
-		log.Printf("No namespaceSelector found for ServiceMonitor target: %s", targetName)
+		logutil.Printf("INFO", "No namespaceSelector found for ServiceMonitor target: %s", targetName)
 		return
 	}
 
 	// Get the service selector (called 'selector' in the new format)
 	serviceSelector, svcOk := targetConfig["selector"].(map[string]interface{})
 	if !svcOk {
-		log.Printf("No selector found for ServiceMonitor target: %s", targetName)
+		logutil.Printf("INFO", "No selector found for ServiceMonitor target: %s", targetName)
 		return
 	}
 
 	// Get the endpoint configurations
 	endpointConfigs, ok := targetConfig["endpoints"].([]interface{})
 	if !ok {
-		log.Printf("No endpoints found for ServiceMonitor target: %s", targetName)
+		logutil.Printf("INFO", "No endpoints found for ServiceMonitor target: %s", targetName)
 		return
 	}
 
 	// Get the K8s client
 	k8sClient := k8s.GetInstance()
 	if !k8sClient.IsInitialized() {
-		log.Printf("Kubernetes client not initialized, using dummy target for ServiceMonitor: %s", targetName)
+		logutil.Printf("INFO", "Kubernetes client not initialized, using dummy target for ServiceMonitor: %s", targetName)
 		// Fall back to dummy target
 		sm.handleServiceMonitorTargetWithDummyTarget(targetName, targetConfig, defaultInterval)
 		return
@@ -887,12 +888,12 @@ func (sm *ScraperManager) handleServiceMonitorTarget(targetName string, targetCo
 		// Get services matching the selector in this namespace
 		services, err := k8sClient.GetServicesByLabels(namespace, serviceLabels)
 		if err != nil {
-			log.Printf("Error getting services in namespace %s for ServiceMonitor %s: %v", namespace, targetName, err)
+			logutil.Printf("ERROR", "Error getting services in namespace %s for ServiceMonitor %s: %v", namespace, targetName, err)
 			continue
 		}
 
 		if len(services) == 0 {
-			log.Printf("No services found in namespace %s matching selector for ServiceMonitor %s", namespace, targetName)
+			logutil.Printf("INFO", "No services found in namespace %s matching selector for ServiceMonitor %s", namespace, targetName)
 			continue
 		}
 
@@ -901,12 +902,12 @@ func (sm *ScraperManager) handleServiceMonitorTarget(targetName string, targetCo
 			// Get endpoints for this service
 			k8sEndpoints, err := k8sClient.GetEndpointsForService(namespace, service.Name)
 			if err != nil {
-				log.Printf("Error getting endpoints for service %s in namespace %s: %v", service.Name, namespace, err)
+				logutil.Printf("ERROR", "Error getting endpoints for service %s in namespace %s: %v", service.Name, namespace, err)
 				continue
 			}
 
 			if k8sEndpoints == nil || len(k8sEndpoints.Subsets) == 0 {
-				log.Printf("No endpoints found for service %s in namespace %s", service.Name, namespace)
+				logutil.Printf("INFO", "No endpoints found for service %s in namespace %s", service.Name, namespace)
 				continue
 			}
 
@@ -920,7 +921,7 @@ func (sm *ScraperManager) handleServiceMonitorTarget(targetName string, targetCo
 				// Get the port
 				portName, ok := endpointMap["port"].(string)
 				if !ok {
-					log.Printf("No port found in endpoint for ServiceMonitor target: %s", targetName)
+					logutil.Printf("INFO", "No port found in endpoint for ServiceMonitor target: %s", targetName)
 					continue
 				}
 
@@ -931,7 +932,7 @@ func (sm *ScraperManager) handleServiceMonitorTarget(targetName string, targetCo
 					if targetPath, ok := targetConfig["path"].(string); ok {
 						path = targetPath
 					} else {
-						log.Printf("No path found in endpoint for ServiceMonitor target: %s", targetName)
+						logutil.Printf("INFO", "No path found in endpoint for ServiceMonitor target: %s", targetName)
 						continue
 					}
 				}
@@ -1013,12 +1014,12 @@ func (sm *ScraperManager) handleServiceMonitorTarget(targetName string, targetCo
 // handleServiceMonitorTargetWithDummyTarget handles a ServiceMonitor target with a dummy target
 // This is used when the Kubernetes client is not initialized
 func (sm *ScraperManager) handleServiceMonitorTargetWithDummyTarget(targetName string, targetConfig map[string]interface{}, defaultInterval time.Duration) {
-	log.Printf("Using dummy target for ServiceMonitor: %s", targetName)
+	logutil.Printf("INFO", "Using dummy target for ServiceMonitor: %s", targetName)
 
 	// Get the endpoints
 	endpoints, ok := targetConfig["endpoints"].([]interface{})
 	if !ok {
-		log.Printf("No endpoints found for ServiceMonitor target: %s", targetName)
+		logutil.Printf("INFO", "No endpoints found for ServiceMonitor target: %s", targetName)
 		return
 	}
 
@@ -1029,24 +1030,24 @@ func (sm *ScraperManager) handleServiceMonitorTargetWithDummyTarget(targetName s
 			continue
 		}
 
-		// Get the port
-		port, ok := endpointMap["port"].(string)
-		if !ok {
-			log.Printf("No port found in endpoint for ServiceMonitor target: %s", targetName)
-			continue
-		}
-
-		// Get the path
-		path, ok := endpointMap["path"].(string)
-		if !ok {
-			// Check if path is defined at the target level
-			if targetPath, ok := targetConfig["path"].(string); ok {
-				path = targetPath
-			} else {
-				log.Printf("No path found in endpoint for ServiceMonitor target: %s", targetName)
+			// Get the port
+			port, ok := endpointMap["port"].(string)
+			if !ok {
+				logutil.Printf("INFO", "No port found in endpoint for ServiceMonitor target: %s", targetName)
 				continue
 			}
-		}
+
+			// Get the path
+			path, ok := endpointMap["path"].(string)
+			if !ok {
+				// Check if path is defined at the target level
+				if targetPath, ok := targetConfig["path"].(string); ok {
+					path = targetPath
+				} else {
+					logutil.Printf("INFO", "No path found in endpoint for ServiceMonitor target: %s", targetName)
+					continue
+				}
+			}
 
 		// Get the interval
 		endpointInterval := defaultInterval
@@ -1105,19 +1106,19 @@ func (sm *ScraperManager) handleServiceMonitorTargetWithDummyTarget(targetName s
 
 // handleStaticEndpointsTarget handles a StaticEndpoints target
 func (sm *ScraperManager) handleStaticEndpointsTarget(targetName string, targetConfig map[string]interface{}, defaultInterval time.Duration) {
-	log.Printf("Processing StaticEndpoints target: %s", targetName)
+	logutil.Printf("INFO", "Processing StaticEndpoints target: %s", targetName)
 
 	// Get the addresses
 	addresses, ok := targetConfig["addresses"].([]interface{})
 	if !ok {
-		log.Printf("No addresses found for StaticEndpoints target: %s", targetName)
+		logutil.Printf("INFO", "No addresses found for StaticEndpoints target: %s", targetName)
 		return
 	}
 
 	// Get the path
 	path, ok := targetConfig["path"].(string)
 	if !ok {
-		log.Printf("No path found for StaticEndpoints target: %s", targetName)
+		logutil.Printf("INFO", "No path found for StaticEndpoints target: %s", targetName)
 		return
 	}
 

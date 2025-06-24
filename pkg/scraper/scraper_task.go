@@ -3,7 +3,6 @@ package scraper
 import (
 	"fmt"
 	corev1 "k8s.io/api/core/v1"
-	"log"
 	"strings"
 	"time"
 
@@ -11,15 +10,11 @@ import (
 	"open-agent/pkg/config"
 	"open-agent/pkg/k8s"
 	"open-agent/pkg/model"
+	"open-agent/tools/util/logutil"
 )
 
-// Global WhatapConfig instance
-var whatapConfig *config.WhatapConfig
-
-func init() {
-	// Initialize the WhatapConfig
-	whatapConfig = config.NewWhatapConfig()
-}
+// Use the package-level functions provided by the config package
+// instead of creating our own instance of WhatapConfig
 
 // TargetType represents the type of target to scrape
 type TargetType string
@@ -238,8 +233,8 @@ func (st *ScraperTask) Run() (*model.ScrapeRawData, error) {
 	// Resolve the endpoint
 	targetURL, resolveErr := st.ResolveEndpoint()
 	if resolveErr != nil {
-		if whatapConfig.IsDebugEnabled() {
-			log.Printf("[DEBUG] Error resolving endpoint for target %s: %v", st.TargetName, resolveErr)
+		if config.IsDebugEnabled() {
+			logutil.Printf("DEBUG", "[DEBUG] Error resolving endpoint for target %s: %v", st.TargetName, resolveErr)
 		}
 		return nil, fmt.Errorf("error resolving endpoint for target %s: %v", st.TargetName, resolveErr)
 	}
@@ -248,16 +243,16 @@ func (st *ScraperTask) Run() (*model.ScrapeRawData, error) {
 	formattedURL := client.FormatURL(targetURL)
 
 	// Log detailed information if debug is enabled
-	if whatapConfig.IsDebugEnabled() {
-		log.Printf("[DEBUG] Starting scraper task for target [%s], URL [%s]", st.TargetName, targetURL)
-		log.Printf("[DEBUG] Formatted URL: %s", formattedURL)
+	if config.IsDebugEnabled() {
+		logutil.Printf("DEBUG", "[DEBUG] Starting scraper task for target [%s], URL [%s]", st.TargetName, targetURL)
+		logutil.Printf("DEBUG", "[DEBUG] Formatted URL: %s", formattedURL)
 		if st.TLSConfig != nil {
-			log.Printf("[DEBUG] Using TLS config with InsecureSkipVerify=%v", st.TLSConfig.InsecureSkipVerify)
+			logutil.Printf("DEBUG", "[DEBUG] Using TLS config with InsecureSkipVerify=%v", st.TLSConfig.InsecureSkipVerify)
 		}
 		if len(st.MetricRelabelConfigs) > 0 {
-			log.Printf("[DEBUG] Using %d metric relabel configs", len(st.MetricRelabelConfigs))
+			logutil.Printf("DEBUG", "[DEBUG] Using %d metric relabel configs", len(st.MetricRelabelConfigs))
 			for i, config := range st.MetricRelabelConfigs {
-				log.Printf("[DEBUG] Relabel config #%d: Action=%s, SourceLabels=%v, TargetLabel=%s, Regex=%s", 
+				logutil.Printf("DEBUG", "[DEBUG] Relabel config #%d: Action=%s, SourceLabels=%v, TargetLabel=%s, Regex=%s", 
 					i+1, config.Action, config.SourceLabels, config.TargetLabel, config.Regex)
 			}
 		}
@@ -265,7 +260,7 @@ func (st *ScraperTask) Run() (*model.ScrapeRawData, error) {
 
 	// Record start time for performance measurement if debug is enabled
 	var startTime time.Time
-	if whatapConfig.IsDebugEnabled() {
+	if config.IsDebugEnabled() {
 		startTime = time.Now()
 	}
 
@@ -281,8 +276,8 @@ func (st *ScraperTask) Run() (*model.ScrapeRawData, error) {
 	}
 
 	if httpErr != nil {
-		if whatapConfig.IsDebugEnabled() {
-			log.Printf("[DEBUG] Error scraping target %s for target %s: %v", targetURL, st.TargetName, httpErr)
+		if config.IsDebugEnabled() {
+			logutil.Printf("DEBUG", "[DEBUG] Error scraping target %s for target %s: %v", targetURL, st.TargetName, httpErr)
 		}
 		return nil, fmt.Errorf("error scraping target %s for target %s: %v", targetURL, st.TargetName, httpErr)
 	}
@@ -296,17 +291,17 @@ func (st *ScraperTask) Run() (*model.ScrapeRawData, error) {
 	}
 
 	// Log detailed information if debug is enabled
-	if whatapConfig.IsDebugEnabled() {
+	if config.IsDebugEnabled() {
 		duration := time.Since(startTime)
-		log.Printf("[DEBUG] Scraper task completed for target [%s], URL [%s] in %v", st.TargetName, targetURL, duration)
-		log.Printf("[DEBUG] Response length: %d bytes", len(response))
+		logutil.Printf("DEBUG", "[DEBUG] Scraper task completed for target [%s], URL [%s] in %v", st.TargetName, targetURL, duration)
+		logutil.Printf("DEBUG", "[DEBUG] Response length: %d bytes", len(response))
 
 		// Log a preview of the response (first 500 characters)
 		preview := response
 		if len(preview) > 500 {
 			preview = preview[:500] + "..."
 		}
-		log.Printf("[DEBUG] Response preview: %s", preview)
+		logutil.Printf("DEBUG", "[DEBUG] Response preview: %s", preview)
 
 		// Count the number of metrics in the response (approximate)
 		metricCount := 0
@@ -317,10 +312,10 @@ func (st *ScraperTask) Run() (*model.ScrapeRawData, error) {
 			}
 			metricCount++
 		}
-		log.Printf("[DEBUG] Approximate number of metrics: %d", metricCount)
+		logutil.Printf("DEBUG", "[DEBUG] Approximate number of metrics: %d", metricCount)
 	}
 
-	log.Printf("ScraperTask: target [%s] fetched URL %s (length=%d)", st.TargetName, st.TargetURL, len(response))
+	logutil.Printf("INFO", "ScraperTask: target [%s] fetched URL %s (length=%d)", st.TargetName, st.TargetURL, len(response))
 
 	return rawData, nil
 }

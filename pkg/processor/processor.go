@@ -2,27 +2,21 @@ package processor
 
 import (
 	"encoding/json"
-	"fmt"
-	"log"
 	"math"
+	"open-agent/tools/util/logutil"
 
 	"open-agent/pkg/config"
 	"open-agent/pkg/converter"
 	"open-agent/pkg/model"
 )
 
-// Global WhatapConfig instance
-var whatapConfig *config.WhatapConfig
-
-func init() {
-	// Initialize the WhatapConfig
-	whatapConfig = config.NewWhatapConfig()
-}
+// Use the package-level functions provided by the config package
+// instead of creating our own instance of WhatapConfig
 
 // Processor is responsible for processing scraped metrics
 type Processor struct {
-	rawQueue        chan *model.ScrapeRawData
-	processedQueue  chan *model.ConversionResult
+	rawQueue       chan *model.ScrapeRawData
+	processedQueue chan *model.ConversionResult
 }
 
 // NewProcessor creates a new Processor instance
@@ -47,18 +41,18 @@ func (p *Processor) processLoop() {
 
 // processRawData processes a single raw data item
 func (p *Processor) processRawData(rawData *model.ScrapeRawData) {
-	log.Printf("Processing raw data from target: %s", rawData.TargetURL)
+	logutil.Printf("INFO", "Processing raw data from target: %s", rawData.TargetURL)
 
 	// Convert the raw data to OpenMx format
 	conversionResult, err := converter.Convert(rawData.RawData)
 	if err != nil {
-		log.Printf("Error converting raw data: %v", err)
+		logutil.Printf("ERROR", "Error converting raw data: %v", err)
 		return
 	}
 
 	// Apply metric relabeling if configured
 	if len(rawData.MetricRelabelConfigs) > 0 {
-		log.Printf("Applying metric relabeling with %d configs", len(rawData.MetricRelabelConfigs))
+		logutil.Printf("INFO", "Applying metric relabeling with %d configs", len(rawData.MetricRelabelConfigs))
 		converter.ApplyRelabelConfigs(conversionResult.GetOpenMxList(), rawData.MetricRelabelConfigs)
 	}
 
@@ -91,41 +85,41 @@ func (p *Processor) processRawData(rawData *model.ScrapeRawData) {
 	}
 
 	// Check if debug is enabled in whatap.conf
-	if whatapConfig.IsDebugEnabled() {
+	if config.IsDebugEnabled() {
 		// Output metric data to stdout
-		fmt.Println("=== DEBUG: Metrics Data ===")
+		logutil.Println("DEBUG", "=== DEBUG: Metrics Data ===")
 
 		// Print OpenMx list
-		fmt.Printf("OpenMx List (%d items):\n", len(conversionResult.GetOpenMxList()))
+		logutil.Printf("DEBUG", "OpenMx List (%d items):\n", len(conversionResult.GetOpenMxList()))
 		for i, openMx := range conversionResult.GetOpenMxList() {
 			// Skip metrics with NaN values
 			if math.IsNaN(openMx.Value) {
-				fmt.Printf("[%d] Skipped (NaN value)\n", i)
+				logutil.Printf("DEBUG", "[%d] Skipped (NaN value)\n", i)
 				continue
 			}
 
 			// Convert to JSON for better readability
 			jsonData, err := json.MarshalIndent(openMx, "", "  ")
 			if err != nil {
-				fmt.Printf("Error marshaling OpenMx to JSON: %v\n", err)
+				logutil.Printf("ERROR", "Error marshaling OpenMx to JSON: %v\n", err)
 				continue
 			}
-			fmt.Printf("[%d] %s\n", i, string(jsonData))
+			logutil.Printf("DEBUG", "[%d] %s\n", i, string(jsonData))
 		}
 
 		// Print OpenMxHelp list
-		fmt.Printf("\nOpenMxHelp List (%d items):\n", len(conversionResult.GetOpenMxHelpList()))
+		logutil.Printf("DEBUG", "\nOpenMxHelp List (%d items):\n", len(conversionResult.GetOpenMxHelpList()))
 		for i, openMxHelp := range conversionResult.GetOpenMxHelpList() {
 			// Convert to JSON for better readability
 			jsonData, err := json.MarshalIndent(openMxHelp, "", "  ")
 			if err != nil {
-				fmt.Printf("Error marshaling OpenMxHelp to JSON: %v\n", err)
+				logutil.Printf("ERROR", "Error marshaling OpenMxHelp to JSON: %v\n", err)
 				continue
 			}
-			fmt.Printf("[%d] %s\n", i, string(jsonData))
+			logutil.Printf("DEBUG", "[%d] %s\n", i, string(jsonData))
 		}
 
-		fmt.Println("=== END DEBUG ===")
+		logutil.Println("DEBUG", "=== END DEBUG ===")
 	}
 
 	// Add the processed data to the queue
