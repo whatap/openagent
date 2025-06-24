@@ -504,7 +504,7 @@ func promaxAddHighCardinalityMetrics(metrics *[]*model.OpenMx) {
 
 	// Label keys
 	labelKeys := []string{
-		"service", "instance", "endpoint", "method", "status", "version", 
+		"service", "instance", "endpoint", "method", "status", "version",
 		"region", "zone", "cluster", "namespace", "pod", "container",
 		"host", "node", "datacenter", "environment", "tier", "job",
 	}

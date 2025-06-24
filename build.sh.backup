@@ -1,0 +1,272 @@
+#!/bin/bash
+
+# Exit on error
+set -e
+
+# Default values
+IMAGE_NAME="open_agent"
+IMAGE_TAG="latest"
+REGISTRY="whatap"
+PUSH=true
+ARCH="all"  # Default to building for all architectures
+VERSION=""   # Default empty version (will be set to IMAGE_TAG if not specified)
+COMMIT_HASH="" # Default empty commit hash
+
+# Parse command line arguments
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --tag|-t)
+      IMAGE_TAG="$2"
+      shift 2
+      ;;
+    --registry|-r)
+      REGISTRY="$2"
+      shift 2
+      ;;
+    --push|-p)
+      PUSH=true
+      shift
+      ;;
+    --arch|-a)
+      ARCH="$2"
+      shift 2
+      ;;
+    --version|-v)
+      VERSION="$2"
+      shift 2
+      ;;
+    --commit|-c)
+      COMMIT_HASH="$2"
+      shift 2
+      ;;
+    --help|-h)
+      echo "Usage: $0 [options]"
+      echo "Options:"
+      echo "  --tag, -t TAG       Set the image tag (default: latest)"
+      echo "  --registry, -r REG  Set the registry (e.g., docker.io/username)"
+      echo "  --push, -p          Push the image to the registry"
+      echo "  --arch, -a ARCH     Set the target architecture: amd64, arm64, or all (default: all)"
+      echo "  --version, -v VER   Set the agent version (default: same as tag)"
+      echo "  --commit, -c HASH   Set the commit hash (default: current git commit)"
+      echo "  --help, -h          Show this help message"
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1"
+      exit 1
+      ;;
+  esac
+done
+
+# Validate architecture
+if [[ "$ARCH" != "amd64" && "$ARCH" != "arm64" && "$ARCH" != "all" ]]; then
+  echo "Error: Invalid architecture. Must be amd64, arm64, or all."
+  exit 1
+fi
+
+# Set default values for VERSION and COMMIT_HASH if not specified
+if [ -z "$VERSION" ]; then
+  VERSION="$IMAGE_TAG"
+  echo "Using image tag as version: $VERSION"
+fi
+
+if [ -z "$COMMIT_HASH" ]; then
+  COMMIT_HASH=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+  echo "Using current git commit hash: $COMMIT_HASH"
+fi
+
+# Set the full image name
+if [ -n "$REGISTRY" ]; then
+  FULL_IMAGE_NAME="$REGISTRY/$IMAGE_NAME:$IMAGE_TAG"
+else
+  FULL_IMAGE_NAME="$IMAGE_NAME:$IMAGE_TAG"
+fi
+
+# Check if Docker Buildx is available
+if ! docker buildx version > /dev/null 2>&1; then
+  echo "Error: Docker Buildx is required for multi-architecture builds."
+  echo "Please install Docker Buildx or upgrade your Docker installation."
+  exit 1
+fi
+
+# Ensure we have a builder instance
+BUILDER_NAME="openagent-builder"
+if ! docker buildx inspect "$BUILDER_NAME" > /dev/null 2>&1; then
+  echo "Creating Docker Buildx builder instance: $BUILDER_NAME"
+  docker buildx create --name "$BUILDER_NAME" --use
+else
+  docker buildx use "$BUILDER_NAME"
+fi
+
+# Set build platform based on architecture
+if [ "$ARCH" = "all" ]; then
+  PLATFORMS="linux/amd64,linux/arm64"
+  ARCH_MSG="all architectures (linux/amd64, linux/arm64)"
+elif [ "$ARCH" = "amd64" ]; then
+  PLATFORMS="linux/amd64"
+  ARCH_MSG="amd64"
+else
+  PLATFORMS="linux/arm64"
+  ARCH_MSG="arm64"
+fi
+
+echo "🚀 Building Docker image: $FULL_IMAGE_NAME for $ARCH_MSG"
+
+# Create bin directory if it doesn't exist
+mkdir -p bin
+
+# Pre-compile binaries for different architectures
+echo "📦 Pre-compiling binaries for different architectures..."
+
+# Compile binaries in parallel for better performance
+if [[ "$PLATFORMS" == *"linux/amd64"* ]]; then
+  echo "🔨 Compiling for linux/amd64..."
+  (
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+      -ldflags "-X main.version=${VERSION} -X main.commitHash=${COMMIT_HASH}" \
+      -o bin/openagent.linux.amd64 main.go
+  ) &
+  AMDPID=$!
+  echo "  Started amd64 build process (PID: $AMDPID)"
+fi
+
+if [[ "$PLATFORMS" == *"linux/arm64"* ]]; then
+  echo "🔨 Compiling for linux/arm64..."
+  (
+    CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build \
+      -ldflags "-X main.version=${VERSION} -X main.commitHash=${COMMIT_HASH}" \
+      -o bin/openagent.linux.arm64 main.go
+  ) &
+  ARMPID=$!
+  echo "  Started arm64 build process (PID: $ARMPID)"
+fi
+
+# Wait for all compilation processes to finish
+BUILD_SUCCESS=true
+
+if [[ "$PLATFORMS" == *"linux/amd64"* ]]; then
+  echo "⏳ Waiting for amd64 build to complete..."
+  if wait $AMDPID; then
+    echo "✅ amd64 build completed"
+  else
+    echo "❌ amd64 build failed"
+    BUILD_SUCCESS=false
+  fi
+fi
+
+if [[ "$PLATFORMS" == *"linux/arm64"* ]]; then
+  echo "⏳ Waiting for arm64 build to complete..."
+  if wait $ARMPID; then
+    echo "✅ arm64 build completed"
+  else
+    echo "❌ arm64 build failed"
+    BUILD_SUCCESS=false
+  fi
+fi
+
+# Exit if any builds failed
+if [ "$BUILD_SUCCESS" = false ]; then
+  echo "❌ One or more builds failed. Exiting."
+  exit 1
+fi
+
+# Create a temporary Dockerfile for multi-platform build
+cat > Dockerfile.multi << EOF
+FROM alpine:3.19
+
+WORKDIR /app
+RUN apk --no-cache add ca-certificates bash curl
+
+# Copy the pre-compiled binary
+COPY openagent /app/openagent
+COPY scrape_config.yaml /app/scrape_config.yaml
+COPY whatap.conf /app/whatap.conf
+
+RUN mkdir -p /app/logs
+ENV WHATAP_HOME=/app
+
+ENTRYPOINT ["/app/openagent"]
+CMD ["foreground"]
+EOF
+
+echo "🔨 Building and pushing Docker images..."
+
+# Build and push for each architecture separately
+if [[ "$PLATFORMS" == *"linux/amd64"* ]]; then
+  echo "🔨 Building and pushing amd64 image..."
+  cp bin/openagent.linux.amd64 openagent
+
+  BUILD_ARGS=""
+  if [ "$PUSH" = true ]; then
+    BUILD_ARGS="--push"
+  else
+    BUILD_ARGS="--load"
+  fi
+
+  docker buildx build $BUILD_ARGS \
+    --platform=linux/amd64 \
+    --tag ${FULL_IMAGE_NAME}-amd64 \
+    -f Dockerfile.multi .
+fi
+
+if [[ "$PLATFORMS" == *"linux/arm64"* ]]; then
+  echo "🔨 Building and pushing arm64 image..."
+  cp bin/openagent.linux.arm64 openagent
+
+  BUILD_ARGS=""
+  if [ "$PUSH" = true ]; then
+    BUILD_ARGS="--push"
+  else
+    # Note: --load only works for single platform, so we can't load multi-arch images
+    if [ "$ARCH" = "arm64" ]; then
+      BUILD_ARGS="--load"
+    else
+      BUILD_ARGS="--push"
+      echo "Warning: Building for arm64 as part of multi-arch build requires pushing."
+    fi
+  fi
+
+  docker buildx build $BUILD_ARGS \
+    --platform=linux/arm64 \
+    --tag ${FULL_IMAGE_NAME}-arm64 \
+    -f Dockerfile.multi .
+fi
+
+# Create and push manifest lists if building for multiple architectures and pushing
+if [ "$ARCH" = "all" ] && [ "$PUSH" = true ]; then
+  echo "🔨 Creating and pushing manifest lists..."
+
+  # Create manifest list for version tag
+  MANIFEST_CMD="docker manifest create ${FULL_IMAGE_NAME}"
+  if [[ "$PLATFORMS" == *"linux/amd64"* ]]; then
+    MANIFEST_CMD+=" --amend ${FULL_IMAGE_NAME}-amd64"
+  fi
+  if [[ "$PLATFORMS" == *"linux/arm64"* ]]; then
+    MANIFEST_CMD+=" --amend ${FULL_IMAGE_NAME}-arm64"
+  fi
+
+  eval ${MANIFEST_CMD}
+  docker manifest push ${FULL_IMAGE_NAME}
+fi
+
+# Clean up
+rm Dockerfile.multi
+rm -f openagent
+
+# Print summary
+echo ""
+echo "📋 Build Summary:"
+echo "  Version: $VERSION"
+echo "  Commit Hash: $COMMIT_HASH"
+echo "  Registry: $REGISTRY"
+echo "  Architectures: $ARCH_MSG"
+echo "  Image: $FULL_IMAGE_NAME"
+echo ""
+
+if [ "$PUSH" = true ]; then
+  echo "✅ Build and push completed for $ARCH_MSG"
+else
+  echo "✅ Build completed for $ARCH_MSG (not pushed to registry)"
+fi
+
+echo "🎉 The pre-compiled multi-architecture image build was successful!"

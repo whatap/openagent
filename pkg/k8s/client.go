@@ -20,21 +20,21 @@ import (
 
 // K8sClient is a wrapper around the Kubernetes client
 type K8sClient struct {
-	clientset          *kubernetes.Clientset
-	podInformer        cache.SharedIndexInformer
-	endpointInformer   cache.SharedIndexInformer
-	serviceInformer    cache.SharedIndexInformer
-	namespaceInformer  cache.SharedIndexInformer
-	configMapInformer  cache.SharedIndexInformer
-	podStore           cache.Store
-	endpointStore      cache.Store
-	serviceStore       cache.Store
-	namespaceStore     cache.Store
-	configMapStore     cache.Store
-	stopCh             chan struct{}
-	initialized        bool
-	mu                 sync.RWMutex
-	configMapHandlers  []func(*corev1.ConfigMap)
+	clientset         *kubernetes.Clientset
+	podInformer       cache.SharedIndexInformer
+	endpointInformer  cache.SharedIndexInformer
+	serviceInformer   cache.SharedIndexInformer
+	namespaceInformer cache.SharedIndexInformer
+	configMapInformer cache.SharedIndexInformer
+	podStore          cache.Store
+	endpointStore     cache.Store
+	serviceStore      cache.Store
+	namespaceStore    cache.Store
+	configMapStore    cache.Store
+	stopCh            chan struct{}
+	initialized       bool
+	mu                sync.RWMutex
+	configMapHandlers []func(*corev1.ConfigMap)
 }
 
 var (
@@ -137,10 +137,10 @@ func (c *K8sClient) initialize() {
 	go c.configMapInformer.Run(c.stopCh)
 
 	// Wait for the caches to sync
-	if !cache.WaitForCacheSync(c.stopCh, 
-		c.podInformer.HasSynced, 
-		c.endpointInformer.HasSynced, 
-		c.serviceInformer.HasSynced, 
+	if !cache.WaitForCacheSync(c.stopCh,
+		c.podInformer.HasSynced,
+		c.endpointInformer.HasSynced,
+		c.serviceInformer.HasSynced,
 		c.namespaceInformer.HasSynced,
 		c.configMapInformer.HasSynced) {
 		log.Println("Timed out waiting for caches to sync")

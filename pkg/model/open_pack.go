@@ -54,4 +54,3 @@ func (om *OpenMx) Read(in *io.DataInputX) *OpenMx {
 
 	return om
 }
-

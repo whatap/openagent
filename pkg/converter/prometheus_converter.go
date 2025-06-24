@@ -276,7 +276,7 @@ func parseRecordLine(line string) (*model.OpenMx, error) {
 		}
 
 		// Parse labels
-		labelContent := line[braceIndex+1:endBrace]
+		labelContent := line[braceIndex+1 : endBrace]
 		if labelContent != "" {
 			labelPairs := strings.Split(labelContent, ",")
 			for _, pair := range labelPairs {

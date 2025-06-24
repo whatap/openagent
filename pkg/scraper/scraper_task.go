@@ -34,12 +34,12 @@ const (
 type ScraperTask struct {
 	TargetName           string
 	TargetType           TargetType
-	TargetURL            string // Used for DirectURLType and as a fallback for other types
-	Namespace            string // Used for PodMonitorType and ServiceMonitorType
+	TargetURL            string            // Used for DirectURLType and as a fallback for other types
+	Namespace            string            // Used for PodMonitorType and ServiceMonitorType
 	Selector             map[string]string // Used for PodMonitorType and ServiceMonitorType
-	Port                 string // Used for PodMonitorType and ServiceMonitorType
-	Path                 string // Used for all types
-	Scheme               string // Used for all types
+	Port                 string            // Used for PodMonitorType and ServiceMonitorType
+	Path                 string            // Used for all types
+	Scheme               string            // Used for all types
 	MetricRelabelConfigs model.RelabelConfigs
 	TLSConfig            *client.TLSConfig
 	NodeName             string // Used to store the node name for PodMonitor targets
@@ -252,7 +252,7 @@ func (st *ScraperTask) Run() (*model.ScrapeRawData, error) {
 		if len(st.MetricRelabelConfigs) > 0 {
 			logutil.Printf("DEBUG", "[DEBUG] Using %d metric relabel configs", len(st.MetricRelabelConfigs))
 			for i, config := range st.MetricRelabelConfigs {
-				logutil.Printf("DEBUG", "[DEBUG] Relabel config #%d: Action=%s, SourceLabels=%v, TargetLabel=%s, Regex=%s", 
+				logutil.Printf("DEBUG", "[DEBUG] Relabel config #%d: Action=%s, SourceLabels=%v, TargetLabel=%s, Regex=%s",
 					i+1, config.Action, config.SourceLabels, config.TargetLabel, config.Regex)
 			}
 		}

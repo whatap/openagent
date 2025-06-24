@@ -754,24 +754,24 @@ func (sm *ScraperManager) handlePodMonitorTargetWithDummyTarget(targetName strin
 			continue
 		}
 
-			// Get the port
-			port, ok := endpointMap["port"].(string)
-			if !ok {
-				logutil.Printf("INFO", "No port found in endpoint for PodMonitor target: %s", targetName)
+		// Get the port
+		port, ok := endpointMap["port"].(string)
+		if !ok {
+			logutil.Printf("INFO", "No port found in endpoint for PodMonitor target: %s", targetName)
+			continue
+		}
+
+		// Get the path
+		path, ok := endpointMap["path"].(string)
+		if !ok {
+			// Check if path is defined at the target level
+			if targetPath, ok := targetConfig["path"].(string); ok {
+				path = targetPath
+			} else {
+				logutil.Printf("INFO", "No path found in endpoint for PodMonitor target: %s", targetName)
 				continue
 			}
-
-			// Get the path
-			path, ok := endpointMap["path"].(string)
-			if !ok {
-				// Check if path is defined at the target level
-				if targetPath, ok := targetConfig["path"].(string); ok {
-					path = targetPath
-				} else {
-					logutil.Printf("INFO", "No path found in endpoint for PodMonitor target: %s", targetName)
-					continue
-				}
-			}
+		}
 
 		// Get the interval
 		endpointInterval := defaultInterval
@@ -1029,24 +1029,24 @@ func (sm *ScraperManager) handleServiceMonitorTargetWithDummyTarget(targetName s
 			continue
 		}
 
-			// Get the port
-			port, ok := endpointMap["port"].(string)
-			if !ok {
-				logutil.Printf("INFO", "No port found in endpoint for ServiceMonitor target: %s", targetName)
+		// Get the port
+		port, ok := endpointMap["port"].(string)
+		if !ok {
+			logutil.Printf("INFO", "No port found in endpoint for ServiceMonitor target: %s", targetName)
+			continue
+		}
+
+		// Get the path
+		path, ok := endpointMap["path"].(string)
+		if !ok {
+			// Check if path is defined at the target level
+			if targetPath, ok := targetConfig["path"].(string); ok {
+				path = targetPath
+			} else {
+				logutil.Printf("INFO", "No path found in endpoint for ServiceMonitor target: %s", targetName)
 				continue
 			}
-
-			// Get the path
-			path, ok := endpointMap["path"].(string)
-			if !ok {
-				// Check if path is defined at the target level
-				if targetPath, ok := targetConfig["path"].(string); ok {
-					path = targetPath
-				} else {
-					logutil.Printf("INFO", "No path found in endpoint for ServiceMonitor target: %s", targetName)
-					continue
-				}
-			}
+		}
 
 		// Get the interval
 		endpointInterval := defaultInterval
