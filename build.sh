@@ -6,7 +6,7 @@ function show_usage {
   echo "❗ 사용법: ./build.sh <VERSION> [<ARCH>] [<REGISTRY>]"
   echo "  <VERSION>: 빌드할 버전 (예: 1.0.0)"
   echo "  <ARCH>: 빌드할 아키텍처 (옵션: amd64, arm64, all) [기본값: all]"
-  echo "  <REGISTRY>: 사용할 레지스트리 (기본값: whatap)"
+  echo "  <REGISTRY>: 사용할 레지스트리 (기본값: public.ecr.aws/whatap)"
   echo "예: ./build.sh 1.0.0 arm64"
   echo "    ./build.sh 1.0.0 all docker.io/myuser"
 }
