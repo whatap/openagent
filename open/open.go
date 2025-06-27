@@ -57,6 +57,20 @@ func GetAppLogger() *logfile.FileLogger {
 func BootOpenAgent(version, commitHash string, logger *logfile.FileLogger) {
 	// Store the logger in the global variable for centralized access
 	SetAppLogger(logger)
+
+	// Display version information prominently
+	if version == "" {
+		version = "dev"
+	}
+	if commitHash == "" {
+		commitHash = "unknown"
+	}
+
+	fmt.Printf("\n🚀 WHATAP Open Agent Starting\n")
+	fmt.Printf("📦 Version: %s\n", version)
+	fmt.Printf("🔗 Build: %s\n", commitHash)
+	fmt.Printf("⏰ Started at: %s\n\n", time.Now().Format("2006-01-02 15:04:05 MST"))
+
 	GetAppLogger().Println("BootOpenAgent", fmt.Sprintf("Starting OpenAgent version=%s, commitHash=%s", version, commitHash))
 
 	// Get configuration values using the config package
