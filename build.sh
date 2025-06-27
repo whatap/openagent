@@ -19,7 +19,7 @@ fi
 
 VERSION=$1
 ARCH=${2:-all}  # Default to 'all' if not specified
-REGISTRY=${3:-whatap}  # Default registry
+REGISTRY=${3:-public.ecr.aws/whatap}  # Default registry
 
 # Set the platforms based on the architecture parameter
 case $ARCH in

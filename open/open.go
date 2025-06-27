@@ -112,9 +112,10 @@ func BootOpenAgent(version, commitHash string, logger *logfile.FileLogger) {
 	// Create and start the scraper manager with error recovery and shutdown handling
 	scraperManager := scraper.NewScraperManager(configManager, rawQueue)
 
-	// Register the scraper manager's reload handler with the config manager
-	configManager.RegisterReloadHandler(scraperManager.ReloadConfig)
-	logger.Println("BootOpenAgent", "Registered scraper manager reload handler with config manager")
+	// Note: RegisterReloadHandler removed as ConfigManager is singleton and ScraperManager
+	// already queries latest configuration on each scraping cycle via configManager.Get*() methods
+	// Configuration changes will be automatically reflected in the next scraping cycle (max 30s delay)
+	logger.Println("BootOpenAgent", "ScraperManager will automatically use latest configuration from singleton ConfigManager")
 
 	// Set up ConfigMap watcher for configuration changes in Kubernetes environments
 	k8sClient := k8s.GetInstance()
