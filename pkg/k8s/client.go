@@ -3,6 +3,7 @@ package k8s
 import (
 	"fmt"
 	"log"
+	"open-agent/tools/util/logutil"
 	"os"
 	"path/filepath"
 	"sync"
@@ -234,17 +235,37 @@ func (c *K8sClient) GetPodsInNamespace(namespace string) ([]*corev1.Pod, error) 
 // GetPodsByLabels returns pods matching the specified labels in the specified namespace
 func (c *K8sClient) GetPodsByLabels(namespace string, labelSelector map[string]string) ([]*corev1.Pod, error) {
 	if !c.IsInitialized() {
+		logutil.Printf("DEBUG", "K8s client not initialized for GetPodsByLabels")
 		return nil, nil
 	}
 
 	selector := labels.SelectorFromSet(labelSelector)
+	logutil.Printf("DEBUG", "GetPodsByLabels - namespace: %s, labelSelector: %+v, selector: %s", namespace, labelSelector, selector.String())
+
 	var pods []*corev1.Pod
+	totalPodsInStore := 0
+	podsInNamespace := 0
+
 	for _, obj := range c.podStore.List() {
 		pod := obj.(*corev1.Pod)
-		if pod.Namespace == namespace && selector.Matches(labels.Set(pod.Labels)) {
-			pods = append(pods, pod)
+		totalPodsInStore++
+
+		if pod.Namespace == namespace {
+			podsInNamespace++
+			logutil.Printf("DEBUG", "GetPodsByLabels - Checking pod %s/%s with labels: %+v", pod.Namespace, pod.Name, pod.Labels)
+
+			if selector.Matches(labels.Set(pod.Labels)) {
+				logutil.Printf("DEBUG", "GetPodsByLabels - Pod %s/%s MATCHES selector", pod.Namespace, pod.Name)
+				pods = append(pods, pod)
+			} else {
+				logutil.Printf("DEBUG", "GetPodsByLabels - Pod %s/%s does NOT match selector", pod.Namespace, pod.Name)
+			}
 		}
 	}
+
+	logutil.Printf("DEBUG", "GetPodsByLabels - Total pods in store: %d, pods in namespace %s: %d, matching pods: %d", 
+		totalPodsInStore, namespace, podsInNamespace, len(pods))
+
 	return pods, nil
 }
 
