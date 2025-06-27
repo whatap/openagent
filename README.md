@@ -121,15 +121,14 @@ features:
             interval: "15s"      # 기본값은 전역 설정, 필요시 재정의
             scheme: "http"
             timeout: "10s"
-            honorLabels: false   # 프로메테우스의 honor_labels와 유사한 기능
-            metricRelabelConfigs:  # 스크래핑 후 메트릭 재라벨링 설정
-              - source_labels: [__name__]
-                regex: "http_requests_total"
-                action: keep
-              - source_labels: [method]
-                target_label: http_method
-                replacement: "${1}"
-                action: replace
+        metricRelabelConfigs:  # 스크래핑 후 메트릭 재라벨링 설정
+          - source_labels: [__name__]
+            regex: "http_requests_total"
+            action: keep
+          - source_labels: [method]
+            target_label: http_method
+            replacement: "${1}"
+            action: replace
 
       # 2. ServiceMonitor: Service 레이블 셀렉터를 이용한 동적 디스커버리
       - targetName: my-service-metrics
@@ -145,14 +144,14 @@ features:
           - port: "http-metrics"  # Service Spec에 정의된 Port 이름 또는 실제 Target Port 번호
             path: "/actuator/prometheus"
             interval: "30s"
-            metricRelabelConfigs:
-              - source_labels: [__name__]
-                regex: "jvm_.*"
-                action: keep
-              - source_labels: [area]
-                target_label: memory_area
-                replacement: "${1}"
-                action: replace
+        metricRelabelConfigs:
+          - source_labels: [__name__]
+            regex: "jvm_.*"
+            action: keep
+          - source_labels: [area]
+            target_label: memory_area
+            replacement: "${1}"
+            action: replace
 
       # 3. StaticEndpoints: 고정된 IP 주소와 포트를 직접 입력
       - targetName: my-external-db-metrics
@@ -220,8 +219,62 @@ features:
   - `interval`: 스크래핑 간격 (기본값은 globalInterval, 필요시 재정의)
   - `scheme`: 스크래핑 프로토콜 (http 또는 https, 기본값 http)
   - `timeout`: 스크래핑 타임아웃
-  - `honorLabels`: 대상에서 제공하는 레이블을 우선시할지 여부
+  - `addNodeLabel`: PodMonitor 타입에서 노드 라벨 추가 여부 (기본값: false)
   - `metricRelabelConfigs`: 스크래핑 후 메트릭 재라벨링 설정 (프로메테우스의 metric_relabel_configs와 유사)
+
+#### PodMonitor의 addNodeLabel 기능
+
+PodMonitor 타입에서는 `addNodeLabel` 옵션을 사용하여 대상 파드가 스케줄링된 노드의 이름을 메트릭에 라벨로 추가할 수 있습니다.
+
+- **설정 위치**: 타겟 레벨 또는 엔드포인트 레벨에서 설정 가능
+- **기본값**: `false`
+- **동작**: `true`로 설정하면 모든 메트릭에 `node` 라벨이 추가되며, 값은 파드가 실행 중인 노드의 이름입니다
+- **우선순위**: 엔드포인트 레벨 설정이 타겟 레벨 설정을 재정의합니다
+
+**사용 예제:**
+
+```yaml
+# 타겟 레벨에서 addNodeLabel 설정
+- targetName: node-exporter
+  type: PodMonitor
+  addNodeLabel: true  # 이 타겟의 모든 엔드포인트에 노드 라벨 추가
+  namespaceSelector:
+    matchNames:
+      - "monitoring"
+  selector:
+    matchLabels:
+      app: node-exporter
+  endpoints:
+    - port: "metrics"
+      path: "/metrics"
+      interval: "30s"
+  metricRelabelConfigs:
+    # 노드 라벨을 사용한 재라벨링 예제
+    - source_labels: [node]
+      target_label: kubernetes_node
+      action: replace
+
+# 엔드포인트 레벨에서 addNodeLabel 설정
+- targetName: dcgm-exporter
+  type: PodMonitor
+  namespaceSelector:
+    matchNames:
+      - "kube-system"
+  selector:
+    matchLabels:
+      app: dcgm-exporter
+  endpoints:
+    - port: "metrics"
+      path: "/metrics"
+      interval: "30s"
+      addNodeLabel: true  # 이 엔드포인트에만 노드 라벨 추가
+  metricRelabelConfigs:
+    - source_labels: [node]
+      target_label: gpu_node
+      action: replace
+```
+
+이 기능은 특히 DaemonSet으로 배포된 파드들의 메트릭을 수집할 때 유용합니다. 각 노드별로 메트릭을 구분하여 분석하거나, 특정 노드의 메트릭만 필터링할 때 활용할 수 있습니다.
 
 #### StaticEndpoints 설정 요소
 
@@ -297,14 +350,14 @@ endpoints:
       scheme: "https"  # 명시적으로 HTTPS 지정 (선택사항)
       tlsConfig:
         insecureSkipVerify: true  # 인증서 검증 건너뛰기
-      metricRelabelConfigs:
-        - source_labels: [__name__]
-          regex: "apiserver_request_total"
-          action: keep
-        - source_labels: [verb]
-          target_label: http_verb
-          replacement: "${1}"
-          action: replace
+  metricRelabelConfigs:
+    - source_labels: [__name__]
+      regex: "apiserver_request_total"
+      action: keep
+    - source_labels: [verb]
+      target_label: http_verb
+      replacement: "${1}"
+      action: replace
 ```
 
 #### 2. StaticEndpoints에서 TLS 설정 예제
@@ -556,18 +609,18 @@ features:
           - port: "https"
             path: "/metrics"
             interval: "30s"
-            metricRelabelConfigs:
-              - source_labels: [__name__]
-                regex: "apiserver_request_total"
-                action: keep
-              - source_labels: [verb]
-                target_label: http_verb
-                replacement: "${1}"
-                action: replace
-              # 정적 레이블 추가
-              - target_label: metric_src
-                replacement: "whatap-open-agent"
-                action: replace
+        metricRelabelConfigs:
+          - source_labels: [__name__]
+            regex: "apiserver_request_total"
+            action: keep
+          - source_labels: [verb]
+            target_label: http_verb
+            replacement: "${1}"
+            action: replace
+          # 정적 레이블 추가
+          - target_label: metric_src
+            replacement: "whatap-open-agent"
+            action: replace
 ```
 
 

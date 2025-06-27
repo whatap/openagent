@@ -1,35 +1,31 @@
 package scraper
 
 import (
-	"fmt"
+	"context"
 	"strings"
 	"sync"
 	"time"
 
 	"open-agent/pkg/client"
 	"open-agent/pkg/config"
+	"open-agent/pkg/discovery"
 	"open-agent/pkg/k8s"
 	"open-agent/pkg/model"
 	"open-agent/tools/util/logutil"
 )
 
 // ScraperManager is responsible for managing scraper tasks
-//
-// Scheme Determination Logic:
-// 1. For PodMonitor and ServiceMonitor targets:
-//   - If port name is "https", default to HTTPS
-//   - Otherwise, default to HTTP
-//
-// 2. For StaticEndpoints targets:
-//   - If TLS config is present, default to HTTPS
-//   - Otherwise, default to HTTP
-//
-// 3. In all cases, explicit scheme configuration in the endpoint or target overrides the default
+// It now uses ServiceDiscovery for target discovery and focuses only on scraping logic
 type ScraperManager struct {
-	configManager *config.ConfigManager
-	rawQueue      chan *model.ScrapeRawData
-	scrapers      map[string]chan struct{}
-	scrapersMutex sync.Mutex
+	configManager   *config.ConfigManager
+	discovery       discovery.ServiceDiscovery
+	rawQueue        chan *model.ScrapeRawData
+	ctx             context.Context
+	cancel          context.CancelFunc
+
+	// Track last scrape times to avoid over-scraping
+	lastScrapeTime  map[string]time.Time
+	lastScrapeMutex sync.RWMutex
 }
 
 // matchNamespaceSelector checks if a namespace matches the namespace selector
@@ -378,10 +374,14 @@ func (sm *ScraperManager) matchPodSelector(podLabels map[string]string, podSelec
 
 // NewScraperManager creates a new ScraperManager instance
 func NewScraperManager(configManager *config.ConfigManager, rawQueue chan *model.ScrapeRawData) *ScraperManager {
+	// Create service discovery
+	kubernetesDiscovery := discovery.NewKubernetesDiscovery(configManager)
+
 	sm := &ScraperManager{
-		configManager: configManager,
-		rawQueue:      rawQueue,
-		scrapers:      make(map[string]chan struct{}),
+		configManager:  configManager,
+		discovery:      kubernetesDiscovery,
+		rawQueue:       rawQueue,
+		lastScrapeTime: make(map[string]time.Time),
 	}
 
 	return sm
@@ -390,27 +390,19 @@ func NewScraperManager(configManager *config.ConfigManager, rawQueue chan *model
 // ReloadConfig reloads the configuration and restarts scraping
 func (sm *ScraperManager) ReloadConfig() {
 	logutil.Println("INFO", "Reloading scraper configuration...")
-	// Stop all existing scrapers before starting new ones
-	sm.StopAllScrapers()
-	// Start new scrapers with the updated configuration
+	// Stop the current scraping process
+	sm.Stop()
+	// Start new scraping with the updated configuration
 	sm.StartScraping()
 }
 
-// StartScraping starts the scraping process
+// StartScraping starts the scraping process using ServiceDiscovery
 func (sm *ScraperManager) StartScraping() {
 	// Get the configuration
 	cm := sm.configManager.GetConfig()
 	if cm == nil {
 		logutil.Println("INFO", "No configuration loaded.")
 		return
-	}
-
-	// Get the scrape interval
-	scrapeIntervalStr := sm.configManager.GetScrapeInterval()
-	scrapeIntervalSeconds, err := sm.configManager.ParseInterval(scrapeIntervalStr)
-	if err != nil {
-		logutil.Printf("WARN", "Error parsing scrape interval: %v. Using default of 15 seconds.", err)
-		scrapeIntervalSeconds = 15
 	}
 
 	// Get the scrape configs
@@ -420,45 +412,307 @@ func (sm *ScraperManager) StartScraping() {
 		return
 	}
 
-	// Schedule scraper tasks for each scrape config
-	for _, scrapeConfig := range scrapeConfigs {
-		// Check if this is a new format target with a type field
-		if targetType, ok := scrapeConfig["type"].(string); ok {
-			// Get the target name
-			targetName, ok := scrapeConfig["targetName"].(string)
-			if !ok {
-				logutil.Println("INFO", "Skipping target with no targetName.")
-				continue
-			}
+	// Load targets into service discovery
+	if err := sm.discovery.LoadTargets(scrapeConfigs); err != nil {
+		logutil.Printf("ERROR", "Failed to load targets into service discovery: %v", err)
+		return
+	}
 
-			// Check if the target is enabled (default to true if not specified)
-			enabled := true
-			if enabledVal, ok := scrapeConfig["enabled"].(bool); ok {
-				enabled = enabledVal
-			}
+	// Create context for the scraping process
+	sm.ctx, sm.cancel = context.WithCancel(context.Background())
 
-			// Skip disabled targets
-			if !enabled {
-				logutil.Printf("INFO", "Skipping disabled target: %s", targetName)
-				continue
-			}
+	// Start service discovery
+	if err := sm.discovery.Start(sm.ctx); err != nil {
+		logutil.Printf("ERROR", "Failed to start service discovery: %v", err)
+		return
+	}
 
-			// Handle the target based on its type
-			switch targetType {
-			case "PodMonitor": // Support both new and old names
-				sm.handlePodMonitorTarget(targetName, scrapeConfig, time.Duration(scrapeIntervalSeconds)*time.Second)
-			case "ServiceMonitor": // Support both new and old names
-				sm.handleServiceMonitorTarget(targetName, scrapeConfig, time.Duration(scrapeIntervalSeconds)*time.Second)
-			case "StaticEndpoints":
-				sm.handleStaticEndpointsTarget(targetName, scrapeConfig, time.Duration(scrapeIntervalSeconds)*time.Second)
-			default:
-				logutil.Printf("WARN", "Unknown target type: %s for target: %s", targetType, targetName)
+	// Start simple polling loop
+	go sm.scrapingLoop()
+
+	logutil.Println("INFO", "Scraping started with polling-based service discovery")
+}
+
+// scrapingLoop runs the periodic scraping process
+func (sm *ScraperManager) scrapingLoop() {
+	// Get configurable scraping interval
+	scrapingIntervalStr := sm.configManager.GetScrapingInterval()
+	scrapingIntervalSeconds, err := sm.configManager.ParseInterval(scrapingIntervalStr)
+	if err != nil {
+		logutil.Printf("WARN", "Error parsing scraping interval: %v. Using default of 30 seconds.", err)
+		scrapingIntervalSeconds = 30
+	}
+	scrapingInterval := time.Duration(scrapingIntervalSeconds) * time.Second
+
+	logutil.Printf("INFO", "Starting scraping loop with interval: %v", scrapingInterval)
+	ticker := time.NewTicker(scrapingInterval)
+	defer ticker.Stop()
+
+	// Counter for periodic cleanup
+	cleanupCounter := 0
+	const cleanupInterval = 10 // Cleanup every 10 iterations
+
+	for {
+		select {
+		case <-ticker.C:
+			sm.performScraping()
+
+			// Periodic cleanup to prevent memory leaks
+			cleanupCounter++
+			if cleanupCounter >= cleanupInterval {
+				sm.cleanupOldTargets()
+				cleanupCounter = 0
 			}
-		} else {
-			logutil.Println("INFO", "Skipping scrape config with no target type.")
-			continue
+		case <-sm.ctx.Done():
+			return
 		}
 	}
+}
+
+// performScraping performs batch scraping of all ready targets
+func (sm *ScraperManager) performScraping() {
+	// Get ready targets from discovery
+	targets := sm.discovery.GetReadyTargets()
+
+	if len(targets) == 0 {
+		logutil.Printf("DEBUG", "No ready targets found for scraping")
+		return
+	}
+
+	// Calculate dynamic concurrency
+	maxConcurrency := sm.configManager.GetMaxConcurrency()
+	if maxConcurrency <= 0 {
+		// Dynamic concurrency: use target count but with reasonable limits
+		maxConcurrency = len(targets)
+		if maxConcurrency > 50 { // Cap at 50 to prevent resource exhaustion
+			maxConcurrency = 50
+		} else if maxConcurrency < 1 {
+			maxConcurrency = 1
+		}
+	}
+
+	logutil.Printf("DEBUG", "Scraping %d targets with max concurrency: %d", len(targets), maxConcurrency)
+
+	// Parallel scraping with semaphore to limit concurrency
+	var wg sync.WaitGroup
+	semaphore := make(chan struct{}, maxConcurrency)
+
+	for _, target := range targets {
+		wg.Add(1)
+		go func(t *discovery.Target) {
+			defer wg.Done()
+			semaphore <- struct{}{}        // Acquire semaphore
+			defer func() { <-semaphore }() // Release semaphore
+
+			sm.scrapeTarget(t)
+		}(target)
+	}
+
+	// Wait for all scraping to complete
+	wg.Wait()
+
+	logutil.Printf("INFO", "Completed scraping %d targets", len(targets))
+}
+
+// scrapeTarget performs scraping for a single target with interval checking
+func (sm *ScraperManager) scrapeTarget(target *discovery.Target) {
+	// Add panic recovery to prevent individual target failures from crashing the scraper
+	defer func() {
+		if r := recover(); r != nil {
+			logutil.Printf("ERROR", "Panic recovered while scraping target %s: %v", target.ID, r)
+		}
+	}()
+
+	// Get target-specific interval
+	interval := sm.getTargetInterval(target)
+
+	// Check if we should skip scraping based on last scrape time
+	if sm.shouldSkipScraping(target, interval) {
+		logutil.Printf("DEBUG", "Skipping target %s - not enough time since last scrape", target.ID)
+		return
+	}
+
+	// Create scraper task from target
+	scraperTask := sm.createScraperTaskFromTarget(target)
+	if scraperTask == nil {
+		logutil.Printf("ERROR", "Failed to create scraper task for target: %s", target.ID)
+		return
+	}
+
+	// Run the scraper task with error handling
+	if err := sm.runScraperTaskWithError(scraperTask); err != nil {
+		logutil.Printf("ERROR", "Failed to scrape target %s: %v", target.ID, err)
+		// Still update last scrape time to avoid immediate retry
+		sm.updateLastScrapingTime(target)
+		return
+	}
+
+	// Update last scrape time on success
+	sm.updateLastScrapingTime(target)
+	logutil.Printf("DEBUG", "Successfully scraped target: %s", target.ID)
+}
+
+// getTargetInterval gets the scraping interval for a target
+func (sm *ScraperManager) getTargetInterval(target *discovery.Target) time.Duration {
+	// Check for endpoint-specific interval first (highest priority)
+	if endpoint, ok := target.Metadata["endpoint"].(discovery.EndpointConfig); ok {
+		if endpoint.Interval != "" {
+			if intervalSeconds, err := sm.configManager.ParseInterval(endpoint.Interval); err == nil {
+				return time.Duration(intervalSeconds) * time.Second
+			} else {
+				logutil.Printf("WARN", "Error parsing endpoint interval '%s' for target %s: %v. Using globalInterval fallback.", 
+					endpoint.Interval, target.ID, err)
+			}
+		}
+	}
+
+	// Fallback to globalInterval
+	globalIntervalStr := sm.configManager.GetGlobalInterval()
+	if globalIntervalSeconds, err := sm.configManager.ParseInterval(globalIntervalStr); err == nil {
+		return time.Duration(globalIntervalSeconds) * time.Second
+	} else {
+		logutil.Printf("WARN", "Error parsing globalInterval: %v. Using default of 60 seconds.", err)
+		return 60 * time.Second
+	}
+}
+
+// shouldSkipScraping checks if scraping should be skipped based on last scrape time
+func (sm *ScraperManager) shouldSkipScraping(target *discovery.Target, interval time.Duration) bool {
+	sm.lastScrapeMutex.RLock()
+	lastScrape, exists := sm.lastScrapeTime[target.ID]
+	sm.lastScrapeMutex.RUnlock()
+
+	if !exists {
+		return false // First time scraping this target
+	}
+
+	// Skip if not enough time has passed since last scrape
+	return time.Since(lastScrape) < interval
+}
+
+// updateLastScrapingTime updates the last scraping time for a target
+func (sm *ScraperManager) updateLastScrapingTime(target *discovery.Target) {
+	sm.lastScrapeMutex.Lock()
+	sm.lastScrapeTime[target.ID] = time.Now()
+	sm.lastScrapeMutex.Unlock()
+}
+
+// cleanupOldTargets removes old entries from lastScrapeTime to prevent memory leaks
+func (sm *ScraperManager) cleanupOldTargets() {
+	sm.lastScrapeMutex.Lock()
+	defer sm.lastScrapeMutex.Unlock()
+
+	// Get current ready targets to keep
+	currentTargets := sm.discovery.GetReadyTargets()
+	currentTargetIDs := make(map[string]bool)
+	for _, target := range currentTargets {
+		currentTargetIDs[target.ID] = true
+	}
+
+	// Remove entries that are not in current targets and are older than 1 hour
+	cutoff := time.Now().Add(-1 * time.Hour)
+	removedCount := 0
+
+	for targetID, lastScrape := range sm.lastScrapeTime {
+		// Remove if target is not current and last scrape was more than 1 hour ago
+		if !currentTargetIDs[targetID] && lastScrape.Before(cutoff) {
+			delete(sm.lastScrapeTime, targetID)
+			removedCount++
+		}
+	}
+
+	if removedCount > 0 {
+		logutil.Printf("DEBUG", "Cleaned up %d old target entries from memory", removedCount)
+	}
+}
+
+
+// createScraperTaskFromTarget creates a ScraperTask from a discovery Target
+func (sm *ScraperManager) createScraperTaskFromTarget(target *discovery.Target) *ScraperTask {
+	// Extract metadata
+	targetName, _ := target.Metadata["targetName"].(string)
+	targetType, _ := target.Metadata["type"].(string)
+	endpoint, _ := target.Metadata["endpoint"].(discovery.EndpointConfig)
+	metricRelabelConfigs, _ := target.Metadata["metricRelabelConfigs"].([]interface{})
+	addNodeLabel, _ := target.Metadata["addNodeLabel"].(bool)
+
+	// Parse metric relabel configs
+	var relabelConfigs model.RelabelConfigs
+	if metricRelabelConfigs != nil {
+		relabelConfigs = model.ParseRelabelConfigs(metricRelabelConfigs)
+	}
+
+	// Create TLS config if present
+	var tlsConfig *client.TLSConfig
+	if endpoint.TLSConfig != nil {
+		tlsConfig = &client.TLSConfig{}
+		if insecureSkipVerify, ok := endpoint.TLSConfig["insecureSkipVerify"].(bool); ok {
+			tlsConfig.InsecureSkipVerify = insecureSkipVerify
+		}
+	}
+
+	// Create scraper task based on target type
+	switch targetType {
+	case "PodMonitor":
+		return NewPodMonitorScraperTask(
+			targetName,
+			target.Labels["namespace"],
+			target.Labels,
+			endpoint.Port,
+			extractPathFromURL(target.URL),
+			extractSchemeFromURL(target.URL),
+			relabelConfigs,
+			tlsConfig,
+			addNodeLabel,
+		)
+	case "ServiceMonitor":
+		return NewServiceMonitorScraperTask(
+			targetName,
+			target.Labels["namespace"],
+			target.Labels,
+			endpoint.Port,
+			extractPathFromURL(target.URL),
+			extractSchemeFromURL(target.URL),
+			relabelConfigs,
+			tlsConfig,
+		)
+	case "StaticEndpoints":
+		return NewStaticEndpointsScraperTask(
+			targetName,
+			target.URL,
+			extractPathFromURL(target.URL),
+			extractSchemeFromURL(target.URL),
+			relabelConfigs,
+			tlsConfig,
+		)
+	default:
+		logutil.Printf("WARN", "Unknown target type: %s", targetType)
+		return nil
+	}
+}
+
+// Helper functions to extract URL components
+func extractSchemeFromURL(url string) string {
+	if strings.HasPrefix(url, "https://") {
+		return "https"
+	}
+	return "http"
+}
+
+func extractPathFromURL(url string) string {
+	// Simple path extraction - find the path after the port
+	parts := strings.Split(url, "://")
+	if len(parts) < 2 {
+		return "/metrics"
+	}
+
+	hostPort := parts[1]
+	pathIndex := strings.Index(hostPort, "/")
+	if pathIndex == -1 {
+		return "/metrics"
+	}
+
+	return hostPort[pathIndex:]
 }
 
 // runScraperTask runs a scraper task and adds the result to the raw queue
@@ -473,75 +727,45 @@ func (sm *ScraperManager) runScraperTask(scraperTask *ScraperTask) {
 	sm.rawQueue <- rawData
 }
 
-// scheduleScraperTask schedules a scraper task to run at regular intervals
-func (sm *ScraperManager) scheduleScraperTask(scraperTask *ScraperTask, interval time.Duration) {
-	// Create a unique key for this scraper based on its type and relevant fields
-	var scraperKey string
-	switch scraperTask.TargetType {
-	case DirectURLType, StaticEndpointsType:
-		// For direct URL and static endpoints, use TargetName, TargetType, and TargetURL
-		scraperKey = fmt.Sprintf("%s-%s-%s", scraperTask.TargetName, scraperTask.TargetType, scraperTask.TargetURL)
-	case PodMonitorType, ServiceMonitorType:
-		// For pod and service monitors, use TargetName, TargetType, Namespace, and Port
-		scraperKey = fmt.Sprintf("%s-%s-%s-%s", scraperTask.TargetName, scraperTask.TargetType, scraperTask.Namespace, scraperTask.Port)
-	default:
-		// Fallback to a simple key
-		scraperKey = fmt.Sprintf("%s-%s", scraperTask.TargetName, scraperTask.TargetType)
+// runScraperTaskWithError runs a scraper task and returns any error
+func (sm *ScraperManager) runScraperTaskWithError(scraperTask *ScraperTask) error {
+	rawData, err := scraperTask.Run()
+	if err != nil {
+		return err
 	}
 
-	// Create a stop channel for this scraper
-	stopCh := make(chan struct{})
-
-	// Register the scraper in the map
-	sm.scrapersMutex.Lock()
-	// If there's already a scraper with this key, stop it first
-	if existingStopCh, exists := sm.scrapers[scraperKey]; exists {
-		logutil.Printf("INFO", "Replacing existing scraper: %s", scraperKey)
-		close(existingStopCh)
-	}
-	sm.scrapers[scraperKey] = stopCh
-	sm.scrapersMutex.Unlock()
-
-	// Start the scraper in a goroutine
-	go func() {
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-
-		// Run the scraper task immediately
-		sm.runScraperTask(scraperTask)
-
-		// Run the scraper task at regular intervals or until stopped
-		for {
-			select {
-			case <-ticker.C:
-				sm.runScraperTask(scraperTask)
-			case <-stopCh:
-				logutil.Printf("INFO", "Stopping scraper task: %s", scraperKey)
-				return
-			}
-		}
-	}()
+	// Add the raw data to the queue
+	sm.rawQueue <- rawData
+	return nil
 }
+
 
 // AddRawData adds raw data to the queue
 func (sm *ScraperManager) AddRawData(data *model.ScrapeRawData) {
 	sm.rawQueue <- data
 }
 
-// StopAllScrapers stops all running scrapers
-func (sm *ScraperManager) StopAllScrapers() {
-	sm.scrapersMutex.Lock()
-	defer sm.scrapersMutex.Unlock()
+// Stop stops the ScraperManager and all its components
+func (sm *ScraperManager) Stop() {
+	logutil.Println("INFO", "Stopping ScraperManager...")
 
-	logutil.Println("INFO", "Stopping all scrapers...")
-	for key, stopCh := range sm.scrapers {
-		logutil.Printf("INFO", "Stopping scraper: %s", key)
-		close(stopCh)
-		delete(sm.scrapers, key)
+	// Cancel context (this will stop the scraping loop)
+	if sm.cancel != nil {
+		sm.cancel()
 	}
-	logutil.Println("INFO", "All scrapers stopped")
+
+	// Stop service discovery
+	if sm.discovery != nil {
+		if err := sm.discovery.Stop(); err != nil {
+			logutil.Printf("ERROR", "Error stopping service discovery: %v", err)
+		}
+	}
+
+	logutil.Println("INFO", "ScraperManager stopped")
 }
 
+// Legacy methods - commented out as they're replaced by ServiceDiscovery
+/*
 // handlePodMonitorTarget handles a PodMonitor target
 func (sm *ScraperManager) handlePodMonitorTarget(targetName string, targetConfig map[string]interface{}, defaultInterval time.Duration) {
 	logutil.Printf("INFO", "Processing PodMonitor target: %s", targetName)
@@ -1198,3 +1422,4 @@ func (sm *ScraperManager) handleStaticEndpointsTarget(targetName string, targetC
 		go sm.scheduleScraperTask(scraperTask, interval)
 	}
 }
+*/

@@ -263,6 +263,49 @@ func (cm *ConfigManager) Close() {
 	}
 }
 
+// GetGlobalInterval returns the globalInterval from openAgent configuration
+func (cm *ConfigManager) GetGlobalInterval() string {
+	if cm.config != nil {
+		if features, ok := cm.config["features"].(map[interface{}]interface{}); ok {
+			if openAgent, ok := features["openAgent"].(map[interface{}]interface{}); ok {
+				if globalInterval, ok := openAgent["globalInterval"].(string); ok {
+					return globalInterval
+				}
+			}
+		}
+	}
+	return "60s" // Default to 60 seconds as per config example
+}
+
+// GetScrapingInterval returns the scraping loop interval from openAgent configuration
+func (cm *ConfigManager) GetScrapingInterval() string {
+	if cm.config != nil {
+		if features, ok := cm.config["features"].(map[interface{}]interface{}); ok {
+			if openAgent, ok := features["openAgent"].(map[interface{}]interface{}); ok {
+				if scrapingInterval, ok := openAgent["scrapingInterval"].(string); ok {
+					return scrapingInterval
+				}
+			}
+		}
+	}
+	// Default to globalInterval if scrapingInterval is not set
+	return cm.GetGlobalInterval()
+}
+
+// GetMaxConcurrency returns the maximum concurrent scrapers from openAgent configuration
+func (cm *ConfigManager) GetMaxConcurrency() int {
+	if cm.config != nil {
+		if features, ok := cm.config["features"].(map[interface{}]interface{}); ok {
+			if openAgent, ok := features["openAgent"].(map[interface{}]interface{}); ok {
+				if maxConcurrency, ok := openAgent["maxConcurrency"].(int); ok {
+					return maxConcurrency
+				}
+			}
+		}
+	}
+	return 0 // 0 means dynamic based on target count
+}
+
 // ParseInterval parses an interval string (e.g., "15s", "1m") to seconds
 func (cm *ConfigManager) ParseInterval(intervalStr string) (int64, error) {
 	if intervalStr == "" {

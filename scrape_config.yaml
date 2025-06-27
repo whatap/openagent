@@ -63,23 +63,23 @@ features:
             # - source_labels: [node]
             #   target_label: kubernetes_node
             #   action: replace
-            metricRelabelConfigs:
-              # Keep only metrics with name matching "apiserver_request_total"
-              - source_labels: [__name__]
-                regex: "apiserver_request_total"
-                action: keep
-              # Create a new label "http_verb" with the value of the "verb" label
-              - source_labels: [verb]
-                target_label: http_verb
-                replacement: "${1}"
-                action: replace
-              # Add a static label "metric_src" with the value "whatap-open-agent"
-              - target_label: metric_src
-                replacement: "whatap-open-agent"
-                action: replace
-              - source_labels: [ __name__ ]
-                regex: "apiserver_request_total"
-                action: keep
+        metricRelabelConfigs:
+          # Keep only metrics with name matching "apiserver_request_total"
+          - source_labels: [__name__]
+            regex: "apiserver_request_total"
+            action: keep
+          # Create a new label "http_verb" with the value of the "verb" label
+          - source_labels: [verb]
+            target_label: http_verb
+            replacement: "${1}"
+            action: replace
+          # Add a static label "metric_src" with the value "whatap-open-agent"
+          - target_label: metric_src
+            replacement: "whatap-open-agent"
+            action: replace
+          - source_labels: [ __name__ ]
+            regex: "apiserver_request_total"
+            action: keep
 
       # 3. PodMonitor: Example for DaemonSet like dcgm-exporter with node label
       - targetName: dcgm-exporter
@@ -98,11 +98,11 @@ features:
             interval: "30s"
             # You can also set addNodeLabel at the endpoint level to override the target level
             # addNodeLabel: false
-            metricRelabelConfigs:
-              # Use the node label in relabeling
-              - source_labels: [node]
-                target_label: kubernetes_node
-                action: replace
+        metricRelabelConfigs:
+          # Use the node label in relabeling
+          - source_labels: [node]
+            target_label: kubernetes_node
+            action: replace
 
       # 4. Example of a disabled target (will be skipped during scraping)
       - targetName: disabled-example
