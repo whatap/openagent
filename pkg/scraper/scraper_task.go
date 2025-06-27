@@ -109,12 +109,10 @@ func (st *ScraperTask) ResolveEndpoint() (string, error) {
 		return st.TargetURL, nil
 	}
 
-	// If it's a static endpoint, just return the target URL with the path
+	// If it's a static endpoint, just return the target URL as-is
+	// ServiceDiscovery already provides a complete URL (e.g., http://10.21.130.48:9400/metrics)
 	if st.TargetType == StaticEndpointsType {
-		if st.Path != "" && !strings.HasPrefix(st.Path, "/") {
-			return fmt.Sprintf("%s/%s", st.TargetURL, st.Path), nil
-		}
-		return fmt.Sprintf("%s%s", st.TargetURL, st.Path), nil
+		return st.TargetURL, nil
 	}
 
 	// For PodMonitor and ServiceMonitor, we need to resolve the endpoint dynamically
