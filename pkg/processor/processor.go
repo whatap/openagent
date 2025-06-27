@@ -56,10 +56,10 @@ func (p *Processor) processRawData(rawData *model.ScrapeRawData) {
 		converter.ApplyRelabelConfigs(conversionResult.GetOpenMxList(), rawData.MetricRelabelConfigs)
 	}
 
-	// Filter out metrics with NaN values
+	// Filter out metrics with NaN and infinite values
 	filteredOpenMxList := make([]*model.OpenMx, 0, len(conversionResult.GetOpenMxList()))
 	for _, openMx := range conversionResult.GetOpenMxList() {
-		if !math.IsNaN(openMx.Value) {
+		if !math.IsNaN(openMx.Value) && !math.IsInf(openMx.Value, 0) {
 			// Add instance label to each valid OpenMx
 			openMx.AddLabel("instance", rawData.TargetURL)
 
@@ -95,6 +95,11 @@ func (p *Processor) processRawData(rawData *model.ScrapeRawData) {
 			// Skip metrics with NaN values
 			if math.IsNaN(openMx.Value) {
 				logutil.Printf("DEBUG", "[%d] Skipped (NaN value)\n", i)
+				continue
+			}
+			// Skip metrics with infinite values
+			if math.IsInf(openMx.Value, 0) {
+				logutil.Printf("DEBUG", "[%d] Skipped (infinite value: %v)\n", i, openMx.Value)
 				continue
 			}
 
