@@ -220,9 +220,7 @@ func (kd *KubernetesDiscovery) processPodTarget(pod *corev1.Pod, config Discover
 			ID:  targetID,
 			URL: url,
 			Labels: map[string]string{
-				"job":       config.TargetName,
-				"namespace": pod.Namespace,
-				"pod":       pod.Name,
+				"job": config.TargetName,
 			},
 			Metadata: map[string]interface{}{
 				"targetName":           config.TargetName,
@@ -492,7 +490,6 @@ func (kd *KubernetesDiscovery) processServiceTarget(service *corev1.Service, con
 							"type":                 config.Type,
 							"endpoint":             endpointConfig,
 							"metricRelabelConfigs": endpointConfig.MetricRelabelConfigs,
-							"service":              service,
 						},
 						State:    TargetStateReady, // Service endpoints are ready if they're in the addresses list
 						LastSeen: time.Now(),
@@ -518,17 +515,13 @@ func (kd *KubernetesDiscovery) processServiceTarget(service *corev1.Service, con
 						ID:  targetID,
 						URL: url,
 						Labels: map[string]string{
-							"job":       config.TargetName,
-							"namespace": service.Namespace,
-							"service":   service.Name,
-							"instance":  fmt.Sprintf("%s:%d", address.IP, endpointPort),
+							"job": config.TargetName,
 						},
 						Metadata: map[string]interface{}{
 							"targetName":           config.TargetName,
 							"type":                 config.Type,
 							"endpoint":             endpointConfig,
 							"metricRelabelConfigs": endpointConfig.MetricRelabelConfigs,
-							"service":              service,
 						},
 						State:    TargetStatePending, // Not ready endpoints are pending
 						LastSeen: time.Now(),
