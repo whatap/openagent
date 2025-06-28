@@ -66,12 +66,10 @@ func BootOpenAgent(version, commitHash string, logger *logfile.FileLogger) {
 		commitHash = "unknown"
 	}
 
-	fmt.Printf("\nWHATAP Open Agent Starting\n")
-	fmt.Printf(" Version: %s\n", version)
-	fmt.Printf(" Build: %s\n", commitHash)
-	fmt.Printf(" Started at: %s\n\n", time.Now().Format("2006-01-02 15:04:05 MST"))
-
-	GetAppLogger().Println("BootOpenAgent", fmt.Sprintf("Starting OpenAgent version=%s, commitHash=%s", version, commitHash))
+	logger.Infof("\nWHATAP Open Agent Starting\n")
+	logger.Infof(" Version: %s\n", version)
+	logger.Infof(" Build: %s\n", commitHash)
+	logger.Infof(" Started at: %s\n\n", time.Now().Format("2006-01-02 15:04:05 MST"))
 
 	// Get configuration values using the config package
 	servers := make([]string, 0)
@@ -79,10 +77,10 @@ func BootOpenAgent(version, commitHash string, logger *logfile.FileLogger) {
 	hosts := config.Get("WHATAP_HOST")
 	port := config.GetIntWithDefault("WHATAP_PORT", 6600)
 	if license == "" || hosts == "" {
-		fmt.Println("Please set the following configuration values:")
-		fmt.Println("WHATAP_LICENSE - The license key for the WHATAP server")
-		fmt.Println("WHATAP_HOST - The hostname or IP address of the WHATAP server")
-		fmt.Println("WHATAP_PORT - The port number of the WHATAP server (default: 6600)")
+		logger.Println("Please set the following configuration values:")
+		logger.Println("WHATAP_LICENSE - The license key for the WHATAP server")
+		logger.Println("WHATAP_HOST - The hostname or IP address of the WHATAP server")
+		logger.Println("WHATAP_PORT - The port number of the WHATAP server (default: 6600)")
 		os.Exit(1)
 	}
 
@@ -98,7 +96,7 @@ func BootOpenAgent(version, commitHash string, logger *logfile.FileLogger) {
 	// Check if debug mode is enabled
 	debugMode := os.Getenv("debug")
 	if debugMode == "true" {
-		GetAppLogger().Println("BootOpenAgent", "Debug mode enabled, running process method")
+		logger.Infoln("BootOpenAgent-Debug mode enabled, running process method")
 		// Initialize random number generator
 		rand.Seed(time.Now().UnixNano())
 		// Run the process method in a loop
@@ -109,7 +107,7 @@ func BootOpenAgent(version, commitHash string, logger *logfile.FileLogger) {
 		// The code below will not be executed in debug mode
 	}
 
-	fmt.Println("BootOpenAgent", "Debug mode disabled, starting agent")
+	logger.Infoln("BootOpenAgent-Debug mode disabled, starting agent")
 	// Create channels for communication between components
 	rawQueue := make(chan *model.ScrapeRawData, RawQueueSize)
 	processedQueue := make(chan *model.ConversionResult, ProcessedQueueSize)
@@ -118,7 +116,7 @@ func BootOpenAgent(version, commitHash string, logger *logfile.FileLogger) {
 	configManager := config.NewConfigManager()
 	// Check if configManager is nil (which happens if the configuration file is missing)
 	if configManager == nil {
-		logger.Println("BootOpenAgent", "Failed to create configuration manager. Please ensure scrape_config.yaml exists.")
+		logger.Infoln("BootOpenAgent - Failed to create configuration manager. Please ensure scrape_config.yaml exists.")
 		return
 	}
 
@@ -147,9 +145,9 @@ func BootOpenAgent(version, commitHash string, logger *logfile.FileLogger) {
 				return
 			}
 
-			logger.Println("ServiceDiscovery", "Service discovery started successfully")
+			logger.Infoln("ServiceDiscovery", "Service discovery started successfully")
 		} else {
-			logger.Println("ServiceDiscovery", "No scrape configs found, service discovery not started")
+			logger.Infoln("ServiceDiscovery", "No scrape configs found, service discovery not started")
 		}
 	}()
 
@@ -157,20 +155,20 @@ func BootOpenAgent(version, commitHash string, logger *logfile.FileLogger) {
 	scraperManager := scraper.NewScraperManager(configManager, serviceDiscovery, rawQueue)
 
 	// Configuration changes will be automatically reflected in the next scraping cycle
-	logger.Println("BootOpenAgent", "ScraperManager will automatically use latest configuration")
+	logger.Infoln("BootOpenAgent", "ScraperManager will automatically use latest configuration")
 
 	// ConfigManager automatically handles ConfigMap synchronization
 	k8sClient := k8s.GetInstance()
 	if k8sClient.IsInitialized() {
-		logger.Println("BootOpenAgent", "Kubernetes environment detected - ConfigManager handles ConfigMap synchronization")
+		logger.Infoln("BootOpenAgent", "Kubernetes environment detected - ConfigManager handles ConfigMap synchronization")
 	} else {
-		logger.Println("BootOpenAgent", "Non-Kubernetes environment detected - ConfigManager watches scrape_config.yaml")
+		logger.Infoln("BootOpenAgent", "Non-Kubernetes environment detected - ConfigManager watches scrape_config.yaml")
 	}
 
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				logger.Println("ScraperManagerPanic", fmt.Sprintf("Recovered from panic: %v", r))
+				logger.Infoln("ScraperManagerPanic", fmt.Sprintf("Recovered from panic: %v", r))
 				// Restart the scraper manager after a short delay
 				select {
 				case <-shutdownCh:
@@ -277,7 +275,7 @@ func BootOpenAgent(version, commitHash string, logger *logfile.FileLogger) {
 			// Sending finished normally
 		case <-shutdownCh:
 			// Shutdown requested, cleanup will be handled by defer
-			logger.Println("Sender", "Shutdown requested")
+			logger.Infoln("Sender", "Shutdown requested")
 			// Call Stop on the sender
 			senderInstance.Stop()
 		}
@@ -287,7 +285,7 @@ func BootOpenAgent(version, commitHash string, logger *logfile.FileLogger) {
 	isRun = true
 	runDate = dateutil.SystemNow()
 
-	logger.Println("BootOpenAgent", "OpenAgent started successfully")
+	logger.Infoln("BootOpenAgent", "OpenAgent started successfully")
 }
 
 // IsOK checks if the agent is running properly

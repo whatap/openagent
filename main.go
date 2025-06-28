@@ -281,6 +281,7 @@ func monitorChildHealth(childHealthChannel chan bool, logger *logfile.FileLogger
 }
 
 func main() {
+
 	printWhatap := fmt.Sprint("\n" +
 		" _      ____       ______WHATAP-OPEN-AGENT\n" +
 		"| | /| / / /  ___ /_  __/__ ____\n" +
