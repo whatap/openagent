@@ -157,48 +157,48 @@ features:
       - targetName: my-external-db-metrics
         type: StaticEndpoints
         # enabled: true  # 타겟 활성화 여부 (기본값: true, 생략 가능)
-        scheme: "http"  # http 또는 https, 기본값 http
-        addresses:  # 대상의 주소 목록 (IP:PORT 또는 HOSTNAME:PORT)
-          - "192.168.1.100:9100"
-          - "external-node-exporter.example.com:9100"
-        labels:  # 이 타겟들에 공통적으로 추가될 레이블
-          environment: "staging"
-          component: "database-exporter"
-        path: "/metrics"  # 모든 addresses에 적용될 기본 path
-        interval: "60s"   # 모든 addresses에 적용될 기본 interval
-        metricRelabelConfigs:   # 모든 addresses에 적용될 기본 metricRelabelConfigs
-          - source_labels: [__name__]
-            regex: "node_(cpu|memory).*"
-            action: keep
-          - source_labels: [instance]
-            target_label: server
-            replacement: "${1}"
-            action: replace
+        endpoints:
+          - address: "192.168.1.100:9100"
+            path: "/metrics"
+            scheme: "http"
+            interval: "60s"
+            metricRelabelConfigs:
+              - source_labels: [__name__]
+                regex: "node_(cpu|memory).*"
+                action: keep
+              - source_labels: [instance]
+                target_label: server
+                replacement: "${1}"
+                action: replace
+          - address: "external-node-exporter.example.com:9100"
+            path: "/metrics"
+            scheme: "http"
+            interval: "60s"
+            metricRelabelConfigs:
+              - source_labels: [__name__]
+                regex: "node_(cpu|memory).*"
+                action: keep
+              - source_labels: [instance]
+                target_label: server
+                replacement: "${1}"
+                action: replace
 
       # 비활성화된 타겟 예시 (스크래핑 시 건너뜀)
       - targetName: disabled-target-example
         type: StaticEndpoints
         # 타겟을 비활성화하려면 enabled를 false로 설정
         enabled: false
-        addresses:
-          - "disabled-example.com:9100"
-        path: "/metrics"
-        interval: "60s"
+        endpoints:
+          - address: "disabled-example.com:9100"
+            path: "/metrics"
+            interval: "60s"
 ```
-
-#### CR 형식 공통 설정 요소
-
-- **globalInterval**: 모든 타겟에 적용되는 기본 스크래핑 간격 (타겟 또는 엔드포인트에서 재정의 가능)
-- **globalPath**: 모든 타겟에 적용되는 기본 메트릭 경로 (타겟 또는 엔드포인트에서 재정의 가능)
 
 #### 타겟 공통 설정 요소
 
 - **targetName**: 타겟의 이름 (필수)
 - **type**: 타겟의 유형 (PodMonitor, ServiceMonitor, StaticEndpoints) (필수)
 - **enabled**: 타겟 활성화 여부 (기본값: true, 생략 가능). false로 설정하면 해당 타겟은 스크래핑 시 건너뜀
-- **interval**: 타겟의 스크래핑 간격 (기본값: globalInterval)
-- **path**: 타겟의 메트릭 경로 (기본값: globalPath)
-- **metricRelabelConfigs**: 메트릭 재라벨링 설정
 
 #### PodMetrics 및 ServiceMetrics 설정 요소
 
@@ -215,8 +215,8 @@ features:
 
 - **endpoints**: 스크래핑할 엔드포인트를 정의합니다.
   - `port`: 스크래핑할 포트 이름 또는 번호
-  - `path`: 메트릭 경로 (기본값은 globalPath, 필요시 재정의)
-  - `interval`: 스크래핑 간격 (기본값은 globalInterval, 필요시 재정의)
+  - `path`: 메트릭 경로 (기본값: /metrics)
+  - `interval`: 스크래핑 간격 (기본값: 60s)
   - `scheme`: 스크래핑 프로토콜 (http 또는 https, 기본값 http)
   - `timeout`: 스크래핑 타임아웃
   - `addNodeLabel`: PodMonitor 타입에서 노드 라벨 추가 여부 (기본값: false)
@@ -226,18 +226,16 @@ features:
 
 PodMonitor 타입에서는 `addNodeLabel` 옵션을 사용하여 대상 파드가 스케줄링된 노드의 이름을 메트릭에 라벨로 추가할 수 있습니다.
 
-- **설정 위치**: 타겟 레벨 또는 엔드포인트 레벨에서 설정 가능
+- **설정 위치**: 엔드포인트 레벨에서만 설정 가능
 - **기본값**: `false`
 - **동작**: `true`로 설정하면 모든 메트릭에 `node` 라벨이 추가되며, 값은 파드가 실행 중인 노드의 이름입니다
-- **우선순위**: 엔드포인트 레벨 설정이 타겟 레벨 설정을 재정의합니다
 
 **사용 예제:**
 
 ```yaml
-# 타겟 레벨에서 addNodeLabel 설정
+# 엔드포인트 레벨에서 addNodeLabel 설정
 - targetName: node-exporter
   type: PodMonitor
-  addNodeLabel: true  # 이 타겟의 모든 엔드포인트에 노드 라벨 추가
   namespaceSelector:
     matchNames:
       - "monitoring"
@@ -248,13 +246,13 @@ PodMonitor 타입에서는 `addNodeLabel` 옵션을 사용하여 대상 파드�
     - port: "metrics"
       path: "/metrics"
       interval: "30s"
-  metricRelabelConfigs:
-    # 노드 라벨을 사용한 재라벨링 예제
-    - source_labels: [node]
-      target_label: kubernetes_node
-      action: replace
+      addNodeLabel: true  # 이 엔드포인트에 노드 라벨 추가
+      metricRelabelConfigs:
+        # 노드 라벨을 사용한 재라벨링 예제
+        - source_labels: [node]
+          target_label: kubernetes_node
+          action: replace
 
-# 엔드포인트 레벨에서 addNodeLabel 설정
 - targetName: dcgm-exporter
   type: PodMonitor
   namespaceSelector:
@@ -267,11 +265,11 @@ PodMonitor 타입에서는 `addNodeLabel` 옵션을 사용하여 대상 파드�
     - port: "metrics"
       path: "/metrics"
       interval: "30s"
-      addNodeLabel: true  # 이 엔드포인트에만 노드 라벨 추가
-  metricRelabelConfigs:
-    - source_labels: [node]
-      target_label: gpu_node
-      action: replace
+      addNodeLabel: true  # 이 엔드포인트에 노드 라벨 추가
+      metricRelabelConfigs:
+        - source_labels: [node]
+          target_label: gpu_node
+          action: replace
 ```
 
 이 기능은 특히 DaemonSet으로 배포된 파드들의 메트릭을 수집할 때 유용합니다. 각 노드별로 메트릭을 구분하여 분석하거나, 특정 노드의 메트릭만 필터링할 때 활용할 수 있습니다.
@@ -280,12 +278,15 @@ PodMonitor 타입에서는 `addNodeLabel` 옵션을 사용하여 대상 파드�
 
 - **targetName**: 타겟의 이름 (로깅 및 식별용)
 - **type**: 타겟 유형 ("StaticEndpoints")
-- **scheme**: 스크래핑 프로토콜 (http 또는 https, 기본값 http)
-- **addresses**: 스크래핑할 대상 주소 목록 (IP:PORT 또는 HOSTNAME:PORT)
-- **labels**: 모든 타겟에 추가할 레이블
-- **path**: 메트릭 경로 (기본값은 globalPath, 필요시 재정의)
-- **interval**: 스크래핑 간격 (기본값은 globalInterval, 필요시 재정의)
-- **metricRelabelConfigs**: 스크래핑 후 메트릭 재라벨링 설정 (프로메테우스의 metric_relabel_configs와 유사)
+- **endpoints**: 스크래핑할 엔드포인트를 정의합니다.
+  - `address`: 스크래핑할 대상 주소 (IP:PORT 또는 HOSTNAME:PORT)
+  - `path`: 메트릭 경로 (기본값: /metrics)
+  - `scheme`: 스크래핑 프로토콜 (http 또는 https, 기본값 http)
+  - `interval`: 스크래핑 간격 (기본값: 60s)
+  - `tlsConfig`: TLS 설정
+  - `metricRelabelConfigs`: 스크래핑 후 메트릭 재라벨링 설정
+
+StaticEndpoints는 이제 PodMonitor 및 ServiceMonitor와 동일한 `endpoints` 배열 구조를 사용하여 일관된 설정 방식을 제공합니다.
 
 ## TLS 설정
 
@@ -365,21 +366,21 @@ endpoints:
 ```yaml
 - targetName: external-secure-service
   type: StaticEndpoints
-  scheme: "https"  # 명시적으로 HTTPS 지정
-  addresses:
-    - "secure-service.example.com:443"
-  path: "/metrics"
-  interval: "60s"
-  tlsConfig:
-    insecureSkipVerify: true  # 인증서 검증 건너뛰기
-  metricRelabelConfigs:
-    - source_labels: [__name__]
-      regex: "http_requests_total"
-      action: keep
-    - source_labels: [method]
-      target_label: http_method
-      replacement: "${1}"
-      action: replace
+  endpoints:
+    - address: "secure-service.example.com:443"
+      path: "/metrics"
+      scheme: "https"  # 명시적으로 HTTPS 지정
+      interval: "60s"
+      tlsConfig:
+        insecureSkipVerify: true  # 인증서 검증 건너뛰기
+      metricRelabelConfigs:
+        - source_labels: [__name__]
+          regex: "http_requests_total"
+          action: keep
+        - source_labels: [method]
+          target_label: http_method
+          replacement: "${1}"
+          action: replace
 ```
 
 ## 메트릭 재라벨링 설정 (metricRelabelConfigs)

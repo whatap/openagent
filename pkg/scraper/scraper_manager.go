@@ -1,7 +1,6 @@
 package scraper
 
 import (
-	"context"
 	"strings"
 	"sync"
 	"time"
@@ -20,8 +19,6 @@ type ScraperManager struct {
 	configManager   *config.ConfigManager
 	discovery       discovery.ServiceDiscovery
 	rawQueue        chan *model.ScrapeRawData
-	ctx             context.Context
-	cancel          context.CancelFunc
 
 	// Track last scrape times to avoid over-scraping
 	lastScrapeTime  map[string]time.Time
@@ -373,13 +370,10 @@ func (sm *ScraperManager) matchPodSelector(podLabels map[string]string, podSelec
 }
 
 // NewScraperManager creates a new ScraperManager instance
-func NewScraperManager(configManager *config.ConfigManager, rawQueue chan *model.ScrapeRawData) *ScraperManager {
-	// Create service discovery
-	kubernetesDiscovery := discovery.NewKubernetesDiscovery(configManager)
-
+func NewScraperManager(configManager *config.ConfigManager, discovery discovery.ServiceDiscovery, rawQueue chan *model.ScrapeRawData) *ScraperManager {
 	sm := &ScraperManager{
 		configManager:  configManager,
-		discovery:      kubernetesDiscovery,
+		discovery:      discovery,
 		rawQueue:       rawQueue,
 		lastScrapeTime: make(map[string]time.Time),
 	}
@@ -387,50 +381,13 @@ func NewScraperManager(configManager *config.ConfigManager, rawQueue chan *model
 	return sm
 }
 
-// ReloadConfig reloads the configuration and restarts scraping
-func (sm *ScraperManager) ReloadConfig() {
-	logutil.Println("INFO", "Reloading scraper configuration...")
-	// Stop the current scraping process
-	sm.Stop()
-	// Start new scraping with the updated configuration
-	sm.StartScraping()
-}
 
-// StartScraping starts the scraping process using ServiceDiscovery
+// StartScraping starts the scraping process
 func (sm *ScraperManager) StartScraping() {
-	// Get the configuration
-	cm := sm.configManager.GetConfig()
-	if cm == nil {
-		logutil.Println("INFO", "No configuration loaded.")
-		return
-	}
-
-	// Get the scrape configs
-	scrapeConfigs := sm.configManager.GetScrapeConfigs()
-	if scrapeConfigs == nil {
-		logutil.Println("INFO", "No scrape_configs found in configuration.")
-		return
-	}
-
-	// Load targets into service discovery
-	if err := sm.discovery.LoadTargets(scrapeConfigs); err != nil {
-		logutil.Printf("ERROR", "Failed to load targets into service discovery: %v", err)
-		return
-	}
-
-	// Create context for the scraping process
-	sm.ctx, sm.cancel = context.WithCancel(context.Background())
-
-	// Start service discovery
-	if err := sm.discovery.Start(sm.ctx); err != nil {
-		logutil.Printf("ERROR", "Failed to start service discovery: %v", err)
-		return
-	}
-
-	// Start simple polling loop
+	// Start scraping loop
 	go sm.scrapingLoop()
 
-	logutil.Println("INFO", "Scraping started with polling-based service discovery")
+	logutil.Println("INFO", "Scraping started")
 }
 
 // scrapingLoop runs the periodic scraping process
@@ -463,8 +420,6 @@ func (sm *ScraperManager) scrapingLoop() {
 				sm.cleanupOldTargets()
 				cleanupCounter = 0
 			}
-		case <-sm.ctx.Done():
-			return
 		}
 	}
 }
@@ -554,26 +509,21 @@ func (sm *ScraperManager) scrapeTarget(target *discovery.Target) {
 
 // getTargetInterval gets the scraping interval for a target
 func (sm *ScraperManager) getTargetInterval(target *discovery.Target) time.Duration {
-	// Check for endpoint-specific interval first (highest priority)
+	// Check for endpoint-specific interval
 	if endpoint, ok := target.Metadata["endpoint"].(discovery.EndpointConfig); ok {
 		if endpoint.Interval != "" {
 			if intervalSeconds, err := sm.configManager.ParseInterval(endpoint.Interval); err == nil {
 				return time.Duration(intervalSeconds) * time.Second
 			} else {
-				logutil.Printf("WARN", "Error parsing endpoint interval '%s' for target %s: %v. Using globalInterval fallback.", 
+				logutil.Printf("WARN", "Error parsing endpoint interval '%s' for target %s: %v. Using default of 60 seconds.", 
 					endpoint.Interval, target.ID, err)
 			}
 		}
 	}
 
-	// Fallback to globalInterval
-	globalIntervalStr := sm.configManager.GetGlobalInterval()
-	if globalIntervalSeconds, err := sm.configManager.ParseInterval(globalIntervalStr); err == nil {
-		return time.Duration(globalIntervalSeconds) * time.Second
-	} else {
-		logutil.Printf("WARN", "Error parsing globalInterval: %v. Using default of 60 seconds.", err)
-		return 60 * time.Second
-	}
+	// Default to 60 seconds if no endpoint interval is specified
+	logutil.Printf("DEBUG", "No interval specified for target %s, using default of 60 seconds", target.ID)
+	return 60 * time.Second
 }
 
 // shouldSkipScraping checks if scraping should be skipped based on last scrape time
@@ -650,9 +600,13 @@ func (sm *ScraperManager) createScraperTaskFromTarget(target *discovery.Target) 
 		}
 	}
 
-	// Use StaticEndpoints approach for all target types
+	// Extract node information for proper node label handling
+	nodeName, _ := target.Labels["node"]
+	addNodeLabel, _ := target.Metadata["addNodeLabel"].(bool)
+
+	// Create the scraper task using StaticEndpoints approach
 	// ServiceDiscovery has already resolved the complete URL, so we use it directly
-	return NewStaticEndpointsScraperTask(
+	scraperTask := NewStaticEndpointsScraperTask(
 		targetName,
 		target.URL,  // Use the complete URL generated by ServiceDiscovery
 		extractPathFromURL(target.URL),
@@ -660,6 +614,12 @@ func (sm *ScraperManager) createScraperTaskFromTarget(target *discovery.Target) 
 		relabelConfigs,
 		tlsConfig,
 	)
+
+	// Set node information for proper node label handling
+	scraperTask.NodeName = nodeName
+	scraperTask.AddNodeLabel = addNodeLabel
+
+	return scraperTask
 }
 
 // Helper functions to extract URL components
@@ -716,24 +676,6 @@ func (sm *ScraperManager) AddRawData(data *model.ScrapeRawData) {
 	sm.rawQueue <- data
 }
 
-// Stop stops the ScraperManager and all its components
-func (sm *ScraperManager) Stop() {
-	logutil.Println("INFO", "Stopping ScraperManager...")
-
-	// Cancel context (this will stop the scraping loop)
-	if sm.cancel != nil {
-		sm.cancel()
-	}
-
-	// Stop service discovery
-	if sm.discovery != nil {
-		if err := sm.discovery.Stop(); err != nil {
-			logutil.Printf("ERROR", "Error stopping service discovery: %v", err)
-		}
-	}
-
-	logutil.Println("INFO", "ScraperManager stopped")
-}
 
 // Legacy methods - commented out as they're replaced by ServiceDiscovery
 /*

@@ -50,17 +50,12 @@ type DiscoveryConfig struct {
 	NamespaceSelector map[string]interface{}
 	Selector          map[string]interface{}
 	Endpoints         []EndpointConfig
-	Addresses         []string // For StaticEndpoints
-	Scheme            string
-	Path              string
-	Interval          string
-	TLSConfig         map[string]interface{}
-	MetricRelabelConfigs []interface{}
 }
 
 // EndpointConfig represents endpoint configuration
 type EndpointConfig struct {
-	Port                 string
+	Port                 string // For PodMonitor/ServiceMonitor
+	Address              string // For StaticEndpoints
 	Path                 string
 	Scheme               string
 	Interval             string

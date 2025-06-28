@@ -21,8 +21,6 @@ type KubernetesDiscovery struct {
 	targets       map[string]*Target
 	targetsMutex  sync.RWMutex
 	stopCh        chan struct{}
-	ctx           context.Context
-	cancel        context.CancelFunc
 }
 
 // NewKubernetesDiscovery creates a new KubernetesDiscovery instance
@@ -40,19 +38,19 @@ func (kd *KubernetesDiscovery) LoadTargets(targets []map[string]interface{}) err
 	kd.configs = make([]DiscoveryConfig, 0, len(targets))
 
 	for _, targetConfig := range targets {
-		config, err := kd.parseDiscoveryConfig(targetConfig)
+		parseDiscoveryConfig, err := kd.parseDiscoveryConfig(targetConfig)
 		if err != nil {
-			logutil.Printf("ERROR", "Failed to parse target config: %v", err)
+			logutil.Printf("ERROR", "Failed to parse target parseDiscoveryConfig: %v", err)
 			continue
 		}
 
 		// Skip disabled targets
-		if !config.Enabled {
-			logutil.Printf("INFO", "Target %s is disabled, skipping", config.TargetName)
+		if !parseDiscoveryConfig.Enabled {
+			logutil.Printf("INFO", "Target %s is disabled, skipping", parseDiscoveryConfig.TargetName)
 			continue
 		}
 
-		kd.configs = append(kd.configs, config)
+		kd.configs = append(kd.configs, parseDiscoveryConfig)
 	}
 
 	logutil.Printf("INFO", "Loaded %d discovery configurations", len(kd.configs))
@@ -61,8 +59,6 @@ func (kd *KubernetesDiscovery) LoadTargets(targets []map[string]interface{}) err
 
 // Start begins target discovery
 func (kd *KubernetesDiscovery) Start(ctx context.Context) error {
-	kd.ctx, kd.cancel = context.WithCancel(ctx)
-
 	// Start periodic discovery
 	go kd.discoveryLoop()
 
@@ -86,9 +82,6 @@ func (kd *KubernetesDiscovery) GetReadyTargets() []*Target {
 
 // Stop stops the discovery process
 func (kd *KubernetesDiscovery) Stop() error {
-	if kd.cancel != nil {
-		kd.cancel()
-	}
 	close(kd.stopCh)
 	logutil.Printf("INFO", "Kubernetes service discovery stopped")
 	return nil
@@ -100,15 +93,13 @@ func (kd *KubernetesDiscovery) discoveryLoop() {
 	kd.discoverTargets()
 
 	// Periodic discovery every 30 seconds (like Prometheus)
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ticker.C:
 			kd.discoverTargets()
-		case <-kd.ctx.Done():
-			return
 		case <-kd.stopCh:
 			return
 		}
@@ -117,16 +108,16 @@ func (kd *KubernetesDiscovery) discoveryLoop() {
 
 // discoverTargets discovers all configured targets
 func (kd *KubernetesDiscovery) discoverTargets() {
-	for _, config := range kd.configs {
-		switch config.Type {
+	for _, discoveryConfig := range kd.configs {
+		switch discoveryConfig.Type {
 		case "PodMonitor":
-			kd.discoverPodTargets(config)
+			kd.discoverPodTargets(discoveryConfig)
 		case "ServiceMonitor":
-			kd.discoverServiceTargets(config)
+			kd.discoverServiceTargets(discoveryConfig)
 		case "StaticEndpoints":
-			kd.discoverStaticTargets(config)
+			kd.discoverStaticTargets(discoveryConfig)
 		default:
-			logutil.Printf("WARN", "Unknown target type: %s", config.Type)
+			logutil.Printf("WARN", "Unknown target type: %s", discoveryConfig.Type)
 		}
 	}
 }
@@ -170,7 +161,6 @@ func (kd *KubernetesDiscovery) discoverPodTargets(config DiscoveryConfig) {
 			kd.processPodTarget(pod, config)
 		}
 	}
-
 	logutil.Printf("DEBUG", "PodMonitor %s - Total pods discovered: %d", config.TargetName, totalPodsFound)
 }
 
@@ -213,16 +203,20 @@ func (kd *KubernetesDiscovery) processPodTarget(pod *corev1.Pod, config Discover
 				"pod":       pod.Name,
 			},
 			Metadata: map[string]interface{}{
-				"targetName":            config.TargetName,
-				"type":                  config.Type,
-				"endpoint":              endpoint,
-				"metricRelabelConfigs":  endpoint.MetricRelabelConfigs,
-				"addNodeLabel":          endpoint.AddNodeLabel,
+				"targetName":           config.TargetName,
+				"type":                 config.Type,
+				"endpoint":             endpoint,
+				"metricRelabelConfigs": endpoint.MetricRelabelConfigs,
+				"addNodeLabel":         endpoint.AddNodeLabel,
 			},
 			LastSeen: time.Now(),
 		}
-
+		// dear junnie
 		// Add node label if requested
+		// endpoint.AddNodeLabel means pod belongs to this Node, so we add 'node' label to metric&label cardinality
+		// e.g) apiserver_request_total{status=200, instance=http://192.168.0.5:443}
+		// clients can't find where instance is scheduled, so we put node like this, apiserver_request_total{status=200, instance=http://192.168.0.5:443, node=infra001}
+		// therefore, this code is designed to processor can load nodeName and put into metric-label
 		if endpoint.AddNodeLabel && pod.Spec.NodeName != "" {
 			target.Labels["node"] = pod.Spec.NodeName
 		}
@@ -413,7 +407,6 @@ func (kd *KubernetesDiscovery) processServiceTarget(service *corev1.Service, con
 		return
 	}
 
-
 	// Process each configured endpoint
 	for _, endpointConfig := range config.Endpoints {
 		// Find the port in the service
@@ -480,11 +473,11 @@ func (kd *KubernetesDiscovery) processServiceTarget(service *corev1.Service, con
 							"instance":  fmt.Sprintf("%s:%d", address.IP, endpointPort),
 						},
 						Metadata: map[string]interface{}{
-							"targetName":            config.TargetName,
-							"type":                  config.Type,
-							"endpoint":              endpointConfig,
-							"metricRelabelConfigs":  endpointConfig.MetricRelabelConfigs,
-							"service":               service,
+							"targetName":           config.TargetName,
+							"type":                 config.Type,
+							"endpoint":             endpointConfig,
+							"metricRelabelConfigs": endpointConfig.MetricRelabelConfigs,
+							"service":              service,
 						},
 						State:    TargetStateReady, // Service endpoints are ready if they're in the addresses list
 						LastSeen: time.Now(),
@@ -523,11 +516,11 @@ func (kd *KubernetesDiscovery) processServiceTarget(service *corev1.Service, con
 							"instance":  fmt.Sprintf("%s:%d", address.IP, endpointPort),
 						},
 						Metadata: map[string]interface{}{
-							"targetName":            config.TargetName,
-							"type":                  config.Type,
-							"endpoint":              endpointConfig,
-							"metricRelabelConfigs":  endpointConfig.MetricRelabelConfigs,
-							"service":               service,
+							"targetName":           config.TargetName,
+							"type":                 config.Type,
+							"endpoint":             endpointConfig,
+							"metricRelabelConfigs": endpointConfig.MetricRelabelConfigs,
+							"service":              service,
 						},
 						State:    TargetStatePending, // Not ready endpoints are pending
 						LastSeen: time.Now(),
@@ -546,35 +539,40 @@ func (kd *KubernetesDiscovery) processServiceTarget(service *corev1.Service, con
 func (kd *KubernetesDiscovery) discoverStaticTargets(config DiscoveryConfig) {
 	logutil.Printf("DEBUG", "Discovering StaticEndpoints targets for %s", config.TargetName)
 
-	// StaticEndpoints don't require Kubernetes API - just process the configured addresses
-	if len(config.Addresses) == 0 {
-		logutil.Printf("WARN", "No addresses configured for StaticEndpoints target: %s", config.TargetName)
+	// StaticEndpoints don't require Kubernetes API - just process the configured endpoints
+	if len(config.Endpoints) == 0 {
+		logutil.Printf("WARN", "No endpoints configured for StaticEndpoints target: %s", config.TargetName)
 		return
 	}
 
-	// Determine scheme
-	scheme := config.Scheme
-	if scheme == "" {
-		// Default scheme based on TLS config
-		if config.TLSConfig != nil && len(config.TLSConfig) > 0 {
-			scheme = "https"
-		} else {
-			scheme = "http"
+	// Process each endpoint
+	for i, endpoint := range config.Endpoints {
+		if endpoint.Address == "" {
+			logutil.Printf("WARN", "Empty address in endpoint %d for StaticEndpoints target: %s", i, config.TargetName)
+			continue
 		}
-	}
 
-	// Determine path
-	path := config.Path
-	if path == "" {
-		path = "/metrics"
-	}
-
-	// Process each address
-	for i, address := range config.Addresses {
 		targetID := fmt.Sprintf("%s-static-%d", config.TargetName, i)
 
+		// Determine scheme
+		scheme := endpoint.Scheme
+		if scheme == "" {
+			// Default scheme based on TLS config
+			if endpoint.TLSConfig != nil && len(endpoint.TLSConfig) > 0 {
+				scheme = "https"
+			} else {
+				scheme = "http"
+			}
+		}
+
+		// Determine path
+		path := endpoint.Path
+		if path == "" {
+			path = "/metrics"
+		}
+
 		// Build target URL
-		url := fmt.Sprintf("%s://%s%s", scheme, address, path)
+		url := fmt.Sprintf("%s://%s%s", scheme, endpoint.Address, path)
 
 		// Create target
 		target := &Target{
@@ -582,14 +580,14 @@ func (kd *KubernetesDiscovery) discoverStaticTargets(config DiscoveryConfig) {
 			URL: url,
 			Labels: map[string]string{
 				"job":      config.TargetName,
-				"instance": address,
+				"instance": endpoint.Address,
 			},
 			Metadata: map[string]interface{}{
-				"targetName":            config.TargetName,
-				"type":                  config.Type,
-				"address":               address,
-				"metricRelabelConfigs":  config.MetricRelabelConfigs,
-				"tlsConfig":             config.TLSConfig,
+				"targetName":           config.TargetName,
+				"type":                 config.Type,
+				"endpoint":             endpoint,
+				"metricRelabelConfigs": endpoint.MetricRelabelConfigs,
+				"address":              endpoint.Address,
 			},
 			State:    TargetStateReady, // Static endpoints are always ready
 			LastSeen: time.Now(),
@@ -602,78 +600,47 @@ func (kd *KubernetesDiscovery) discoverStaticTargets(config DiscoveryConfig) {
 
 // parseDiscoveryConfig parses target configuration into DiscoveryConfig
 func (kd *KubernetesDiscovery) parseDiscoveryConfig(targetConfig map[string]interface{}) (DiscoveryConfig, error) {
-	config := DiscoveryConfig{
+	discoveryConfig := DiscoveryConfig{
 		Enabled: true, // Default to enabled
 	}
 
 	// Parse basic fields
 	if targetName, ok := targetConfig["targetName"].(string); ok {
-		config.TargetName = targetName
+		discoveryConfig.TargetName = targetName
 	}
 
 	if targetType, ok := targetConfig["type"].(string); ok {
-		config.Type = targetType
+		discoveryConfig.Type = targetType
 	}
 
 	if enabled, ok := targetConfig["enabled"].(bool); ok {
-		config.Enabled = enabled
+		discoveryConfig.Enabled = enabled
 	}
 
 	// Parse namespace selector
 	if namespaceSelector, ok := targetConfig["namespaceSelector"].(map[string]interface{}); ok {
-		config.NamespaceSelector = namespaceSelector
+		discoveryConfig.NamespaceSelector = namespaceSelector
 	}
 
 	// Parse selector
 	if selector, ok := targetConfig["selector"].(map[string]interface{}); ok {
-		config.Selector = selector
+		discoveryConfig.Selector = selector
 	}
 
 	// Parse endpoints
 	if endpoints, ok := targetConfig["endpoints"].([]interface{}); ok {
-		config.Endpoints = make([]EndpointConfig, 0, len(endpoints))
+		discoveryConfig.Endpoints = make([]EndpointConfig, 0, len(endpoints))
 		for _, ep := range endpoints {
 			if epMap, ok := ep.(map[string]interface{}); ok {
 				endpointConfig := kd.parseEndpointConfig(epMap)
-				config.Endpoints = append(config.Endpoints, endpointConfig)
+				discoveryConfig.Endpoints = append(discoveryConfig.Endpoints, endpointConfig)
 			}
 		}
 	}
 
-	// Parse addresses for StaticEndpoints
-	if addresses, ok := targetConfig["addresses"].([]interface{}); ok {
-		config.Addresses = make([]string, 0, len(addresses))
-		for _, addr := range addresses {
-			if addrStr, ok := addr.(string); ok {
-				config.Addresses = append(config.Addresses, addrStr)
-			}
-		}
-	}
 
-	// Parse other fields
-	if scheme, ok := targetConfig["scheme"].(string); ok {
-		config.Scheme = scheme
-	}
 
-	if path, ok := targetConfig["path"].(string); ok {
-		config.Path = path
-	}
-
-	if interval, ok := targetConfig["interval"].(string); ok {
-		config.Interval = interval
-	}
-
-	// Parse TLS config at target level (for StaticEndpoints)
-	if tlsConfig, ok := targetConfig["tlsConfig"].(map[string]interface{}); ok {
-		config.TLSConfig = tlsConfig
-	}
-
-	// Parse metric relabel configs at target level (for StaticEndpoints)
-	if metricRelabelConfigs, ok := targetConfig["metricRelabelConfigs"].([]interface{}); ok {
-		config.MetricRelabelConfigs = metricRelabelConfigs
-	}
-
-	return config, nil
+	return discoveryConfig, nil
 }
 
 func (kd *KubernetesDiscovery) parseEndpointConfig(endpointMap map[string]interface{}) EndpointConfig {
@@ -681,6 +648,10 @@ func (kd *KubernetesDiscovery) parseEndpointConfig(endpointMap map[string]interf
 
 	if port, ok := endpointMap["port"].(string); ok {
 		config.Port = port
+	}
+
+	if address, ok := endpointMap["address"].(string); ok {
+		config.Address = address
 	}
 
 	if path, ok := endpointMap["path"].(string); ok {

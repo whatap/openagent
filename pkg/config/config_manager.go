@@ -12,7 +12,6 @@ import (
 	"sync"
 	"time"
 
-	corev1 "k8s.io/api/core/v1"
 	"open-agent/pkg/k8s"
 )
 
@@ -24,7 +23,6 @@ type ConfigManager struct {
 	k8sClient          *k8s.K8sClient
 	configMapNamespace string
 	configMapName      string
-	onConfigReload     []func()
 	fileWatcherEnabled bool
 	fileWatcherStop    chan struct{}
 	lastModTime        time.Time
@@ -35,93 +33,67 @@ func NewConfigManager() *ConfigManager {
 	cm := &ConfigManager{
 		configMapNamespace: "whatap-monitoring",
 		configMapName:      "whatap-open-agent-config",
-		onConfigReload:     make([]func(), 0),
 	}
 
 	// Initialize k8s client
 	cm.k8sClient = k8s.GetInstance()
-	fmt.Printf("k8s client initialized: %v\n", cm.k8sClient.IsInitialized())
-	// Register ConfigMap change handler if k8s client is initialized
+
 	if cm.k8sClient.IsInitialized() {
-		log.Printf("Kubernetes environment detected, using ConfigMap watcher")
-		cm.k8sClient.RegisterConfigMapHandler(func(configMap *corev1.ConfigMap) {
-			// Only handle our specific ConfigMap
-			if configMap.Namespace == cm.configMapNamespace && configMap.Name == cm.configMapName {
-				log.Printf("ConfigMap %s/%s changed, reloading configuration", configMap.Namespace, configMap.Name)
+		log.Printf("Kubernetes environment detected, using ConfigMap informer cache")
 
-				// Get the scrape_config.yaml data from the ConfigMap
-				if configData, ok := configMap.Data["scrape_config.yaml"]; ok {
-					// Parse the YAML data
-					var config map[string]interface{}
-					err := yaml.Unmarshal([]byte(configData), &config)
-					if err != nil {
-						log.Printf("Error parsing ConfigMap data: %v", err)
-						return
-					}
+		// Initial configuration load
+		if err := cm.LoadConfig(); err != nil {
+			log.Printf("Failed to load initial configuration: %v", err)
+			return nil
+		}
 
-					// Update the config with a lock to ensure thread safety
-					cm.mu.Lock()
-					cm.config = config
-					cm.mu.Unlock()
-
-					// Notify all registered handlers
-					for _, handler := range cm.onConfigReload {
-						handler()
-					}
-				}
-			}
-		})
 	} else {
-		// Not in Kubernetes, enable file watcher
+		// Non-k8s environment: file watcher
 		log.Printf("Non-Kubernetes environment detected, using file watcher")
 		cm.fileWatcherEnabled = true
 		cm.fileWatcherStop = make(chan struct{})
 		go cm.watchConfigFile()
-	}
 
-	// Load initial configuration
-	err := cm.LoadConfig()
-	if err != nil {
-		log.Printf("Failed to load configuration: %v", err)
-		return nil
+		// Initial file load
+		if err := cm.LoadConfig(); err != nil {
+			log.Printf("Failed to load configuration: %v", err)
+			return nil
+		}
 	}
 
 	return cm
 }
 
-// LoadConfig loads the configuration from the ConfigMap or YAML file
+// LoadConfig loads the configuration from informer cache or YAML file
 func (cm *ConfigManager) LoadConfig() error {
-	// If Kubernetes client is initialized, only use the ConfigMap
+	// k8s environment: use informer cache directly
 	if cm.k8sClient.IsInitialized() {
 		configMap, err := cm.k8sClient.GetConfigMap(cm.configMapNamespace, cm.configMapName)
 		if err != nil || configMap == nil {
-			return fmt.Errorf("ConfigMap %s/%s not found or error: %v", cm.configMapNamespace, cm.configMapName, err)
+			return fmt.Errorf("ConfigMap %s/%s not found: %v", cm.configMapNamespace, cm.configMapName, err)
 		}
 
-		// Get the scrape_config.yaml data from the ConfigMap
 		configData, ok := configMap.Data["scrape_config.yaml"]
 		if !ok {
-			return fmt.Errorf("scrape_config.yaml not found in ConfigMap %s/%s", cm.configMapNamespace, cm.configMapName)
+			return fmt.Errorf("scrape_config.yaml not found in ConfigMap")
 		}
 
-		// Parse the YAML data
 		var config map[string]interface{}
 		err = yaml.Unmarshal([]byte(configData), &config)
 		if err != nil {
 			return fmt.Errorf("error parsing ConfigMap data: %v", err)
 		}
 
-		// Update the config with a lock to ensure thread safety
 		cm.mu.Lock()
 		cm.config = config
 		cm.mu.Unlock()
 
-		log.Printf("Configuration loaded from ConfigMap %s/%s", cm.configMapNamespace, cm.configMapName)
+		log.Printf("Configuration loaded from ConfigMap informer cache")
 		return nil
 	}
 
 	// Fall back to local file
-	homeDir := os.Getenv("WHATAP_HOME")
+	homeDir := os.Getenv("WHATAP_OPEN_HOME")
 	if homeDir == "" {
 		homeDir = "."
 	}
@@ -189,17 +161,6 @@ func (cm *ConfigManager) GetScrapeConfigs() []map[string]interface{} {
 										stringMap[key] = convertToStringMap(v)
 									}
 								}
-								// Add global settings if they exist
-								if globalInterval, ok := openAgent["globalInterval"].(string); ok {
-									if _, exists := stringMap["interval"]; !exists {
-										stringMap["interval"] = globalInterval
-									}
-								}
-								if globalPath, ok := openAgent["globalPath"].(string); ok {
-									if _, exists := stringMap["path"]; !exists {
-										stringMap["path"] = globalPath
-									}
-								}
 
 								result = append(result, stringMap)
 							}
@@ -229,7 +190,7 @@ func (cm *ConfigManager) watchConfigFile() {
 		case <-ticker.C:
 			if fileInfo, err := os.Stat(cm.configFile); err == nil {
 				if fileInfo.ModTime().After(cm.lastModTime) {
-					log.Printf("Configuration file changed, reloading")
+					log.Printf("Configuration file changed, automatically synchronizing")
 					cm.lastModTime = fileInfo.ModTime()
 
 					if err := cm.LoadConfig(); err != nil {
@@ -237,23 +198,14 @@ func (cm *ConfigManager) watchConfigFile() {
 						continue
 					}
 
-					// Notify all registered handlers
-					for _, handler := range cm.onConfigReload {
-						handler()
-					}
+					// Handler execution removed - simple configuration update only
+					log.Printf("Configuration synchronized successfully")
 				}
 			}
 		case <-cm.fileWatcherStop:
 			return
 		}
 	}
-}
-
-// RegisterReloadHandler registers a function to be called when the configuration is reloaded
-func (cm *ConfigManager) RegisterReloadHandler(handler func()) {
-	cm.mu.Lock()
-	defer cm.mu.Unlock()
-	cm.onConfigReload = append(cm.onConfigReload, handler)
 }
 
 // Close stops the file watcher if it's running
@@ -263,19 +215,6 @@ func (cm *ConfigManager) Close() {
 	}
 }
 
-// GetGlobalInterval returns the globalInterval from openAgent configuration
-func (cm *ConfigManager) GetGlobalInterval() string {
-	if cm.config != nil {
-		if features, ok := cm.config["features"].(map[interface{}]interface{}); ok {
-			if openAgent, ok := features["openAgent"].(map[interface{}]interface{}); ok {
-				if globalInterval, ok := openAgent["globalInterval"].(string); ok {
-					return globalInterval
-				}
-			}
-		}
-	}
-	return "60s" // Default to 60 seconds as per config example
-}
 
 // GetScrapingInterval returns the scraping loop interval from openAgent configuration
 func (cm *ConfigManager) GetScrapingInterval() string {
@@ -288,8 +227,8 @@ func (cm *ConfigManager) GetScrapingInterval() string {
 			}
 		}
 	}
-	// Default to globalInterval if scrapingInterval is not set
-	return cm.GetGlobalInterval()
+	// Default to 60s if scrapingInterval is not set
+	return "60s"
 }
 
 // GetMaxConcurrency returns the maximum concurrent scrapers from openAgent configuration

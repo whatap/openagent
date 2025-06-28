@@ -1,12 +1,14 @@
 package open
 
 import (
+	"context"
 	"fmt"
 	"github.com/whatap/gointernal/net/secure"
 	"github.com/whatap/golib/logger/logfile"
 	"github.com/whatap/golib/util/dateutil"
 	"math/rand"
 	"open-agent/pkg/config"
+	"open-agent/pkg/discovery"
 	"open-agent/pkg/k8s"
 	"open-agent/pkg/model"
 	"open-agent/pkg/processor"
@@ -15,8 +17,6 @@ import (
 	"os"
 	"strings"
 	"time"
-
-	corev1 "k8s.io/api/core/v1"
 )
 
 const (
@@ -116,42 +116,55 @@ func BootOpenAgent(version, commitHash string, logger *logfile.FileLogger) {
 
 	// Create the configuration manager
 	configManager := config.NewConfigManager()
-
 	// Check if configManager is nil (which happens if the configuration file is missing)
 	if configManager == nil {
 		logger.Println("BootOpenAgent", "Failed to create configuration manager. Please ensure scrape_config.yaml exists.")
 		return
 	}
 
+	// Create service discovery
+	serviceDiscovery := discovery.NewKubernetesDiscovery(configManager)
+
+	// Start service discovery as an independent component
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				logger.Println("ServiceDiscoveryPanic", fmt.Sprintf("Recovered from panic: %v", r))
+			}
+		}()
+
+		// Load targets from configuration
+		scrapeConfigs := configManager.GetScrapeConfigs()
+		if scrapeConfigs != nil {
+			if err := serviceDiscovery.LoadTargets(scrapeConfigs); err != nil {
+				logger.Println("ServiceDiscovery", fmt.Sprintf("Failed to load targets: %v", err))
+				return
+			}
+
+			// Start service discovery
+			if err := serviceDiscovery.Start(context.Background()); err != nil {
+				logger.Println("ServiceDiscovery", fmt.Sprintf("Failed to start service discovery: %v", err))
+				return
+			}
+
+			logger.Println("ServiceDiscovery", "Service discovery started successfully")
+		} else {
+			logger.Println("ServiceDiscovery", "No scrape configs found, service discovery not started")
+		}
+	}()
+
 	// Create and start the scraper manager with error recovery and shutdown handling
-	scraperManager := scraper.NewScraperManager(configManager, rawQueue)
+	scraperManager := scraper.NewScraperManager(configManager, serviceDiscovery, rawQueue)
 
-	// Note: RegisterReloadHandler removed as ConfigManager is singleton and ScraperManager
-	// already queries latest configuration on each scraping cycle via configManager.Get*() methods
-	// Configuration changes will be automatically reflected in the next scraping cycle (max 30s delay)
-	logger.Println("BootOpenAgent", "ScraperManager will automatically use latest configuration from singleton ConfigManager")
+	// Configuration changes will be automatically reflected in the next scraping cycle
+	logger.Println("BootOpenAgent", "ScraperManager will automatically use latest configuration")
 
-	// Set up ConfigMap watcher for configuration changes in Kubernetes environments
+	// ConfigManager automatically handles ConfigMap synchronization
 	k8sClient := k8s.GetInstance()
 	if k8sClient.IsInitialized() {
-		logger.Println("BootOpenAgent", "Setting up ConfigMap watcher for configuration changes")
-		k8sClient.RegisterConfigMapHandler(func(configMap *corev1.ConfigMap) {
-			// Only handle our specific ConfigMap
-			if configMap.Namespace == "whatap-monitoring" && configMap.Name == "whatap-open-agent-config" {
-				logger.Println("BootOpenAgent", fmt.Sprintf("ConfigMap %s/%s changed, reloading configuration", configMap.Namespace, configMap.Name))
-				// Reload the configuration
-				// The ConfigManager will notify all registered handlers after reloading
-				err := configManager.LoadConfig()
-				if err != nil {
-					logger.Println("BootOpenAgent", fmt.Sprintf("Error reloading configuration: %v", err))
-					return
-				}
-				// No need to manually call scraperManager.ReloadConfig() here
-				// It will be called automatically by the ConfigManager
-			}
-		})
+		logger.Println("BootOpenAgent", "Kubernetes environment detected - ConfigManager handles ConfigMap synchronization")
 	} else {
-		logger.Println("BootOpenAgent", "Kubernetes client not initialized, using file watcher for configuration changes")
+		logger.Println("BootOpenAgent", "Non-Kubernetes environment detected - ConfigManager watches scrape_config.yaml")
 	}
 
 	go func() {
