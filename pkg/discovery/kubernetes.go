@@ -184,13 +184,6 @@ func (kd *KubernetesDiscovery) processPodTarget(pod *corev1.Pod, config Discover
 
 		// Build target URL
 		path := endpoint.Path
-		if path == "" {
-			path = config.Path
-		}
-		if path == "" {
-			path = "/metrics"
-		}
-
 		url := fmt.Sprintf("%s://%s:%s%s", scheme, podIP, endpoint.Port, path)
 
 		// Create or update target
@@ -453,13 +446,6 @@ func (kd *KubernetesDiscovery) processServiceTarget(service *corev1.Service, con
 
 					// Build target URL
 					path := endpointConfig.Path
-					if path == "" {
-						path = config.Path
-					}
-					if path == "" {
-						path = "/metrics"
-					}
-
 					url := fmt.Sprintf("%s://%s:%d%s", scheme, address.IP, endpointPort, path)
 
 					// Create target
@@ -496,13 +482,6 @@ func (kd *KubernetesDiscovery) processServiceTarget(service *corev1.Service, con
 
 					// Build target URL
 					path := endpointConfig.Path
-					if path == "" {
-						path = config.Path
-					}
-					if path == "" {
-						path = "/metrics"
-					}
-
 					url := fmt.Sprintf("%s://%s:%d%s", scheme, address.IP, endpointPort, path)
 
 					// Create target
@@ -637,8 +616,6 @@ func (kd *KubernetesDiscovery) parseDiscoveryConfig(targetConfig map[string]inte
 			}
 		}
 	}
-
-
 
 	return discoveryConfig, nil
 }
