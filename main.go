@@ -17,6 +17,7 @@ import (
 	"net"
 	"open-agent/open"
 	"open-agent/pkg/client"
+	"open-agent/pkg/config"
 	"open-agent/pkg/k8s"
 	"open-agent/util/io"
 	"os"
@@ -295,26 +296,32 @@ func main() {
 	if len(os.Args) > 1 {
 		arg1 := os.Args[1]
 		if arg1 == "foreground" {
-			fmt.Println("mode:foreground")
+			if config.IsDebugEnabled() {
+				fmt.Println("mode:foreground")
+			}
 
 			// Check if we have a second argument
 			if len(os.Args) > 2 {
 				arg2 := os.Args[2]
 				if arg2 == "debug" {
-					fmt.Println("Debug mode: enabled")
+					if config.IsDebugEnabled() {
+						fmt.Println("Debug mode: enabled")
+					}
 					err := os.Setenv("debug", "true")
-					if err != nil {
+					if err != nil && config.IsDebugEnabled() {
 						fmt.Println("error: failed to set env:debug ")
 					}
 				} else if arg2 == "local-minikube" {
-					fmt.Println("Using local minikube configuration")
+					if config.IsDebugEnabled() {
+						fmt.Println("Using local minikube configuration")
+					}
 					// Set the kubeconfig path to the default location
 					home := os.Getenv("HOME")
 					kubeconfigPath := filepath.Join(home, ".kube", "config")
 					k8s.SetKubeconfigPath(kubeconfigPath)
 
 					// Set up HTTP client with Minikube certificates
-					if err := client.SetupMinikubeClient(home); err != nil {
+					if err := client.SetupMinikubeClient(home); err != nil && config.IsDebugEnabled() {
 						fmt.Printf("Warning: Failed to set up minikube client: %v\n", err)
 					}
 				}

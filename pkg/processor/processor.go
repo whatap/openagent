@@ -114,8 +114,10 @@ func (p *Processor) processRawData(rawData *model.ScrapeRawData) {
 					nonNanCount++
 				}
 			}
-			logutil.Printf("DEBUG", "After applying relabel configs: %d non-NaN metrics out of %d total", 
-				nonNanCount, len(conversionResult.GetOpenMxList()))
+			if config.IsDebugEnabled() {
+				logutil.Printf("DEBUG", "After applying relabel configs: %d non-NaN metrics out of %d total", 
+					nonNanCount, len(conversionResult.GetOpenMxList()))
+			}
 		}
 	}
 
@@ -137,7 +139,7 @@ func (p *Processor) processRawData(rawData *model.ScrapeRawData) {
 				nodeLabelsAdded++
 
 				// Log first few metrics that get node labels for debugging
-				if nodeLabelsAdded <= 3 {
+				if config.IsDebugEnabled() && nodeLabelsAdded <= 3 {
 					logutil.Printf("DEBUG_NODE", "Added node label to metric[%d]: %s, node=%s", 
 						nodeLabelsAdded, openMx.Metric, rawData.NodeName)
 				}
@@ -148,7 +150,7 @@ func (p *Processor) processRawData(rawData *model.ScrapeRawData) {
 	}
 
 	// Summary logging for node label addition
-	if rawData.AddNodeLabel && rawData.NodeName != "" {
+	if config.IsDebugEnabled() && rawData.AddNodeLabel && rawData.NodeName != "" {
 		logutil.Printf("DEBUG_NODE", "Node label addition summary: %d out of %d valid metrics received node label (node=%s)", 
 			nodeLabelsAdded, totalValidMetrics, rawData.NodeName)
 	}
@@ -168,7 +170,7 @@ func (p *Processor) processRawData(rawData *model.ScrapeRawData) {
 			nodePropertiesAdded++
 
 			// Log first few help items that get node properties for debugging
-			if nodePropertiesAdded <= 3 {
+			if config.IsDebugEnabled() && nodePropertiesAdded <= 3 {
 				logutil.Printf("DEBUG_NODE", "Added node property to OpenMxHelp[%d]: metric=%s, node=%s", 
 					i+1, openMxHelp.Metric, rawData.NodeName)
 			}
@@ -176,7 +178,7 @@ func (p *Processor) processRawData(rawData *model.ScrapeRawData) {
 	}
 
 	// Summary logging for node property addition
-	if rawData.AddNodeLabel && rawData.NodeName != "" {
+	if config.IsDebugEnabled() && rawData.AddNodeLabel && rawData.NodeName != "" {
 		logutil.Printf("DEBUG_NODE", "Node property addition summary: %d out of %d help items received node property (node=%s)", 
 			nodePropertiesAdded, totalHelpItems, rawData.NodeName)
 	}

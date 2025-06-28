@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	configPkg "open-agent/pkg/config"
 	"open-agent/pkg/model"
 )
 
@@ -121,13 +122,15 @@ func ApplyRelabelConfigs(metrics []*model.OpenMx, configs model.RelabelConfigs) 
 	}
 
 	// Log the number of metrics and configs
-	fmt.Printf("[DEBUG] ApplyRelabelConfigs: Processing %d metrics with %d configs\n", len(metrics), len(configs))
+	if configPkg.IsDebugEnabled() {
+		fmt.Printf("[DEBUG] ApplyRelabelConfigs: Processing %d metrics with %d configs\n", len(metrics), len(configs))
 
-	// Log the first few configs for debugging
-	for i, config := range configs {
-		if i < 3 { // Log only first 3 configs to avoid flooding logs
-			fmt.Printf("[DEBUG] Config[%d]: Action=%s, SourceLabels=%v, Regex=%s\n", 
-				i, config.Action, config.SourceLabels, config.Regex)
+		// Log the first few configs for debugging
+		for i, config := range configs {
+			if i < 3 { // Log only first 3 configs to avoid flooding logs
+				fmt.Printf("[DEBUG] Config[%d]: Action=%s, SourceLabels=%v, Regex=%s\n", 
+					i, config.Action, config.SourceLabels, config.Regex)
+			}
 		}
 	}
 
@@ -147,20 +150,22 @@ func ApplyRelabelConfigs(metrics []*model.OpenMx, configs model.RelabelConfigs) 
 		if !isNaN && math.IsNaN(metric.Value) {
 			droppedCount++
 			// Log some dropped metrics for debugging
-			if droppedCount <= 5 {
+			if configPkg.IsDebugEnabled() && droppedCount <= 5 {
 				fmt.Printf("[DEBUG] Metric dropped: %s\n", metric.Metric)
 			}
 		} else if !math.IsNaN(metric.Value) {
 			keptCount++
 			// Log some kept metrics for debugging
-			if keptCount <= 5 {
+			if configPkg.IsDebugEnabled() && keptCount <= 5 {
 				fmt.Printf("[DEBUG] Metric kept: %s\n", metric.Metric)
 			}
 		}
 	}
 
-	fmt.Printf("[DEBUG] ApplyRelabelConfigs: Result - %d metrics kept, %d metrics dropped\n", 
-		keptCount, droppedCount)
+	if configPkg.IsDebugEnabled() {
+		fmt.Printf("[DEBUG] ApplyRelabelConfigs: Result - %d metrics kept, %d metrics dropped\n", 
+			keptCount, droppedCount)
+	}
 }
 
 // applyRelabelConfig applies a single relabeling configuration to an OpenMx object
@@ -229,14 +234,14 @@ func matchesRegex(metric *model.OpenMx, config *model.RelabelConfig) bool {
 	if len(config.SourceLabels) == 0 {
 		re, err := regexp.Compile(config.Regex)
 		if err != nil {
-			if debugThisMetric {
+			if configPkg.IsDebugEnabled() && debugThisMetric {
 				fmt.Printf("[DEBUG] matchesRegex: Error compiling regex '%s': %v\n", config.Regex, err)
 			}
 			return false
 		}
 
 		matches := re.MatchString(metric.Metric)
-		if debugThisMetric {
+		if configPkg.IsDebugEnabled() && debugThisMetric {
 			fmt.Printf("[DEBUG] matchesRegex: Metric '%s' against regex '%s' => %v\n", 
 				metric.Metric, config.Regex, matches)
 		}
@@ -248,7 +253,7 @@ func matchesRegex(metric *model.OpenMx, config *model.RelabelConfig) bool {
 	for _, sourceLabel := range config.SourceLabels {
 		if sourceLabel == "__name__" {
 			values = append(values, metric.Metric)
-			if debugThisMetric {
+			if configPkg.IsDebugEnabled() && debugThisMetric {
 				fmt.Printf("[DEBUG] matchesRegex: Using __name__ = '%s'\n", metric.Metric)
 			}
 		} else {
@@ -258,7 +263,7 @@ func matchesRegex(metric *model.OpenMx, config *model.RelabelConfig) bool {
 				if label.Key == sourceLabel {
 					values = append(values, label.Value)
 					found = true
-					if debugThisMetric {
+					if configPkg.IsDebugEnabled() && debugThisMetric {
 						fmt.Printf("[DEBUG] matchesRegex: Found label %s = '%s'\n", sourceLabel, label.Value)
 					}
 					break
@@ -266,7 +271,7 @@ func matchesRegex(metric *model.OpenMx, config *model.RelabelConfig) bool {
 			}
 			if !found {
 				values = append(values, "")
-				if debugThisMetric {
+				if configPkg.IsDebugEnabled() && debugThisMetric {
 					fmt.Printf("[DEBUG] matchesRegex: Label %s not found, using empty string\n", sourceLabel)
 				}
 			}
@@ -275,21 +280,21 @@ func matchesRegex(metric *model.OpenMx, config *model.RelabelConfig) bool {
 
 	// Concatenate values with separator
 	value := strings.Join(values, config.Separator)
-	if debugThisMetric {
+	if configPkg.IsDebugEnabled() && debugThisMetric {
 		fmt.Printf("[DEBUG] matchesRegex: Concatenated value: '%s'\n", value)
 	}
 
 	// Match against regex
 	re, err := regexp.Compile(config.Regex)
 	if err != nil {
-		if debugThisMetric {
+		if configPkg.IsDebugEnabled() && debugThisMetric {
 			fmt.Printf("[DEBUG] matchesRegex: Error compiling regex '%s': %v\n", config.Regex, err)
 		}
 		return false
 	}
 
 	matches := re.MatchString(value)
-	if debugThisMetric {
+	if configPkg.IsDebugEnabled() && debugThisMetric {
 		fmt.Printf("[DEBUG] matchesRegex: Value '%s' against regex '%s' => %v\n", 
 			value, config.Regex, matches)
 	}

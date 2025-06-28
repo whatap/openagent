@@ -373,7 +373,9 @@ func Shutdown() {
 // promaxLogMessage logs a message to both the file logger and stdout
 func promaxLogMessage(logger *logfile.FileLogger, tag string, message string) {
 	logger.Println(tag, message)
-	fmt.Printf("[%s] %s\n", tag, message)
+	if config.IsDebugEnabled() {
+		fmt.Printf("[%s] %s\n", tag, message)
+	}
 }
 
 // process creates and sends metrics and help information
