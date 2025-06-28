@@ -108,7 +108,35 @@ func (kd *KubernetesDiscovery) discoveryLoop() {
 
 // discoverTargets discovers all configured targets
 func (kd *KubernetesDiscovery) discoverTargets() {
-	for _, discoveryConfig := range kd.configs {
+	// Get latest configuration from ConfigManager (uses Informer cache automatically)
+	scrapeConfigs := kd.configManager.GetScrapeConfigs()
+	if scrapeConfigs == nil {
+		logutil.Printf("WARN", "No scrape configs available from ConfigManager")
+		return
+	}
+
+	// Parse latest configurations into discovery configs
+	currentConfigs := make([]DiscoveryConfig, 0)
+	for _, targetConfig := range scrapeConfigs {
+		parseDiscoveryConfig, err := kd.parseDiscoveryConfig(targetConfig)
+		if err != nil {
+			logutil.Printf("ERROR", "Failed to parse target config: %v", err)
+			continue
+		}
+
+		// Skip disabled targets
+		if !parseDiscoveryConfig.Enabled {
+			logutil.Printf("DEBUG", "Target %s is disabled, skipping", parseDiscoveryConfig.TargetName)
+			continue
+		}
+
+		currentConfigs = append(currentConfigs, parseDiscoveryConfig)
+	}
+
+	logutil.Printf("DEBUG", "Using %d current discovery configurations from latest ConfigManager data", len(currentConfigs))
+
+	// Execute discovery with latest configurations
+	for _, discoveryConfig := range currentConfigs {
 		switch discoveryConfig.Type {
 		case "PodMonitor":
 			kd.discoverPodTargets(discoveryConfig)

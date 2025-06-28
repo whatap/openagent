@@ -141,6 +141,22 @@ func (cm *ConfigManager) GetScrapeInterval() string {
 
 // GetScrapeConfigs returns the scrape_configs section or the openAgent.scrapConfigs/targets section if available
 func (cm *ConfigManager) GetScrapeConfigs() []map[string]interface{} {
+	// Always reload configuration from Informer cache in Kubernetes environment
+	if cm.k8sClient.IsInitialized() {
+		log.Printf("GetScrapeConfigs: Reloading latest configuration from Informer cache")
+		if err := cm.LoadConfig(); err != nil {
+			log.Printf("GetScrapeConfigs: Failed to reload config from Informer cache: %v", err)
+			// Continue with existing config as fallback
+		} else {
+			log.Printf("GetScrapeConfigs: Successfully reloaded configuration from Informer cache")
+		}
+	}
+
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+
+	log.Printf("GetScrapeConfigs: Processing current configuration")
+
 	// First, try to get the openAgent section from the CR format
 	if cm.config != nil {
 		// Check if we have a features section (CR format)
@@ -149,10 +165,12 @@ func (cm *ConfigManager) GetScrapeConfigs() []map[string]interface{} {
 			if openAgent, ok := features["openAgent"].(map[interface{}]interface{}); ok {
 				// Check if openAgent is enabled
 				if enabled, ok := openAgent["enabled"].(bool); ok && enabled {
+					log.Printf("GetScrapeConfigs: OpenAgent is enabled, checking for targets")
 					// First check if we have a targets section (new format)
 					if targets, ok := openAgent["targets"].([]interface{}); ok {
+						log.Printf("GetScrapeConfigs: Found %d targets in configuration", len(targets))
 						result := make([]map[string]interface{}, 0, len(targets))
-						for _, target := range targets {
+						for i, target := range targets {
 							if targetMap, ok := target.(map[interface{}]interface{}); ok {
 								// Convert map[interface{}]interface{} to map[string]interface{}
 								stringMap := make(map[string]interface{})
@@ -162,15 +180,33 @@ func (cm *ConfigManager) GetScrapeConfigs() []map[string]interface{} {
 									}
 								}
 
+								// Log target name for debugging
+								if targetName, ok := stringMap["targetName"].(string); ok {
+									log.Printf("GetScrapeConfigs: Processing target %d: %s", i+1, targetName)
+								}
+
 								result = append(result, stringMap)
 							}
 						}
+						log.Printf("GetScrapeConfigs: Returning %d processed targets", len(result))
 						return result
+					} else {
+						log.Printf("GetScrapeConfigs: No targets section found in openAgent configuration")
 					}
+				} else {
+					log.Printf("GetScrapeConfigs: OpenAgent is disabled or enabled flag not found")
 				}
+			} else {
+				log.Printf("GetScrapeConfigs: No openAgent section found in features")
 			}
+		} else {
+			log.Printf("GetScrapeConfigs: No features section found in configuration")
 		}
+	} else {
+		log.Printf("GetScrapeConfigs: Configuration is nil")
 	}
+
+	log.Printf("GetScrapeConfigs: No valid scrape configs found, returning nil")
 	return nil
 }
 
