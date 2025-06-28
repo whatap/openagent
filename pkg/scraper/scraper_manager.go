@@ -1,6 +1,7 @@
 package scraper
 
 import (
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -427,7 +428,32 @@ func (sm *ScraperManager) scrapingLoop() {
 func (sm *ScraperManager) performScraping() {
 	// Get ready targets from discovery
 	targets := sm.discovery.GetReadyTargets()
-	logutil.Printf("PerformScraping", "targets: %v", targets)
+
+	// Detailed logging of targets for debugging
+	logutil.Printf("PerformScraping", "Found %d ready targets", len(targets))
+	for i, target := range targets {
+		logutil.Printf("PerformScraping", "Target[%d] ID: %s, URL: %s, State: %s",
+			i, target.ID, target.URL, target.State)
+		logutil.Printf("PerformScraping", "Target[%d] Labels: %+v", i, target.Labels)
+
+		// Log important metadata fields
+		metadataLog := "Target[" + fmt.Sprintf("%d", i) + "] Metadata: "
+		if len(target.Metadata) > 0 {
+			for k, v := range target.Metadata {
+				// Skip logging large or complex metadata
+				switch v.(type) {
+				case map[string]interface{}, []interface{}:
+					metadataLog += fmt.Sprintf("%s: [complex type], ", k)
+				default:
+					metadataLog += fmt.Sprintf("%s: %v, ", k, v)
+				}
+			}
+		} else {
+			metadataLog += "empty"
+		}
+		logutil.Printf("PerformScraping", metadataLog)
+	}
+
 	if len(targets) == 0 {
 		logutil.Printf("DEBUG", "No ready targets found for scraping")
 		return
