@@ -30,23 +30,3 @@ func NewScrapeRawDataWithNodeName(targetURL, rawData string, metricRelabelConfig
 		AddNodeLabel:         addNodeLabel,
 	}
 }
-
-// NewScrapeRawDataFromFilterConfig creates a new ScrapeRawData instance from a filterConfig map
-// This is kept for backward compatibility
-func NewScrapeRawDataFromFilterConfig(targetURL, rawData string, filterConfig map[string]interface{}) *ScrapeRawData {
-	// Extract metricRelabelConfigs from filterConfig if present
-	var metricRelabelConfigs RelabelConfigs
-	if filterConfig != nil {
-		if relabelConfigs, ok := filterConfig["metricRelabelConfigs"].([]interface{}); ok {
-			metricRelabelConfigs = ParseRelabelConfigs(relabelConfigs)
-		}
-	}
-
-	return &ScrapeRawData{
-		TargetURL:            targetURL,
-		RawData:              rawData,
-		MetricRelabelConfigs: metricRelabelConfigs,
-		NodeName:             "",
-		AddNodeLabel:         false,
-	}
-}

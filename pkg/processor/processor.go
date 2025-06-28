@@ -43,6 +43,18 @@ func (p *Processor) processLoop() {
 func (p *Processor) processRawData(rawData *model.ScrapeRawData) {
 	logutil.Printf("INFO", "Processing raw data from target: %s", rawData.TargetURL)
 
+	// Debug logging for addNodeLabel functionality
+	logutil.Printf("DEBUG_NODE", "NodeName: '%s', AddNodeLabel: %v", rawData.NodeName, rawData.AddNodeLabel)
+	if rawData.AddNodeLabel && rawData.NodeName != "" {
+		logutil.Printf("DEBUG_NODE", "Node label will be added to metrics: node=%s", rawData.NodeName)
+	} else if rawData.AddNodeLabel && rawData.NodeName == "" {
+		logutil.Printf("DEBUG_NODE", "AddNodeLabel is true but NodeName is empty - no node label will be added")
+	} else if !rawData.AddNodeLabel && rawData.NodeName != "" {
+		logutil.Printf("DEBUG_NODE", "NodeName is available (%s) but AddNodeLabel is false - no node label will be added", rawData.NodeName)
+	} else {
+		logutil.Printf("DEBUG_NODE", "No node label will be added (AddNodeLabel: %v, NodeName: '%s')", rawData.AddNodeLabel, rawData.NodeName)
+	}
+
 	// Convert the raw data to OpenMx format
 	conversionResult, err := converter.Convert(rawData.RawData)
 	if err != nil {
@@ -53,35 +65,99 @@ func (p *Processor) processRawData(rawData *model.ScrapeRawData) {
 	// Apply metric relabeling if configured
 	if len(rawData.MetricRelabelConfigs) > 0 {
 		logutil.Printf("INFO", "Applying metric relabeling with %d configs", len(rawData.MetricRelabelConfigs))
+
+		// Detailed logging of metric relabel configs
+		for i, metricRelabelConfig := range rawData.MetricRelabelConfigs {
+			logutil.Printf("DEBUG", "MetricRelabelConfig[%d]: Action=%s, SourceLabels=%v, Regex=%s", 
+				i, metricRelabelConfig.Action, metricRelabelConfig.SourceLabels, metricRelabelConfig.Regex)
+		}
+
+		// Log metrics before applying relabel configs
+		if config.IsDebugEnabled() {
+			logutil.Printf("DEBUG", "Before applying relabel configs: %d metrics", len(conversionResult.GetOpenMxList()))
+			for i, metric := range conversionResult.GetOpenMxList() {
+				if i < 5 { // Log only first 5 metrics to avoid flooding logs
+					logutil.Printf("DEBUG", "Metric[%d] before relabeling: %s, Value=%v", i, metric.Metric, metric.Value)
+				}
+			}
+		}
+
 		converter.ApplyRelabelConfigs(conversionResult.GetOpenMxList(), rawData.MetricRelabelConfigs)
+
+		// Log metrics after applying relabel configs
+		if config.IsDebugEnabled() {
+			// Count non-NaN metrics
+			nonNanCount := 0
+			for _, metric := range conversionResult.GetOpenMxList() {
+				if !math.IsNaN(metric.Value) {
+					nonNanCount++
+				}
+			}
+			logutil.Printf("DEBUG", "After applying relabel configs: %d non-NaN metrics out of %d total", 
+				nonNanCount, len(conversionResult.GetOpenMxList()))
+		}
 	}
 
 	// Filter out metrics with NaN and infinite values
 	filteredOpenMxList := make([]*model.OpenMx, 0, len(conversionResult.GetOpenMxList()))
+	nodeLabelsAdded := 0
+	totalValidMetrics := 0
+
 	for _, openMx := range conversionResult.GetOpenMxList() {
 		if !math.IsNaN(openMx.Value) && !math.IsInf(openMx.Value, 0) {
+			totalValidMetrics++
+
 			// Add instance label to each valid OpenMx
 			openMx.AddLabel("instance", rawData.TargetURL)
 
 			// Add node label if available and enabled
 			if rawData.NodeName != "" && rawData.AddNodeLabel {
 				openMx.AddLabel("node", rawData.NodeName)
+				nodeLabelsAdded++
+
+				// Log first few metrics that get node labels for debugging
+				if nodeLabelsAdded <= 3 {
+					logutil.Printf("DEBUG_NODE", "Added node label to metric[%d]: %s, node=%s", 
+						nodeLabelsAdded, openMx.Metric, rawData.NodeName)
+				}
 			}
 
 			filteredOpenMxList = append(filteredOpenMxList, openMx)
 		}
 	}
+
+	// Summary logging for node label addition
+	if rawData.AddNodeLabel && rawData.NodeName != "" {
+		logutil.Printf("DEBUG_NODE", "Node label addition summary: %d out of %d valid metrics received node label (node=%s)", 
+			nodeLabelsAdded, totalValidMetrics, rawData.NodeName)
+	}
 	// Replace the original list with the filtered list
 	conversionResult.OpenMxList = filteredOpenMxList
 
 	// Add instance property to each OpenMxHelp
-	for _, openMxHelp := range conversionResult.GetOpenMxHelpList() {
+	nodePropertiesAdded := 0
+	totalHelpItems := len(conversionResult.GetOpenMxHelpList())
+
+	for i, openMxHelp := range conversionResult.GetOpenMxHelpList() {
 		openMxHelp.Put("instance", rawData.TargetURL)
 
 		// Add node property if available and enabled
 		if rawData.NodeName != "" && rawData.AddNodeLabel {
 			openMxHelp.Put("node", rawData.NodeName)
+			nodePropertiesAdded++
+
+			// Log first few help items that get node properties for debugging
+			if nodePropertiesAdded <= 3 {
+				logutil.Printf("DEBUG_NODE", "Added node property to OpenMxHelp[%d]: metric=%s, node=%s", 
+					i+1, openMxHelp.Metric, rawData.NodeName)
+			}
 		}
+	}
+
+	// Summary logging for node property addition
+	if rawData.AddNodeLabel && rawData.NodeName != "" {
+		logutil.Printf("DEBUG_NODE", "Node property addition summary: %d out of %d help items received node property (node=%s)", 
+			nodePropertiesAdded, totalHelpItems, rawData.NodeName)
 	}
 
 	// Check if debug is enabled in whatap.conf

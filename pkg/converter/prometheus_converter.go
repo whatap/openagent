@@ -120,11 +120,47 @@ func ApplyRelabelConfigs(metrics []*model.OpenMx, configs model.RelabelConfigs) 
 		return
 	}
 
+	// Log the number of metrics and configs
+	fmt.Printf("[DEBUG] ApplyRelabelConfigs: Processing %d metrics with %d configs\n", len(metrics), len(configs))
+
+	// Log the first few configs for debugging
+	for i, config := range configs {
+		if i < 3 { // Log only first 3 configs to avoid flooding logs
+			fmt.Printf("[DEBUG] Config[%d]: Action=%s, SourceLabels=%v, Regex=%s\n", 
+				i, config.Action, config.SourceLabels, config.Regex)
+		}
+	}
+
+	// Track metrics that are kept and dropped
+	keptCount := 0
+	droppedCount := 0
+
 	for _, metric := range metrics {
+		originalValue := metric.Value
+		isNaN := math.IsNaN(originalValue)
+
 		for _, config := range configs {
 			applyRelabelConfig(metric, config)
 		}
+
+		// Check if metric was kept or dropped
+		if !isNaN && math.IsNaN(metric.Value) {
+			droppedCount++
+			// Log some dropped metrics for debugging
+			if droppedCount <= 5 {
+				fmt.Printf("[DEBUG] Metric dropped: %s\n", metric.Metric)
+			}
+		} else if !math.IsNaN(metric.Value) {
+			keptCount++
+			// Log some kept metrics for debugging
+			if keptCount <= 5 {
+				fmt.Printf("[DEBUG] Metric kept: %s\n", metric.Metric)
+			}
+		}
 	}
+
+	fmt.Printf("[DEBUG] ApplyRelabelConfigs: Result - %d metrics kept, %d metrics dropped\n", 
+		keptCount, droppedCount)
 }
 
 // applyRelabelConfig applies a single relabeling configuration to an OpenMx object
@@ -179,13 +215,32 @@ func applyRelabelConfig(metric *model.OpenMx, config *model.RelabelConfig) {
 
 // matchesRegex checks if a metric matches the regex in the relabel config
 func matchesRegex(metric *model.OpenMx, config *model.RelabelConfig) bool {
+	// For detailed debugging of specific metrics (add metric names you want to debug)
+	debugThisMetric := false
+	metricsToDebug := []string{"apiserver_request_total", "apiserver_current_inflight_requests", "etcd_server_requests_total"}
+	for _, m := range metricsToDebug {
+		if strings.Contains(metric.Metric, m) {
+			debugThisMetric = true
+			break
+		}
+	}
+
 	// If no source labels are specified, use the metric name
 	if len(config.SourceLabels) == 0 {
 		re, err := regexp.Compile(config.Regex)
 		if err != nil {
+			if debugThisMetric {
+				fmt.Printf("[DEBUG] matchesRegex: Error compiling regex '%s': %v\n", config.Regex, err)
+			}
 			return false
 		}
-		return re.MatchString(metric.Metric)
+
+		matches := re.MatchString(metric.Metric)
+		if debugThisMetric {
+			fmt.Printf("[DEBUG] matchesRegex: Metric '%s' against regex '%s' => %v\n", 
+				metric.Metric, config.Regex, matches)
+		}
+		return matches
 	}
 
 	// Extract values from source labels
@@ -193,6 +248,9 @@ func matchesRegex(metric *model.OpenMx, config *model.RelabelConfig) bool {
 	for _, sourceLabel := range config.SourceLabels {
 		if sourceLabel == "__name__" {
 			values = append(values, metric.Metric)
+			if debugThisMetric {
+				fmt.Printf("[DEBUG] matchesRegex: Using __name__ = '%s'\n", metric.Metric)
+			}
 		} else {
 			// Find the label value
 			found := false
@@ -200,24 +258,42 @@ func matchesRegex(metric *model.OpenMx, config *model.RelabelConfig) bool {
 				if label.Key == sourceLabel {
 					values = append(values, label.Value)
 					found = true
+					if debugThisMetric {
+						fmt.Printf("[DEBUG] matchesRegex: Found label %s = '%s'\n", sourceLabel, label.Value)
+					}
 					break
 				}
 			}
 			if !found {
 				values = append(values, "")
+				if debugThisMetric {
+					fmt.Printf("[DEBUG] matchesRegex: Label %s not found, using empty string\n", sourceLabel)
+				}
 			}
 		}
 	}
 
 	// Concatenate values with separator
 	value := strings.Join(values, config.Separator)
+	if debugThisMetric {
+		fmt.Printf("[DEBUG] matchesRegex: Concatenated value: '%s'\n", value)
+	}
 
 	// Match against regex
 	re, err := regexp.Compile(config.Regex)
 	if err != nil {
+		if debugThisMetric {
+			fmt.Printf("[DEBUG] matchesRegex: Error compiling regex '%s': %v\n", config.Regex, err)
+		}
 		return false
 	}
-	return re.MatchString(value)
+
+	matches := re.MatchString(value)
+	if debugThisMetric {
+		fmt.Printf("[DEBUG] matchesRegex: Value '%s' against regex '%s' => %v\n", 
+			value, config.Regex, matches)
+	}
+	return matches
 }
 
 // getReplacementValue gets the replacement value for a label

@@ -202,20 +202,20 @@ func BootOpenAgent(version, commitHash string, logger *logfile.FileLogger) {
 		}
 	}()
 
-	// Create and start the processor with error recovery and shutdown handling
-	processor := processor.NewProcessor(rawQueue, processedQueue)
+	// Create and start the newProcessor with error recovery and shutdown handling
+	newProcessor := processor.NewProcessor(rawQueue, processedQueue)
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
 				logger.Println("ProcessorPanic", fmt.Sprintf("Recovered from panic: %v", r))
-				// Restart the processor after a short delay
+				// Restart the newProcessor after a short delay
 				select {
 				case <-shutdownCh:
 					// Don't restart if we're shutting down
 					doneCh <- struct{}{}
 					return
 				case <-time.After(5 * time.Second):
-					processor.Start()
+					newProcessor.Start()
 				}
 			} else {
 				// Normal exit
@@ -226,7 +226,7 @@ func BootOpenAgent(version, commitHash string, logger *logfile.FileLogger) {
 		// Start processing in a separate goroutine so we can listen for shutdown
 		processDone := make(chan struct{})
 		go func() {
-			processor.Start()
+			newProcessor.Start()
 			close(processDone)
 		}()
 
@@ -237,7 +237,7 @@ func BootOpenAgent(version, commitHash string, logger *logfile.FileLogger) {
 		case <-shutdownCh:
 			// Shutdown requested, cleanup will be handled by defer
 			logger.Println("Processor", "Shutdown requested")
-			// Here we would call a stop method on processor if it had one
+			// Here we would call a stop method on newProcessor if it had one
 		}
 	}()
 

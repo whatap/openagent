@@ -61,7 +61,7 @@ func NewLogger() *Logger {
 	whatapLogger.logID = "whatap"
 
 	//Default 10초 설정
-	whatapLogger.confLogInterval = 10
+	whatapLogger.confLogInterval = 0
 
 	//Default true
 	whatapLogger.confLogRotationEnabled = true

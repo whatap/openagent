@@ -74,21 +74,6 @@ func NewPodMonitorScraperTask(targetName string, namespace string, selector map[
 	}
 }
 
-// NewServiceMonitorScraperTask creates a new ScraperTask instance for a ServiceMonitor target
-func NewServiceMonitorScraperTask(targetName string, namespace string, selector map[string]string, port string, path string, scheme string, metricRelabelConfigs model.RelabelConfigs, tlsConfig *client.TLSConfig) *ScraperTask {
-	return &ScraperTask{
-		TargetName:           targetName,
-		TargetType:           ServiceMonitorType,
-		Namespace:            namespace,
-		Selector:             selector,
-		Port:                 port,
-		Path:                 path,
-		Scheme:               scheme,
-		MetricRelabelConfigs: metricRelabelConfigs,
-		TLSConfig:            tlsConfig,
-	}
-}
-
 // NewStaticEndpointsScraperTask creates a new ScraperTask instance for a StaticEndpoints target
 func NewStaticEndpointsScraperTask(targetName string, targetURL string, path string, scheme string, metricRelabelConfigs model.RelabelConfigs, tlsConfig *client.TLSConfig) *ScraperTask {
 	return &ScraperTask{

@@ -1,5 +1,7 @@
 package model
 
+import "open-agent/tools/util/logutil"
+
 // RelabelConfig represents a relabeling configuration for metrics
 type RelabelConfig struct {
 	SourceLabels []string `yaml:"source_labels,omitempty"`
@@ -30,12 +32,11 @@ func NewRelabelConfigs() RelabelConfigs {
 	return make(RelabelConfigs, 0)
 }
 
-// ParseRelabelConfigs parses a list of relabel configs from a generic interface
 func ParseRelabelConfigs(configs []interface{}) RelabelConfigs {
 	if configs == nil {
+		logutil.Errorf("ParseRelabelConfigs","configs is nil")
 		return nil
 	}
-
 	result := make(RelabelConfigs, 0, len(configs))
 	for _, c := range configs {
 		if configMap, ok := c.(map[string]interface{}); ok {
