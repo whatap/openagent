@@ -430,11 +430,11 @@ func (sm *ScraperManager) performScraping() {
 	targets := sm.discovery.GetReadyTargets()
 
 	// Detailed logging of targets for debugging
-	logutil.Printf("PerformScraping", "Found %d ready targets", len(targets))
+	logutil.Printf("PerformScraping01", "Found %d ready targets", len(targets))
 	for i, target := range targets {
-		logutil.Printf("PerformScraping", "Target[%d] ID: %s, URL: %s, State: %s",
+		logutil.Printf("PerformScraping02", "Target[%d] ID: %s, URL: %s, State: %s",
 			i, target.ID, target.URL, target.State)
-		logutil.Printf("PerformScraping", "Target[%d] Labels: %+v", i, target.Labels)
+		logutil.Printf("PerformScraping03", "Target[%d] Labels: %+v", i, target.Labels)
 
 		// Log important metadata fields
 		metadataLog := "Target[" + fmt.Sprintf("%d", i) + "] Metadata: "
@@ -451,7 +451,7 @@ func (sm *ScraperManager) performScraping() {
 		} else {
 			metadataLog += "empty"
 		}
-		logutil.Printf("PerformScraping", metadataLog)
+		logutil.Printf("PerformScraping04", metadataLog)
 	}
 
 	if len(targets) == 0 {
