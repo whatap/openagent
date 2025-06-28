@@ -306,19 +306,17 @@ func (kd *KubernetesDiscovery) updateTarget(newTarget *Target) {
 	kd.targetsMutex.Lock()
 	defer kd.targetsMutex.Unlock()
 
-	existingTarget, exists := kd.targets[newTarget.ID]
+	_, exists := kd.targets[newTarget.ID]
 
 	if !exists {
 		// New target
 		kd.targets[newTarget.ID] = newTarget
 		logutil.Printf("DEBUG", "Added new target: %s (state: %s)", newTarget.ID, newTarget.State)
-	} else if existingTarget.State != newTarget.State || existingTarget.URL != newTarget.URL {
-		// Target updated
-		kd.targets[newTarget.ID] = newTarget
-		logutil.Printf("DEBUG", "Updated target: %s (state: %s -> %s)", newTarget.ID, existingTarget.State, newTarget.State)
 	} else {
-		// Just update last seen time
-		existingTarget.LastSeen = newTarget.LastSeen
+		// Always update target to ensure metadata changes are reflected
+		// This includes metricRelabelConfigs changes from ConfigMap updates
+		kd.targets[newTarget.ID] = newTarget
+		logutil.Printf("DEBUG", "Updated target: %s (forced update to ensure metadata sync)", newTarget.ID)
 	}
 }
 
