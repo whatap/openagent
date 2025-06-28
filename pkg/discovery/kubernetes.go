@@ -110,6 +110,7 @@ func (kd *KubernetesDiscovery) discoveryLoop() {
 func (kd *KubernetesDiscovery) discoverTargets() {
 	// Get latest configuration from ConfigManager (uses Informer cache automatically)
 	scrapeConfigs := kd.configManager.GetScrapeConfigs()
+	logutil.Printf("discoverTargets", "scrapeConfigs: %+v", scrapeConfigs)
 	if scrapeConfigs == nil {
 		logutil.Printf("WARN", "No scrape configs available from ConfigManager")
 		return
