@@ -14,6 +14,7 @@ import (
 	"open-agent/pkg/processor"
 	"open-agent/pkg/scraper"
 	"open-agent/pkg/sender"
+	"open-agent/tools/util/logutil"
 	"os"
 	"strings"
 	"time"
@@ -66,10 +67,10 @@ func BootOpenAgent(version, commitHash string, logger *logfile.FileLogger) {
 		commitHash = "unknown"
 	}
 
-	logger.Infof("\nWHATAP Open Agent Starting\n")
-	logger.Infof(" Version: %s\n", version)
-	logger.Infof(" Build: %s\n", commitHash)
-	logger.Infof(" Started at: %s\n\n", time.Now().Format("2006-01-02 15:04:05 MST"))
+	logutil.Infof("START", "\nWHATAP Open Agent Starting\n")
+	logutil.Infof("START", " Version: %s\n", version)
+	logutil.Infof("START", " Build: %s\n", commitHash)
+	logutil.Infof("START", " Started at: %s\n\n", time.Now().Format("2006-01-02 15:04:05 MST"))
 
 	// Get configuration values using the config package
 	servers := make([]string, 0)
@@ -77,10 +78,10 @@ func BootOpenAgent(version, commitHash string, logger *logfile.FileLogger) {
 	hosts := config.Get("WHATAP_HOST")
 	port := config.GetIntWithDefault("WHATAP_PORT", 6600)
 	if license == "" || hosts == "" {
-		logger.Println("Please set the following configuration values:")
-		logger.Println("WHATAP_LICENSE - The license key for the WHATAP server")
-		logger.Println("WHATAP_HOST - The hostname or IP address of the WHATAP server")
-		logger.Println("WHATAP_PORT - The port number of the WHATAP server (default: 6600)")
+		logutil.Println("SETTING", "Please set the following configuration values:")
+		logutil.Println("SETTING", "WHATAP_LICENSE - The license key for the WHATAP server")
+		logutil.Println("SETTING", "WHATAP_HOST - The hostname or IP address of the WHATAP server")
+		logutil.Println("SETTING", "WHATAP_PORT - The port number of the WHATAP server (default: 6600)")
 		os.Exit(1)
 	}
 
@@ -96,7 +97,7 @@ func BootOpenAgent(version, commitHash string, logger *logfile.FileLogger) {
 	// Check if debug mode is enabled
 	debugMode := os.Getenv("debug")
 	if debugMode == "true" {
-		logger.Infoln("BootOpenAgent-Debug mode enabled, running process method")
+		logutil.Infoln("BootOpenAgent", "Debug mode enabled, running process method")
 		// Initialize random number generator
 		rand.Seed(time.Now().UnixNano())
 		// Run the process method in a loop
@@ -116,7 +117,7 @@ func BootOpenAgent(version, commitHash string, logger *logfile.FileLogger) {
 	configManager := config.NewConfigManager()
 	// Check if configManager is nil (which happens if the configuration file is missing)
 	if configManager == nil {
-		logger.Infoln("BootOpenAgent - Failed to create configuration manager. Please ensure scrape_config.yaml exists.")
+		logutil.Infoln("BootOpenAgent", "Failed to create configuration manager. Please ensure scrape_config.yaml exists.")
 		return
 	}
 
@@ -127,7 +128,7 @@ func BootOpenAgent(version, commitHash string, logger *logfile.FileLogger) {
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				logger.Println("ServiceDiscoveryPanic", fmt.Sprintf("Recovered from panic: %v", r))
+				logutil.Errorln("ServiceDiscoveryPanic", fmt.Sprintf("Recovered from panic: %v", r))
 			}
 		}()
 
@@ -135,19 +136,19 @@ func BootOpenAgent(version, commitHash string, logger *logfile.FileLogger) {
 		scrapeConfigs := configManager.GetScrapeConfigs()
 		if scrapeConfigs != nil {
 			if err := serviceDiscovery.LoadTargets(scrapeConfigs); err != nil {
-				logger.Println("ServiceDiscovery", fmt.Sprintf("Failed to load targets: %v", err))
+				logutil.Println("ServiceDiscovery", fmt.Sprintf("Failed to load targets: %v", err))
 				return
 			}
 
 			// Start service discovery
 			if err := serviceDiscovery.Start(context.Background()); err != nil {
-				logger.Println("ServiceDiscovery", fmt.Sprintf("Failed to start service discovery: %v", err))
+				logutil.Println("ServiceDiscovery", fmt.Sprintf("Failed to start service discovery: %v", err))
 				return
 			}
 
-			logger.Infoln("ServiceDiscovery", "Service discovery started successfully")
+			logutil.Infoln("ServiceDiscovery", "Service discovery started successfully")
 		} else {
-			logger.Infoln("ServiceDiscovery", "No scrape configs found, service discovery not started")
+			logutil.Infoln("ServiceDiscovery", "No scrape configs found, service discovery not started")
 		}
 	}()
 

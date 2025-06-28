@@ -77,6 +77,38 @@ func (kd *KubernetesDiscovery) GetReadyTargets() []*Target {
 			readyTargets = append(readyTargets, target)
 		}
 	}
+
+	// Debug logging for returned targets
+	logutil.Printf("DEBUG_GET_TARGETS", "GetReadyTargets: Found %d ready targets out of %d total targets", 
+		len(readyTargets), len(kd.targets))
+
+	for i, target := range readyTargets {
+		logutil.Printf("DEBUG_GET_TARGETS", "ReadyTarget[%d]: ID=%s, URL=%s, State=%s", 
+			i, target.ID, target.URL, target.State)
+
+		// Check metricRelabelConfigs in metadata
+		if metricRelabelConfigs, ok := target.Metadata["metricRelabelConfigs"].([]interface{}); ok {
+			logutil.Printf("DEBUG_GET_TARGETS", "ReadyTarget[%d]: metricRelabelConfigs count=%d", 
+				i, len(metricRelabelConfigs))
+
+			// Log first config for debugging
+			if len(metricRelabelConfigs) > 0 {
+				if configMap, ok := metricRelabelConfigs[0].(map[string]interface{}); ok {
+					logutil.Printf("DEBUG_GET_TARGETS", "ReadyTarget[%d]: First config - action=%v, regex=%v", 
+						i, configMap["action"], configMap["regex"])
+				}
+			}
+		} else {
+			logutil.Printf("DEBUG_GET_TARGETS", "ReadyTarget[%d]: No metricRelabelConfigs found in metadata", i)
+		}
+
+		// Log target labels for debugging
+		logutil.Printf("DEBUG_GET_TARGETS", "ReadyTarget[%d]: Labels=%+v", i, target.Labels)
+
+		// Log last seen time to check if target is fresh
+		logutil.Printf("DEBUG_GET_TARGETS", "ReadyTarget[%d]: LastSeen=%s", i, target.LastSeen.Format("15:04:05"))
+	}
+
 	return readyTargets
 }
 
@@ -495,7 +527,25 @@ func (kd *KubernetesDiscovery) processServiceTarget(service *corev1.Service, con
 						LastSeen: time.Now(),
 					}
 
+					// Debug log before updateTarget
+					logutil.Printf("DEBUG_TARGET_UPDATE", "BEFORE updateTarget - Target ID: %s", targetID)
+					logutil.Printf("DEBUG_TARGET_UPDATE", "BEFORE updateTarget - Target URL: %s", url)
+					logutil.Printf("DEBUG_TARGET_UPDATE", "BEFORE updateTarget - metricRelabelConfigs count: %d", len(endpointConfig.MetricRelabelConfigs))
+					if len(endpointConfig.MetricRelabelConfigs) > 0 {
+						for i, config := range endpointConfig.MetricRelabelConfigs {
+							if configMap, ok := config.(map[string]interface{}); ok {
+								logutil.Printf("DEBUG_TARGET_UPDATE", "BEFORE updateTarget - Config[%d]: action=%v, regex=%v", 
+									i, configMap["action"], configMap["regex"])
+							}
+						}
+					} else {
+						logutil.Printf("DEBUG_TARGET_UPDATE", "BEFORE updateTarget - No metricRelabelConfigs found")
+					}
+
 					kd.updateTarget(target)
+
+					// Debug log after updateTarget
+					logutil.Printf("DEBUG_TARGET_UPDATE", "AFTER updateTarget - Target ID: %s successfully updated", targetID)
 					logutil.Printf("DEBUG", "Added ServiceMonitor target: %s (URL: %s)", targetID, url)
 				}
 
@@ -527,7 +577,25 @@ func (kd *KubernetesDiscovery) processServiceTarget(service *corev1.Service, con
 						LastSeen: time.Now(),
 					}
 
+					// Debug log before updateTarget (NotReady)
+					logutil.Printf("DEBUG_TARGET_UPDATE", "BEFORE updateTarget (NotReady) - Target ID: %s", targetID)
+					logutil.Printf("DEBUG_TARGET_UPDATE", "BEFORE updateTarget (NotReady) - Target URL: %s", url)
+					logutil.Printf("DEBUG_TARGET_UPDATE", "BEFORE updateTarget (NotReady) - metricRelabelConfigs count: %d", len(endpointConfig.MetricRelabelConfigs))
+					if len(endpointConfig.MetricRelabelConfigs) > 0 {
+						for i, config := range endpointConfig.MetricRelabelConfigs {
+							if configMap, ok := config.(map[string]interface{}); ok {
+								logutil.Printf("DEBUG_TARGET_UPDATE", "BEFORE updateTarget (NotReady) - Config[%d]: action=%v, regex=%v", 
+									i, configMap["action"], configMap["regex"])
+							}
+						}
+					} else {
+						logutil.Printf("DEBUG_TARGET_UPDATE", "BEFORE updateTarget (NotReady) - No metricRelabelConfigs found")
+					}
+
 					kd.updateTarget(target)
+
+					// Debug log after updateTarget (NotReady)
+					logutil.Printf("DEBUG_TARGET_UPDATE", "AFTER updateTarget (NotReady) - Target ID: %s successfully updated", targetID)
 					logutil.Printf("DEBUG", "Added pending ServiceMonitor target: %s (URL: %s)", targetID, url)
 				}
 			}

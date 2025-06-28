@@ -1,7 +1,6 @@
 package scraper
 
 import (
-	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -436,22 +435,33 @@ func (sm *ScraperManager) performScraping() {
 			i, target.ID, target.URL, target.State)
 		logutil.Printf("PerformScraping03", "Target[%d] Labels: %+v", i, target.Labels)
 
-		// Log important metadata fields
-		metadataLog := "Target[" + fmt.Sprintf("%d", i) + "] Metadata: "
-		if len(target.Metadata) > 0 {
-			for k, v := range target.Metadata {
-				// Skip logging large or complex metadata
-				switch v.(type) {
-				case map[string]interface{}, []interface{}:
-					metadataLog += fmt.Sprintf("%s: [complex type], ", k)
-				default:
-					metadataLog += fmt.Sprintf("%s: %v, ", k, v)
+		// Log important metadata fields with special handling for metricRelabelConfigs
+		logutil.Printf("PerformScraping04", "Target[%d] Metadata keys: %v", i, getMapKeys(target.Metadata))
+
+		// Special detailed logging for metricRelabelConfigs
+		if metricRelabelConfigs, ok := target.Metadata["metricRelabelConfigs"].([]interface{}); ok {
+			logutil.Printf("PerformScraping05", "Target[%d] metricRelabelConfigs: Found %d configs", i, len(metricRelabelConfigs))
+
+			for j, config := range metricRelabelConfigs {
+				if configMap, ok := config.(map[string]interface{}); ok {
+					logutil.Printf("PerformScraping06", "Target[%d] Config[%d]: action=%v, regex=%v, sourceLabels=%v",
+						i, j, configMap["action"], configMap["regex"], configMap["source_labels"])
 				}
 			}
 		} else {
-			metadataLog += "empty"
+			logutil.Printf("PerformScraping05", "Target[%d] metricRelabelConfigs: NOT FOUND or wrong type", i)
 		}
-		logutil.Printf("PerformScraping04", metadataLog)
+
+		// Log other important metadata
+		if targetName, ok := target.Metadata["targetName"].(string); ok {
+			logutil.Printf("PerformScraping07", "Target[%d] targetName: %s", i, targetName)
+		}
+		if targetType, ok := target.Metadata["type"].(string); ok {
+			logutil.Printf("PerformScraping08", "Target[%d] type: %s", i, targetType)
+		}
+
+		// Log last seen time to check freshness
+		logutil.Printf("PerformScraping09", "Target[%d] LastSeen: %s", i, target.LastSeen.Format("15:04:05"))
 	}
 
 	if len(targets) == 0 {
@@ -626,7 +636,7 @@ func (sm *ScraperManager) createScraperTaskFromTarget(target *discovery.Target) 
 	// Create TLS config if present
 	var tlsConfig *client.TLSConfig
 	if endpoint, ok := target.Metadata["endpoint"].(discovery.EndpointConfig); ok {
-		logutil.Printf("CreateScraperTask", "Found endpoint config: path=%s, scheme=%s, interval=%s", 
+		logutil.Printf("CreateScraperTask", "Found endpoint config: path=%s, scheme=%s, interval=%s",
 			endpoint.Path, endpoint.Scheme, endpoint.Interval)
 
 		if endpoint.TLSConfig != nil {
@@ -668,9 +678,9 @@ func (sm *ScraperManager) createScraperTaskFromTarget(target *discovery.Target) 
 	scraperTask.AddNodeLabel = addNodeLabel
 
 	// Debug log for created scraper task
-	logutil.Printf("CreateScraperTask", "Created scraper task: type=%s, targetName=%s, targetURL=%s, path=%s, scheme=%s", 
+	logutil.Printf("CreateScraperTask", "Created scraper task: type=%s, targetName=%s, targetURL=%s, path=%s, scheme=%s",
 		scraperTask.TargetType, scraperTask.TargetName, scraperTask.TargetURL, scraperTask.Path, scraperTask.Scheme)
-	logutil.Printf("CreateScraperTask", "Scraper task node info: nodeName=%s, addNodeLabel=%v", 
+	logutil.Printf("CreateScraperTask", "Scraper task node info: nodeName=%s, addNodeLabel=%v",
 		scraperTask.NodeName, scraperTask.AddNodeLabel)
 
 	return scraperTask
