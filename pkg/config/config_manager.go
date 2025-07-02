@@ -262,7 +262,6 @@ func (cm *ConfigManager) GetScrapingInterval() string {
 			}
 		}
 	}
-	// Default to 60s if scrapingInterval is not set
 	return "30s"
 }
 

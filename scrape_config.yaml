@@ -1,7 +1,3 @@
-# Global configuration
-global:
-  scrape_interval: 15s  # Default interval between scrapes
-
 # New CR format configuration
 features:
   openAgent:
