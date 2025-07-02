@@ -79,34 +79,36 @@ func (kd *KubernetesDiscovery) GetReadyTargets() []*Target {
 	}
 
 	// Debug logging for returned targets
-	logutil.Printf("DEBUG_GET_TARGETS", "GetReadyTargets: Found %d ready targets out of %d total targets", 
-		len(readyTargets), len(kd.targets))
+	if config.IsDebugEnabled() {
+		logutil.Printf("DEBUG_GET_TARGETS", "GetReadyTargets: Found %d ready targets out of %d total targets", 
+			len(readyTargets), len(kd.targets))
 
-	for i, target := range readyTargets {
-		logutil.Printf("DEBUG_GET_TARGETS", "ReadyTarget[%d]: ID=%s, URL=%s, State=%s", 
-			i, target.ID, target.URL, target.State)
+		for i, target := range readyTargets {
+			logutil.Printf("DEBUG_GET_TARGETS", "ReadyTarget[%d]: ID=%s, URL=%s, State=%s", 
+				i, target.ID, target.URL, target.State)
 
-		// Check metricRelabelConfigs in metadata
-		if metricRelabelConfigs, ok := target.Metadata["metricRelabelConfigs"].([]interface{}); ok {
-			logutil.Printf("DEBUG_GET_TARGETS", "ReadyTarget[%d]: metricRelabelConfigs count=%d", 
-				i, len(metricRelabelConfigs))
+			// Check metricRelabelConfigs in metadata
+			if metricRelabelConfigs, ok := target.Metadata["metricRelabelConfigs"].([]interface{}); ok {
+				logutil.Printf("DEBUG_GET_TARGETS", "ReadyTarget[%d]: metricRelabelConfigs count=%d", 
+					i, len(metricRelabelConfigs))
 
-			// Log first config for debugging
-			if len(metricRelabelConfigs) > 0 {
-				if configMap, ok := metricRelabelConfigs[0].(map[string]interface{}); ok {
-					logutil.Printf("DEBUG_GET_TARGETS", "ReadyTarget[%d]: First config - action=%v, regex=%v", 
-						i, configMap["action"], configMap["regex"])
+				// Log first config for debugging
+				if len(metricRelabelConfigs) > 0 {
+					if configMap, ok := metricRelabelConfigs[0].(map[string]interface{}); ok {
+						logutil.Printf("DEBUG_GET_TARGETS", "ReadyTarget[%d]: First config - action=%v, regex=%v", 
+							i, configMap["action"], configMap["regex"])
+					}
 				}
+			} else {
+				logutil.Printf("DEBUG_GET_TARGETS", "ReadyTarget[%d]: No metricRelabelConfigs found in metadata", i)
 			}
-		} else {
-			logutil.Printf("DEBUG_GET_TARGETS", "ReadyTarget[%d]: No metricRelabelConfigs found in metadata", i)
+
+			// Log target labels for debugging
+			logutil.Printf("DEBUG_GET_TARGETS", "ReadyTarget[%d]: Labels=%+v", i, target.Labels)
+
+			// Log last seen time to check if target is fresh
+			logutil.Printf("DEBUG_GET_TARGETS", "ReadyTarget[%d]: LastSeen=%s", i, target.LastSeen.Format("15:04:05"))
 		}
-
-		// Log target labels for debugging
-		logutil.Printf("DEBUG_GET_TARGETS", "ReadyTarget[%d]: Labels=%+v", i, target.Labels)
-
-		// Log last seen time to check if target is fresh
-		logutil.Printf("DEBUG_GET_TARGETS", "ReadyTarget[%d]: LastSeen=%s", i, target.LastSeen.Format("15:04:05"))
 	}
 
 	return readyTargets
@@ -142,7 +144,9 @@ func (kd *KubernetesDiscovery) discoveryLoop() {
 func (kd *KubernetesDiscovery) discoverTargets() {
 	// Get latest configuration from ConfigManager (uses Informer cache automatically)
 	scrapeConfigs := kd.configManager.GetScrapeConfigs()
-	logutil.Printf("discoverTargets", "scrapeConfigs: %+v", scrapeConfigs)
+	if config.IsDebugEnabled() {
+		logutil.Printf("discoverTargets", "scrapeConfigs: %+v", scrapeConfigs)
+	}
 	if scrapeConfigs == nil {
 		logutil.Printf("WARN", "No scrape configs available from ConfigManager")
 		return
@@ -159,14 +163,18 @@ func (kd *KubernetesDiscovery) discoverTargets() {
 
 		// Skip disabled targets
 		if !parseDiscoveryConfig.Enabled {
-			logutil.Printf("DEBUG", "Target %s is disabled, skipping", parseDiscoveryConfig.TargetName)
+			if config.IsDebugEnabled() {
+				logutil.Printf("DEBUG", "Target %s is disabled, skipping", parseDiscoveryConfig.TargetName)
+			}
 			continue
 		}
 
 		currentConfigs = append(currentConfigs, parseDiscoveryConfig)
 	}
 
-	logutil.Printf("DEBUG", "Using %d current discovery configurations from latest ConfigManager data", len(currentConfigs))
+	if config.IsDebugEnabled() {
+		logutil.Printf("DEBUG", "Using %d current discovery configurations from latest ConfigManager data", len(currentConfigs))
+	}
 
 	// Execute discovery with latest configurations
 	for _, discoveryConfig := range currentConfigs {
@@ -185,7 +193,9 @@ func (kd *KubernetesDiscovery) discoverTargets() {
 
 // discoverPodTargets discovers Pod-based targets
 func (kd *KubernetesDiscovery) discoverPodTargets(config DiscoveryConfig) {
-	logutil.Printf("DEBUG", "Discovering PodMonitor targets for %s", config.TargetName)
+	if config.IsDebugEnabled() {
+		logutil.Printf("DEBUG", "Discovering PodMonitor targets for %s", config.TargetName)
+	}
 
 	if !kd.k8sClient.IsInitialized() {
 		logutil.Printf("WARN", "Kubernetes client not initialized for PodMonitor: %s", config.TargetName)

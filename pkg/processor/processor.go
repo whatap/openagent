@@ -44,36 +44,40 @@ func (p *Processor) processRawData(rawData *model.ScrapeRawData) {
 	logutil.Printf("INFO", "Processing raw data from target: %s", rawData.TargetURL)
 
 	// ===== METRIC RELABEL CONFIGS LOGGING (Before Processing) =====
-	logutil.Printf("METRIC_RELABEL", "=== MetricRelabelConfigs Status ===")
-	logutil.Printf("METRIC_RELABEL", "Target: %s", rawData.TargetURL)
-	logutil.Printf("METRIC_RELABEL", "Total MetricRelabelConfigs: %d", len(rawData.MetricRelabelConfigs))
+	if config.IsDebugEnabled() {
+		logutil.Printf("METRIC_RELABEL", "=== MetricRelabelConfigs Status ===")
+		logutil.Printf("METRIC_RELABEL", "Target: %s", rawData.TargetURL)
+		logutil.Printf("METRIC_RELABEL", "Total MetricRelabelConfigs: %d", len(rawData.MetricRelabelConfigs))
 
-	if len(rawData.MetricRelabelConfigs) == 0 {
-		logutil.Printf("METRIC_RELABEL", "No MetricRelabelConfigs found - all metrics will be kept")
-	} else {
-		logutil.Printf("METRIC_RELABEL", "MetricRelabelConfigs details:")
-		for i, config := range rawData.MetricRelabelConfigs {
-			logutil.Printf("METRIC_RELABEL", "  Config[%d]:", i)
-			logutil.Printf("METRIC_RELABEL", "    Action: %s", config.Action)
-			logutil.Printf("METRIC_RELABEL", "    SourceLabels: %v", config.SourceLabels)
-			logutil.Printf("METRIC_RELABEL", "    Regex: %s", config.Regex)
-			logutil.Printf("METRIC_RELABEL", "    TargetLabel: %s", config.TargetLabel)
-			logutil.Printf("METRIC_RELABEL", "    Replacement: %s", config.Replacement)
-			logutil.Printf("METRIC_RELABEL", "    Separator: %s", config.Separator)
+		if len(rawData.MetricRelabelConfigs) == 0 {
+			logutil.Printf("METRIC_RELABEL", "No MetricRelabelConfigs found - all metrics will be kept")
+		} else {
+			logutil.Printf("METRIC_RELABEL", "MetricRelabelConfigs details:")
+			for i, config := range rawData.MetricRelabelConfigs {
+				logutil.Printf("METRIC_RELABEL", "  Config[%d]:", i)
+				logutil.Printf("METRIC_RELABEL", "    Action: %s", config.Action)
+				logutil.Printf("METRIC_RELABEL", "    SourceLabels: %v", config.SourceLabels)
+				logutil.Printf("METRIC_RELABEL", "    Regex: %s", config.Regex)
+				logutil.Printf("METRIC_RELABEL", "    TargetLabel: %s", config.TargetLabel)
+				logutil.Printf("METRIC_RELABEL", "    Replacement: %s", config.Replacement)
+				logutil.Printf("METRIC_RELABEL", "    Separator: %s", config.Separator)
+			}
 		}
+		logutil.Printf("METRIC_RELABEL", "=== End MetricRelabelConfigs Status ===")
 	}
-	logutil.Printf("METRIC_RELABEL", "=== End MetricRelabelConfigs Status ===")
 
 	// Debug logging for addNodeLabel functionality
-	logutil.Printf("DEBUG_NODE", "NodeName: '%s', AddNodeLabel: %v", rawData.NodeName, rawData.AddNodeLabel)
-	if rawData.AddNodeLabel && rawData.NodeName != "" {
-		logutil.Printf("DEBUG_NODE", "Node label will be added to metrics: node=%s", rawData.NodeName)
-	} else if rawData.AddNodeLabel && rawData.NodeName == "" {
-		logutil.Printf("DEBUG_NODE", "AddNodeLabel is true but NodeName is empty - no node label will be added")
-	} else if !rawData.AddNodeLabel && rawData.NodeName != "" {
-		logutil.Printf("DEBUG_NODE", "NodeName is available (%s) but AddNodeLabel is false - no node label will be added", rawData.NodeName)
-	} else {
-		logutil.Printf("DEBUG_NODE", "No node label will be added (AddNodeLabel: %v, NodeName: '%s')", rawData.AddNodeLabel, rawData.NodeName)
+	if config.IsDebugEnabled() {
+		logutil.Printf("DEBUG_NODE", "NodeName: '%s', AddNodeLabel: %v", rawData.NodeName, rawData.AddNodeLabel)
+		if rawData.AddNodeLabel && rawData.NodeName != "" {
+			logutil.Printf("DEBUG_NODE", "Node label will be added to metrics: node=%s", rawData.NodeName)
+		} else if rawData.AddNodeLabel && rawData.NodeName == "" {
+			logutil.Printf("DEBUG_NODE", "AddNodeLabel is true but NodeName is empty - no node label will be added")
+		} else if !rawData.AddNodeLabel && rawData.NodeName != "" {
+			logutil.Printf("DEBUG_NODE", "NodeName is available (%s) but AddNodeLabel is false - no node label will be added", rawData.NodeName)
+		} else {
+			logutil.Printf("DEBUG_NODE", "No node label will be added (AddNodeLabel: %v, NodeName: '%s')", rawData.AddNodeLabel, rawData.NodeName)
+		}
 	}
 
 	// Convert the raw data to OpenMx format using the collection timestamp
@@ -88,9 +92,11 @@ func (p *Processor) processRawData(rawData *model.ScrapeRawData) {
 		logutil.Printf("INFO", "Applying metric relabeling with %d configs", len(rawData.MetricRelabelConfigs))
 
 		// Detailed logging of metric relabel configs
-		for i, metricRelabelConfig := range rawData.MetricRelabelConfigs {
-			logutil.Printf("DEBUG", "MetricRelabelConfig[%d]: Action=%s, SourceLabels=%v, Regex=%s", 
-				i, metricRelabelConfig.Action, metricRelabelConfig.SourceLabels, metricRelabelConfig.Regex)
+		if config.IsDebugEnabled() {
+			for i, metricRelabelConfig := range rawData.MetricRelabelConfigs {
+				logutil.Printf("DEBUG", "MetricRelabelConfig[%d]: Action=%s, SourceLabels=%v, Regex=%s", 
+					i, metricRelabelConfig.Action, metricRelabelConfig.SourceLabels, metricRelabelConfig.Regex)
+			}
 		}
 
 		// Log metrics before applying relabel configs
@@ -114,10 +120,8 @@ func (p *Processor) processRawData(rawData *model.ScrapeRawData) {
 					nonNanCount++
 				}
 			}
-			if config.IsDebugEnabled() {
-				logutil.Printf("DEBUG", "After applying relabel configs: %d non-NaN metrics out of %d total", 
-					nonNanCount, len(conversionResult.GetOpenMxList()))
-			}
+			logutil.Printf("DEBUG", "After applying relabel configs: %d non-NaN metrics out of %d total", 
+				nonNanCount, len(conversionResult.GetOpenMxList()))
 		}
 	}
 
