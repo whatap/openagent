@@ -76,8 +76,8 @@ func (p *Processor) processRawData(rawData *model.ScrapeRawData) {
 		logutil.Printf("DEBUG_NODE", "No node label will be added (AddNodeLabel: %v, NodeName: '%s')", rawData.AddNodeLabel, rawData.NodeName)
 	}
 
-	// Convert the raw data to OpenMx format
-	conversionResult, err := converter.Convert(rawData.RawData)
+	// Convert the raw data to OpenMx format using the collection timestamp
+	conversionResult, err := converter.ConvertWithTimestamp(rawData.RawData, rawData.CollectionTime)
 	if err != nil {
 		logutil.Printf("ERROR", "Error converting raw data: %v", err)
 		return

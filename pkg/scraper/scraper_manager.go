@@ -13,16 +13,32 @@ import (
 	"open-agent/tools/util/logutil"
 )
 
+// TargetScheduler manages individual target scraping with its own goroutine and ticker
+type TargetScheduler struct {
+	target   *discovery.Target
+	interval time.Duration
+	ticker   *time.Ticker
+	stopCh   chan struct{}
+	sm       *ScraperManager
+}
+
 // ScraperManager is responsible for managing scraper tasks
-// It now uses ServiceDiscovery for target discovery and focuses only on scraping logic
+// It now uses individual target schedulers instead of a global scheduler
 type ScraperManager struct {
 	configManager *config.ConfigManager
 	discovery     discovery.ServiceDiscovery
 	rawQueue      chan *model.ScrapeRawData
 
+	// Individual target schedulers
+	targetSchedulers map[string]*TargetScheduler
+	schedulerMutex   sync.RWMutex
+
 	// Track last scrape times to avoid over-scraping
 	lastScrapeTime  map[string]time.Time
 	lastScrapeMutex sync.RWMutex
+
+	// Control channels
+	stopCh chan struct{}
 }
 
 // matchNamespaceSelector checks if a namespace matches the namespace selector
@@ -372,139 +388,185 @@ func (sm *ScraperManager) matchPodSelector(podLabels map[string]string, podSelec
 // NewScraperManager creates a new ScraperManager instance
 func NewScraperManager(configManager *config.ConfigManager, discovery discovery.ServiceDiscovery, rawQueue chan *model.ScrapeRawData) *ScraperManager {
 	sm := &ScraperManager{
-		configManager:  configManager,
-		discovery:      discovery,
-		rawQueue:       rawQueue,
-		lastScrapeTime: make(map[string]time.Time),
+		configManager:    configManager,
+		discovery:        discovery,
+		rawQueue:         rawQueue,
+		targetSchedulers: make(map[string]*TargetScheduler),
+		lastScrapeTime:   make(map[string]time.Time),
+		stopCh:           make(chan struct{}),
 	}
 
 	return sm
 }
 
-// StartScraping starts the scraping process
+// StartScraping starts the scraping process with individual target schedulers
 func (sm *ScraperManager) StartScraping() {
-	// Start scraping loop
-	go sm.scrapingLoop()
+	// Start target management loop
+	go sm.targetManagementLoop()
 
-	logutil.Println("INFO", "Scraping started")
+	logutil.Println("INFO", "Individual target scraping started")
 }
 
-// scrapingLoop runs the periodic scraping process
-func (sm *ScraperManager) scrapingLoop() {
-	// Get configurable scraping interval
-	scrapingIntervalStr := sm.configManager.GetScrapingInterval()
-	scrapingIntervalSeconds, err := sm.configManager.ParseInterval(scrapingIntervalStr)
+// targetManagementLoop manages individual target schedulers
+func (sm *ScraperManager) targetManagementLoop() {
+	// Get minimum interval for target management checks
+	minimumIntervalStr := sm.configManager.GetMinimumInterval()
+	minimumIntervalSeconds, err := sm.configManager.ParseInterval(minimumIntervalStr)
 	if err != nil {
-		logutil.Printf("WARN", "Error parsing scraping interval: %v. Using default of 30 seconds.", err)
-		scrapingIntervalSeconds = 30
+		logutil.Printf("WARN", "Error parsing minimum interval: %v. Using default of 1 second.", err)
+		minimumIntervalSeconds = 1
 	}
-	scrapingInterval := time.Duration(scrapingIntervalSeconds) * time.Second
 
-	logutil.Printf("INFO", "Starting scraping loop with interval: %v", scrapingInterval)
-	ticker := time.NewTicker(scrapingInterval)
+	// Use minimum interval for target management checks, but at least 5 seconds for efficiency
+	managementInterval := time.Duration(minimumIntervalSeconds) * time.Second
+	if managementInterval < 5*time.Second {
+		managementInterval = 5 * time.Second
+	}
+
+	logutil.Printf("INFO", "Starting target management loop with interval: %v", managementInterval)
+	ticker := time.NewTicker(managementInterval)
 	defer ticker.Stop()
-
-	// Counter for periodic cleanup
-	cleanupCounter := 0
-	const cleanupInterval = 10 // Cleanup every 10 iterations
 
 	for {
 		select {
 		case <-ticker.C:
-			sm.performScraping()
-
-			// Periodic cleanup to prevent memory leaks
-			cleanupCounter++
-			if cleanupCounter >= cleanupInterval {
-				sm.cleanupOldTargets()
-				cleanupCounter = 0
-			}
+			sm.updateTargetSchedulers()
+		case <-sm.stopCh:
+			sm.stopAllSchedulers()
+			return
 		}
 	}
 }
 
-// performScraping performs batch scraping of all ready targets
-func (sm *ScraperManager) performScraping() {
-	// Get ready targets from discovery
+// updateTargetSchedulers manages the lifecycle of individual target schedulers
+func (sm *ScraperManager) updateTargetSchedulers() {
+	// Get current ready targets
 	targets := sm.discovery.GetReadyTargets()
+	currentTargetIDs := make(map[string]bool)
 
-	// Detailed logging of targets for debugging
-	logutil.Printf("PerformScraping01", "Found %d ready targets", len(targets))
-	for i, target := range targets {
-		logutil.Printf("PerformScraping02", "Target[%d] ID: %s, URL: %s, State: %s",
-			i, target.ID, target.URL, target.State)
-		logutil.Printf("PerformScraping03", "Target[%d] Labels: %+v", i, target.Labels)
+	logutil.Printf("DEBUG", "Updating target schedulers for %d targets", len(targets))
 
-		// Log important metadata fields with special handling for metricRelabelConfigs
-		logutil.Printf("PerformScraping04", "Target[%d] Metadata keys: %v", i, getMapKeys(target.Metadata))
-
-		// Special detailed logging for metricRelabelConfigs
-		if metricRelabelConfigs, ok := target.Metadata["metricRelabelConfigs"].([]interface{}); ok {
-			logutil.Printf("PerformScraping05", "Target[%d] metricRelabelConfigs: Found %d configs", i, len(metricRelabelConfigs))
-
-			for j, config := range metricRelabelConfigs {
-				if configMap, ok := config.(map[string]interface{}); ok {
-					logutil.Printf("PerformScraping06", "Target[%d] Config[%d]: action=%v, regex=%v, sourceLabels=%v",
-						i, j, configMap["action"], configMap["regex"], configMap["source_labels"])
-				}
-			}
-		} else {
-			logutil.Printf("PerformScraping05", "Target[%d] metricRelabelConfigs: NOT FOUND or wrong type", i)
-		}
-
-		// Log other important metadata
-		if targetName, ok := target.Metadata["targetName"].(string); ok {
-			logutil.Printf("PerformScraping07", "Target[%d] targetName: %s", i, targetName)
-		}
-		if targetType, ok := target.Metadata["type"].(string); ok {
-			logutil.Printf("PerformScraping08", "Target[%d] type: %s", i, targetType)
-		}
-
-		// Log last seen time to check freshness
-		logutil.Printf("PerformScraping09", "Target[%d] LastSeen: %s", i, target.LastSeen.Format("15:04:05"))
-	}
-
-	if len(targets) == 0 {
-		logutil.Printf("DEBUG", "No ready targets found for scraping")
-		return
-	}
-
-	// Calculate dynamic concurrency
-	maxConcurrency := sm.configManager.GetMaxConcurrency()
-	if maxConcurrency <= 0 {
-		// Dynamic concurrency: use target count but with reasonable limits
-		maxConcurrency = len(targets)
-		if maxConcurrency > 50 { // Cap at 50 to prevent resource exhaustion
-			maxConcurrency = 50
-		} else if maxConcurrency < 1 {
-			maxConcurrency = 1
-		}
-	}
-
-	logutil.Printf("DEBUG", "Scraping %d targets with max concurrency: %d", len(targets), maxConcurrency)
-
-	// Parallel scraping with semaphore to limit concurrency
-	var wg sync.WaitGroup
-	semaphore := make(chan struct{}, maxConcurrency)
-
+	// Start schedulers for new targets and update existing ones
 	for _, target := range targets {
-		wg.Add(1)
-		go func(t *discovery.Target) {
-			defer wg.Done()
-			semaphore <- struct{}{}        // Acquire semaphore
-			defer func() { <-semaphore }() // Release semaphore
+		currentTargetIDs[target.ID] = true
 
-			sm.scrapeTarget(t)
-		}(target)
+		sm.schedulerMutex.RLock()
+		existingScheduler, exists := sm.targetSchedulers[target.ID]
+		sm.schedulerMutex.RUnlock()
+
+		if !exists {
+			// Start new scheduler for this target
+			sm.startTargetScheduler(target)
+		} else {
+			// Check if interval has changed
+			newInterval := sm.getTargetInterval(target)
+			if existingScheduler.interval != newInterval {
+				logutil.Printf("INFO", "Target %s interval changed from %v to %v, restarting scheduler",
+					target.ID, existingScheduler.interval, newInterval)
+				sm.stopTargetScheduler(target.ID)
+				sm.startTargetScheduler(target)
+			}
+		}
 	}
 
-	// Wait for all scraping to complete
-	wg.Wait()
+	// Stop schedulers for targets that are no longer ready
+	sm.schedulerMutex.RLock()
+	var schedulersToStop []string
+	for targetID := range sm.targetSchedulers {
+		if !currentTargetIDs[targetID] {
+			schedulersToStop = append(schedulersToStop, targetID)
+		}
+	}
+	sm.schedulerMutex.RUnlock()
 
-	logutil.Printf("INFO", "Completed scraping %d targets", len(targets))
+	for _, targetID := range schedulersToStop {
+		logutil.Printf("INFO", "Stopping scheduler for target %s (no longer ready)", targetID)
+		sm.stopTargetScheduler(targetID)
+	}
 }
 
-// scrapeTarget performs scraping for a single target with interval checking
+// startTargetScheduler starts an individual scheduler for a target
+func (sm *ScraperManager) startTargetScheduler(target *discovery.Target) {
+	interval := sm.getTargetInterval(target)
+
+	// Apply minimum interval constraint
+	minimumIntervalStr := sm.configManager.GetMinimumInterval()
+	minimumIntervalSeconds, err := sm.configManager.ParseInterval(minimumIntervalStr)
+	if err != nil {
+		minimumIntervalSeconds = 1 // Default to 1 second
+	}
+	minimumInterval := time.Duration(minimumIntervalSeconds) * time.Second
+
+	if interval < minimumInterval {
+		logutil.Printf("WARN", "Target %s interval %v is less than minimum %v, using minimum",
+			target.ID, interval, minimumInterval)
+		interval = minimumInterval
+	}
+
+	scheduler := &TargetScheduler{
+		target:   target,
+		interval: interval,
+		ticker:   time.NewTicker(interval),
+		stopCh:   make(chan struct{}),
+		sm:       sm,
+	}
+
+	sm.schedulerMutex.Lock()
+	sm.targetSchedulers[target.ID] = scheduler
+	sm.schedulerMutex.Unlock()
+
+	// Start the scheduler goroutine
+	go func() {
+		defer scheduler.ticker.Stop()
+
+		logutil.Printf("INFO", "Started scheduler for target %s with interval %v", target.ID, interval)
+
+		for {
+			select {
+			case <-scheduler.ticker.C:
+				sm.scrapeTarget(scheduler.target)
+			case <-scheduler.stopCh:
+				logutil.Printf("INFO", "Stopped scheduler for target %s", target.ID)
+				return
+			}
+		}
+	}()
+}
+
+// stopTargetScheduler stops an individual target scheduler
+func (sm *ScraperManager) stopTargetScheduler(targetID string) {
+	sm.schedulerMutex.Lock()
+	defer sm.schedulerMutex.Unlock()
+
+	if scheduler, exists := sm.targetSchedulers[targetID]; exists {
+		close(scheduler.stopCh)
+		delete(sm.targetSchedulers, targetID)
+	}
+}
+
+// stopAllSchedulers stops all target schedulers
+func (sm *ScraperManager) stopAllSchedulers() {
+	sm.schedulerMutex.Lock()
+	defer sm.schedulerMutex.Unlock()
+
+	logutil.Printf("INFO", "Stopping all %d target schedulers", len(sm.targetSchedulers))
+
+	for targetID, scheduler := range sm.targetSchedulers {
+		close(scheduler.stopCh)
+		logutil.Printf("DEBUG", "Stopped scheduler for target %s", targetID)
+	}
+
+	// Clear the map
+	sm.targetSchedulers = make(map[string]*TargetScheduler)
+}
+
+// Stop gracefully stops the scraper manager
+func (sm *ScraperManager) Stop() {
+	logutil.Printf("INFO", "Stopping ScraperManager")
+	close(sm.stopCh)
+}
+
+// scrapeTarget performs scraping for a single target (called by individual schedulers)
 func (sm *ScraperManager) scrapeTarget(target *discovery.Target) {
 	// Add panic recovery to prevent individual target failures from crashing the scraper
 	defer func() {
@@ -512,15 +574,6 @@ func (sm *ScraperManager) scrapeTarget(target *discovery.Target) {
 			logutil.Infoln("ERROR", "Panic recovered while scraping target %s: %v", target.ID, r)
 		}
 	}()
-
-	// Get target-specific interval
-	interval := sm.getTargetInterval(target)
-
-	// Check if we should skip scraping based on last scrape time
-	if sm.shouldSkipScraping(target, interval) {
-		logutil.Infoln("DEBUG", "Skipping target %s - not enough time since last scrape", target.ID)
-		return
-	}
 
 	// Create scraper task from target
 	scraperTask := sm.createScraperTaskFromTarget(target)
@@ -532,7 +585,7 @@ func (sm *ScraperManager) scrapeTarget(target *discovery.Target) {
 	// Run the scraper task with error handling
 	if err := sm.runScraperTaskWithError(scraperTask); err != nil {
 		logutil.Errorf("ERROR", "Failed to scrape target %s: %v\n", target.ID, err)
-		// Still update last scrape time to avoid immediate retry
+		// Still update last scrape time for tracking
 		sm.updateLastScrapingTime(target)
 		return
 	}

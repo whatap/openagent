@@ -96,7 +96,7 @@ func runSend() {
 			lock.Lock()
 			session := GetTcpSession()
 			defer func() {
-				fmt.Println("Sender.runSend defer")
+				//fmt.Println("Sender.runSend defer")
 				lock.Unlock()
 				if x := recover(); x != nil {
 					fmt.Println("Recover", x)

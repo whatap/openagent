@@ -251,7 +251,6 @@ func (cm *ConfigManager) Close() {
 	}
 }
 
-
 // GetScrapingInterval returns the scraping loop interval from openAgent configuration
 func (cm *ConfigManager) GetScrapingInterval() string {
 	if cm.config != nil {
@@ -264,7 +263,7 @@ func (cm *ConfigManager) GetScrapingInterval() string {
 		}
 	}
 	// Default to 60s if scrapingInterval is not set
-	return "60s"
+	return "30s"
 }
 
 // GetMaxConcurrency returns the maximum concurrent scrapers from openAgent configuration
@@ -279,6 +278,21 @@ func (cm *ConfigManager) GetMaxConcurrency() int {
 		}
 	}
 	return 0 // 0 means dynamic based on target count
+}
+
+// GetMinimumInterval returns the minimum scraping interval from openAgent configuration
+func (cm *ConfigManager) GetMinimumInterval() string {
+	if cm.config != nil {
+		if features, ok := cm.config["features"].(map[interface{}]interface{}); ok {
+			if openAgent, ok := features["openAgent"].(map[interface{}]interface{}); ok {
+				if minimumInterval, ok := openAgent["minimumInterval"].(string); ok {
+					return minimumInterval
+				}
+			}
+		}
+	}
+	// Default to 1s if minimumInterval is not set
+	return "1s"
 }
 
 // ParseInterval parses an interval string (e.g., "15s", "1m") to seconds

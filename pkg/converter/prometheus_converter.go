@@ -19,6 +19,11 @@ const (
 
 // Convert converts Prometheus metrics to OpenMx format
 func Convert(prometheusData string) (*model.ConversionResult, error) {
+	return ConvertWithTimestamp(prometheusData, time.Now().UnixMilli())
+}
+
+// ConvertWithTimestamp converts Prometheus metrics to OpenMx format using the provided timestamp
+func ConvertWithTimestamp(prometheusData string, collectionTime int64) (*model.ConversionResult, error) {
 	openMxList := make([]*model.OpenMx, 0)
 	helpMap := make(map[string]*model.OpenMxHelp)
 
@@ -54,7 +59,7 @@ func Convert(prometheusData string) (*model.ConversionResult, error) {
 				omh.Put("type", typeText)
 			}
 		} else {
-			om, err := parseRecordLine(line)
+			om, err := parseRecordLine(line, collectionTime)
 			if err != nil {
 				continue
 			}
@@ -341,8 +346,7 @@ func getReplacementValue(metric *model.OpenMx, config *model.RelabelConfig) stri
 }
 
 // parseRecordLine parses a single line of Prometheus metrics data
-func parseRecordLine(line string) (*model.OpenMx, error) {
-	timestamp := time.Now().UnixMilli()
+func parseRecordLine(line string, timestamp int64) (*model.OpenMx, error) {
 	var metricName string
 	var value float64
 	var labels []model.Label

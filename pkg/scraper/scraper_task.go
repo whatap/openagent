@@ -247,6 +247,9 @@ func (st *ScraperTask) Run() (*model.ScrapeRawData, error) {
 		startTime = time.Now()
 	}
 
+	// Capture collection time right before making the HTTP request
+	collectionTime := time.Now().UnixMilli()
+
 	// Execute the HTTP request
 	httpClient := client.GetInstance()
 	var response string
@@ -268,9 +271,9 @@ func (st *ScraperTask) Run() (*model.ScrapeRawData, error) {
 	// Create a ScrapeRawData instance with the response
 	var rawData *model.ScrapeRawData
 	if st.NodeName != "" && st.AddNodeLabel {
-		rawData = model.NewScrapeRawDataWithNodeName(targetURL, response, st.MetricRelabelConfigs, st.NodeName, st.AddNodeLabel)
+		rawData = model.NewScrapeRawDataWithNodeName(targetURL, response, st.MetricRelabelConfigs, st.NodeName, st.AddNodeLabel, collectionTime)
 	} else {
-		rawData = model.NewScrapeRawData(targetURL, response, st.MetricRelabelConfigs)
+		rawData = model.NewScrapeRawData(targetURL, response, st.MetricRelabelConfigs, collectionTime)
 	}
 
 	// Log detailed information if debug is enabled
