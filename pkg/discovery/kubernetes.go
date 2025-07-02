@@ -3,19 +3,18 @@ package discovery
 import (
 	"context"
 	"fmt"
+	corev1 "k8s.io/api/core/v1"
+	configPkg "open-agent/pkg/config"
+	"open-agent/pkg/k8s"
+	"open-agent/tools/util/logutil"
 	"strings"
 	"sync"
 	"time"
-
-	corev1 "k8s.io/api/core/v1"
-	"open-agent/pkg/config"
-	"open-agent/pkg/k8s"
-	"open-agent/tools/util/logutil"
 )
 
 // KubernetesDiscovery implements ServiceDiscovery for Kubernetes environments
 type KubernetesDiscovery struct {
-	configManager *config.ConfigManager
+	configManager *configPkg.ConfigManager
 	k8sClient     *k8s.K8sClient
 	configs       []DiscoveryConfig
 	targets       map[string]*Target
@@ -24,7 +23,7 @@ type KubernetesDiscovery struct {
 }
 
 // NewKubernetesDiscovery creates a new KubernetesDiscovery instance
-func NewKubernetesDiscovery(configManager *config.ConfigManager) *KubernetesDiscovery {
+func NewKubernetesDiscovery(configManager *configPkg.ConfigManager) *KubernetesDiscovery {
 	return &KubernetesDiscovery{
 		configManager: configManager,
 		k8sClient:     k8s.GetInstance(),
@@ -79,23 +78,23 @@ func (kd *KubernetesDiscovery) GetReadyTargets() []*Target {
 	}
 
 	// Debug logging for returned targets
-	if config.IsDebugEnabled() {
-		logutil.Printf("DEBUG_GET_TARGETS", "GetReadyTargets: Found %d ready targets out of %d total targets", 
+	if configPkg.IsDebugEnabled() {
+		logutil.Printf("DEBUG_GET_TARGETS", "GetReadyTargets: Found %d ready targets out of %d total targets",
 			len(readyTargets), len(kd.targets))
 
 		for i, target := range readyTargets {
-			logutil.Printf("DEBUG_GET_TARGETS", "ReadyTarget[%d]: ID=%s, URL=%s, State=%s", 
+			logutil.Printf("DEBUG_GET_TARGETS", "ReadyTarget[%d]: ID=%s, URL=%s, State=%s",
 				i, target.ID, target.URL, target.State)
 
 			// Check metricRelabelConfigs in metadata
 			if metricRelabelConfigs, ok := target.Metadata["metricRelabelConfigs"].([]interface{}); ok {
-				logutil.Printf("DEBUG_GET_TARGETS", "ReadyTarget[%d]: metricRelabelConfigs count=%d", 
+				logutil.Printf("DEBUG_GET_TARGETS", "ReadyTarget[%d]: metricRelabelConfigs count=%d",
 					i, len(metricRelabelConfigs))
 
 				// Log first config for debugging
 				if len(metricRelabelConfigs) > 0 {
 					if configMap, ok := metricRelabelConfigs[0].(map[string]interface{}); ok {
-						logutil.Printf("DEBUG_GET_TARGETS", "ReadyTarget[%d]: First config - action=%v, regex=%v", 
+						logutil.Printf("DEBUG_GET_TARGETS", "ReadyTarget[%d]: First config - action=%v, regex=%v",
 							i, configMap["action"], configMap["regex"])
 					}
 				}
@@ -144,7 +143,7 @@ func (kd *KubernetesDiscovery) discoveryLoop() {
 func (kd *KubernetesDiscovery) discoverTargets() {
 	// Get latest configuration from ConfigManager (uses Informer cache automatically)
 	scrapeConfigs := kd.configManager.GetScrapeConfigs()
-	if config.IsDebugEnabled() {
+	if configPkg.IsDebugEnabled() {
 		logutil.Printf("discoverTargets", "scrapeConfigs: %+v", scrapeConfigs)
 	}
 	if scrapeConfigs == nil {
@@ -163,7 +162,7 @@ func (kd *KubernetesDiscovery) discoverTargets() {
 
 		// Skip disabled targets
 		if !parseDiscoveryConfig.Enabled {
-			if config.IsDebugEnabled() {
+			if configPkg.IsDebugEnabled() {
 				logutil.Printf("DEBUG", "Target %s is disabled, skipping", parseDiscoveryConfig.TargetName)
 			}
 			continue
@@ -172,7 +171,7 @@ func (kd *KubernetesDiscovery) discoverTargets() {
 		currentConfigs = append(currentConfigs, parseDiscoveryConfig)
 	}
 
-	if config.IsDebugEnabled() {
+	if configPkg.IsDebugEnabled() {
 		logutil.Printf("DEBUG", "Using %d current discovery configurations from latest ConfigManager data", len(currentConfigs))
 	}
 
@@ -193,7 +192,7 @@ func (kd *KubernetesDiscovery) discoverTargets() {
 
 // discoverPodTargets discovers Pod-based targets
 func (kd *KubernetesDiscovery) discoverPodTargets(config DiscoveryConfig) {
-	if config.IsDebugEnabled() {
+	if configPkg.IsDebugEnabled() {
 		logutil.Printf("DEBUG", "Discovering PodMonitor targets for %s", config.TargetName)
 	}
 
@@ -540,9 +539,9 @@ func (kd *KubernetesDiscovery) processServiceTarget(service *corev1.Service, con
 					logutil.Printf("DEBUG_TARGET_UPDATE", "BEFORE updateTarget - Target URL: %s", url)
 					logutil.Printf("DEBUG_TARGET_UPDATE", "BEFORE updateTarget - metricRelabelConfigs count: %d", len(endpointConfig.MetricRelabelConfigs))
 					if len(endpointConfig.MetricRelabelConfigs) > 0 {
-						for i, config := range endpointConfig.MetricRelabelConfigs {
-							if configMap, ok := config.(map[string]interface{}); ok {
-								logutil.Printf("DEBUG_TARGET_UPDATE", "BEFORE updateTarget - Config[%d]: action=%v, regex=%v", 
+						for i, relabelConfig := range endpointConfig.MetricRelabelConfigs {
+							if configMap, ok := relabelConfig.(map[string]interface{}); ok {
+								logutil.Printf("DEBUG_TARGET_UPDATE", "BEFORE updateTarget - Config[%d]: action=%v, regex=%v",
 									i, configMap["action"], configMap["regex"])
 							}
 						}
@@ -590,9 +589,9 @@ func (kd *KubernetesDiscovery) processServiceTarget(service *corev1.Service, con
 					logutil.Printf("DEBUG_TARGET_UPDATE", "BEFORE updateTarget (NotReady) - Target URL: %s", url)
 					logutil.Printf("DEBUG_TARGET_UPDATE", "BEFORE updateTarget (NotReady) - metricRelabelConfigs count: %d", len(endpointConfig.MetricRelabelConfigs))
 					if len(endpointConfig.MetricRelabelConfigs) > 0 {
-						for i, config := range endpointConfig.MetricRelabelConfigs {
-							if configMap, ok := config.(map[string]interface{}); ok {
-								logutil.Printf("DEBUG_TARGET_UPDATE", "BEFORE updateTarget (NotReady) - Config[%d]: action=%v, regex=%v", 
+						for i, relabelConfig := range endpointConfig.MetricRelabelConfigs {
+							if configMap, ok := relabelConfig.(map[string]interface{}); ok {
+								logutil.Printf("DEBUG_TARGET_UPDATE", "BEFORE updateTarget (NotReady) - Config[%d]: action=%v, regex=%v",
 									i, configMap["action"], configMap["regex"])
 							}
 						}
@@ -719,39 +718,39 @@ func (kd *KubernetesDiscovery) parseDiscoveryConfig(targetConfig map[string]inte
 }
 
 func (kd *KubernetesDiscovery) parseEndpointConfig(endpointMap map[string]interface{}) EndpointConfig {
-	config := EndpointConfig{}
+	endpointConfig := EndpointConfig{}
 
 	if port, ok := endpointMap["port"].(string); ok {
-		config.Port = port
+		endpointConfig.Port = port
 	}
 
 	if address, ok := endpointMap["address"].(string); ok {
-		config.Address = address
+		endpointConfig.Address = address
 	}
 
 	if path, ok := endpointMap["path"].(string); ok {
-		config.Path = path
+		endpointConfig.Path = path
 	}
 
 	if scheme, ok := endpointMap["scheme"].(string); ok {
-		config.Scheme = scheme
+		endpointConfig.Scheme = scheme
 	}
 
 	if interval, ok := endpointMap["interval"].(string); ok {
-		config.Interval = interval
+		endpointConfig.Interval = interval
 	}
 
 	if tlsConfig, ok := endpointMap["tlsConfig"].(map[string]interface{}); ok {
-		config.TLSConfig = tlsConfig
+		endpointConfig.TLSConfig = tlsConfig
 	}
 
 	if metricRelabelConfigs, ok := endpointMap["metricRelabelConfigs"].([]interface{}); ok {
-		config.MetricRelabelConfigs = metricRelabelConfigs
+		endpointConfig.MetricRelabelConfigs = metricRelabelConfigs
 	}
 
 	if addNodeLabel, ok := endpointMap["addNodeLabel"].(bool); ok {
-		config.AddNodeLabel = addNodeLabel
+		endpointConfig.AddNodeLabel = addNodeLabel
 	}
 
-	return config
+	return endpointConfig
 }
