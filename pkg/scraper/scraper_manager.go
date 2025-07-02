@@ -575,6 +575,9 @@ func (sm *ScraperManager) scrapeTarget(target *discovery.Target) {
 		}
 	}()
 
+	// Log scraping interval information
+	sm.logScrapingInterval(target)
+
 	// Create scraper task from target
 	scraperTask := sm.createScraperTaskFromTarget(target)
 	if scraperTask == nil {
@@ -633,6 +636,35 @@ func (sm *ScraperManager) updateLastScrapingTime(target *discovery.Target) {
 	sm.lastScrapeMutex.Lock()
 	sm.lastScrapeTime[target.ID] = time.Now()
 	sm.lastScrapeMutex.Unlock()
+}
+
+// logScrapingInterval logs the actual scraping interval for a target
+func (sm *ScraperManager) logScrapingInterval(target *discovery.Target) {
+	currentTime := time.Now()
+	configuredInterval := sm.getTargetInterval(target)
+
+	sm.lastScrapeMutex.RLock()
+	lastScrape, exists := sm.lastScrapeTime[target.ID]
+	sm.lastScrapeMutex.RUnlock()
+
+	if exists {
+		actualInterval := currentTime.Sub(lastScrape)
+
+		// Log the interval information
+		logutil.Printf("SCRAPE_INTERVAL", "Target %s: Configured=%v, Actual=%v, Deviation=%v",
+			target.ID, configuredInterval, actualInterval, actualInterval-configuredInterval)
+
+		// Log warning if deviation is significant (more than 1 second)
+		deviation := actualInterval - configuredInterval
+		if deviation > time.Second || deviation < -time.Second {
+			logutil.Printf("WARN", "Target %s has significant interval deviation: expected %v, actual %v (deviation: %v)",
+				target.ID, configuredInterval, actualInterval, deviation)
+		}
+	} else {
+		// First scrape for this target
+		logutil.Printf("SCRAPE_INTERVAL", "Target %s: First scrape, configured interval=%v",
+			target.ID, configuredInterval)
+	}
 }
 
 // cleanupOldTargets removes old entries from lastScrapeTime to prevent memory leaks
