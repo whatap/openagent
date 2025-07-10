@@ -46,34 +46,6 @@ type ScraperTask struct {
 	AddNodeLabel         bool   // Controls whether to add node label to metrics
 }
 
-// NewScraperTask creates a new ScraperTask instance
-func NewScraperTask(targetName, targetURL string, metricRelabelConfigs model.RelabelConfigs, tlsConfig *client.TLSConfig) *ScraperTask {
-	// For backward compatibility, create a DirectURL type task
-	return &ScraperTask{
-		TargetName:           targetName,
-		TargetType:           DirectURLType,
-		TargetURL:            targetURL,
-		MetricRelabelConfigs: metricRelabelConfigs,
-		TLSConfig:            tlsConfig,
-	}
-}
-
-// NewPodMonitorScraperTask creates a new ScraperTask instance for a PodMonitor target
-func NewPodMonitorScraperTask(targetName string, namespace string, selector map[string]string, port string, path string, scheme string, metricRelabelConfigs model.RelabelConfigs, tlsConfig *client.TLSConfig, addNodeLabel bool) *ScraperTask {
-	return &ScraperTask{
-		TargetName:           targetName,
-		TargetType:           PodMonitorType,
-		Namespace:            namespace,
-		Selector:             selector,
-		Port:                 port,
-		Path:                 path,
-		Scheme:               scheme,
-		MetricRelabelConfigs: metricRelabelConfigs,
-		TLSConfig:            tlsConfig,
-		AddNodeLabel:         addNodeLabel,
-	}
-}
-
 // NewStaticEndpointsScraperTask creates a new ScraperTask instance for a StaticEndpoints target
 func NewStaticEndpointsScraperTask(targetName string, targetURL string, path string, scheme string, metricRelabelConfigs model.RelabelConfigs, tlsConfig *client.TLSConfig) *ScraperTask {
 	return &ScraperTask{

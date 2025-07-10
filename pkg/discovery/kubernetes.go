@@ -240,7 +240,9 @@ func (kd *KubernetesDiscovery) processPodTarget(pod *corev1.Pod, config Discover
 	isReady := kd.isPodReady(pod)
 
 	for _, endpoint := range config.Endpoints {
-		targetID := fmt.Sprintf("%s-%s-%s-%s", config.TargetName, pod.Namespace, pod.Name, endpoint.Port)
+		// Include path in targetID to ensure uniqueness when multiple endpoints use the same port
+		pathSafe := strings.ReplaceAll(endpoint.Path, "/", "-")
+		targetID := fmt.Sprintf("%s-%s-%s-%s-%s", config.TargetName, pod.Namespace, pod.Name, endpoint.Port, pathSafe)
 
 		// Get pod IP
 		podIP := pod.Status.PodIP
@@ -505,7 +507,9 @@ func (kd *KubernetesDiscovery) processServiceTarget(service *corev1.Service, con
 
 				// Process ready addresses
 				for addrIdx, address := range subset.Addresses {
-					targetID := fmt.Sprintf("%s-%s-%s-%s-%d-%d", config.TargetName, service.Namespace, service.Name, endpointConfig.Port, subsetIdx, addrIdx)
+					// Include path in targetID to ensure uniqueness when multiple endpoints use the same port
+					pathSafe := strings.ReplaceAll(endpointConfig.Path, "/", "-")
+					targetID := fmt.Sprintf("%s-%s-%s-%s-%d-%d-%s", config.TargetName, service.Namespace, service.Name, endpointConfig.Port, subsetIdx, addrIdx, pathSafe)
 
 					// Determine scheme
 					scheme := kd.determineScheme(endpointConfig.Scheme, endpointConfig.Port, endpointConfig.TLSConfig)
@@ -558,7 +562,9 @@ func (kd *KubernetesDiscovery) processServiceTarget(service *corev1.Service, con
 
 				// Process not-ready addresses as pending
 				for addrIdx, address := range subset.NotReadyAddresses {
-					targetID := fmt.Sprintf("%s-%s-%s-%s-%d-nr-%d", config.TargetName, service.Namespace, service.Name, endpointConfig.Port, subsetIdx, addrIdx)
+					// Include path in targetID to ensure uniqueness when multiple endpoints use the same port
+					pathSafe := strings.ReplaceAll(endpointConfig.Path, "/", "-")
+					targetID := fmt.Sprintf("%s-%s-%s-%s-%d-nr-%d-%s", config.TargetName, service.Namespace, service.Name, endpointConfig.Port, subsetIdx, addrIdx, pathSafe)
 
 					// Determine scheme
 					scheme := kd.determineScheme(endpointConfig.Scheme, endpointConfig.Port, endpointConfig.TLSConfig)
@@ -628,8 +634,6 @@ func (kd *KubernetesDiscovery) discoverStaticTargets(config DiscoveryConfig) {
 			continue
 		}
 
-		targetID := fmt.Sprintf("%s-static-%d", config.TargetName, i)
-
 		// Determine scheme
 		scheme := endpoint.Scheme
 		if scheme == "" {
@@ -646,6 +650,10 @@ func (kd *KubernetesDiscovery) discoverStaticTargets(config DiscoveryConfig) {
 		if path == "" {
 			path = "/metrics"
 		}
+
+		// Include path in targetID to ensure uniqueness when multiple endpoints use different paths
+		pathSafe := strings.ReplaceAll(path, "/", "-")
+		targetID := fmt.Sprintf("%s-static-%d-%s", config.TargetName, i, pathSafe)
 
 		// Build target URL
 		url := fmt.Sprintf("%s://%s%s", scheme, endpoint.Address, path)
