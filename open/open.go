@@ -159,11 +159,13 @@ func BootOpenAgent(version, commitHash string, logger *logfile.FileLogger) {
 	logger.Infoln("BootOpenAgent", "ScraperManager will automatically use latest configuration")
 
 	// ConfigManager automatically handles ConfigMap synchronization
-	k8sClient := k8s.GetInstance()
-	if k8sClient.IsInitialized() {
-		logger.Infoln("BootOpenAgent", "Kubernetes environment detected - ConfigManager handles ConfigMap synchronization")
-	} else {
-		logger.Infoln("BootOpenAgent", "Non-Kubernetes environment detected - ConfigManager watches scrape_config.yaml")
+	if !config.IsForceStandaloneMode() {
+		k8sClient := k8s.GetInstance()
+		if k8sClient.IsInitialized() {
+			logger.Infoln("BootOpenAgent", "Kubernetes environment detected - ConfigManager handles ConfigMap synchronization")
+		} else {
+			logger.Infoln("BootOpenAgent", "Non-Kubernetes environment detected - ConfigManager watches scrape_config.yaml")
+		}
 	}
 
 	go func() {

@@ -80,9 +80,18 @@ func run(home string, logger *logfile.FileLogger) {
 		if err != nil {
 			log.Fatal(err)
 		}
-		defer f.Close()
+		defer func(f *os.File) {
+			err := f.Close()
+			if err != nil {
+				logger.Println("run", "Error closing stack dump file", err)
+			}
+		}(f)
 
-		pprof.Lookup("goroutine").WriteTo(f, 1)
+		err = pprof.Lookup("goroutine").WriteTo(f, 1)
+		if err != nil {
+			logger.Println("run", "Error writing stack dump file", err)
+			return
+		}
 
 		os.Exit(1)
 	}()
@@ -105,8 +114,14 @@ func exitOnStdinClose(logger *logfile.FileLogger) {
 	}
 }
 func startWorker(command string, logger *logfile.FileLogger) (*exec.Cmd, error) {
-	logger.Println("StartWorker", fmt.Sprintf("Start Worker Process(%s foreground)", command))
-	cmd := exec.Command(command, "foreground")
+	var cmd *exec.Cmd
+	if config.IsForceStandaloneMode() {
+		logger.Println("StartWorker", fmt.Sprintf("Start Worker Process(%s foreground standalone)", command))
+		cmd = exec.Command(command, "foreground", "standalone")
+	} else {
+		logger.Println("StartWorker", fmt.Sprintf("Start Worker Process(%s foreground)", command))
+		cmd = exec.Command(command, "foreground")
+	}
 	err := cmd.Start()
 	if err != nil {
 		logger.Println("StartWorkerError", err)
@@ -324,6 +339,12 @@ func main() {
 					if err := client.SetupMinikubeClient(home); err != nil && config.IsDebugEnabled() {
 						fmt.Printf("Warning: Failed to set up minikube client: %v\n", err)
 					}
+				} else if arg2 == "standalone" {
+					if config.IsDebugEnabled() {
+						fmt.Println("Standalone configuration mode: enabled")
+					}
+					// Force standalone configuration mode
+					config.SetForceStandaloneMode(true)
 				}
 			}
 
@@ -333,6 +354,12 @@ func main() {
 			go exitOnStdinClose(logger)
 			go keepAliveSender(logger)
 			run(openHome, logger)
+		} else if arg1 == "standalone" {
+			if config.IsDebugEnabled() {
+				fmt.Println("Standalone supervisor mode: enabled")
+			}
+			// Set force standalone mode for supervisor
+			config.SetForceStandaloneMode(true)
 		}
 	}
 

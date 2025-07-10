@@ -15,6 +15,19 @@ import (
 	"open-agent/pkg/k8s"
 )
 
+// Force standalone mode flag
+var forceStandaloneMode bool = false
+
+// SetForceStandaloneMode sets the force standalone mode flag
+func SetForceStandaloneMode(force bool) {
+	forceStandaloneMode = force
+}
+
+// IsForceStandaloneMode returns the current force standalone mode flag
+func IsForceStandaloneMode() bool {
+	return forceStandaloneMode
+}
+
 // ConfigManager is responsible for loading and parsing the scrape configuration
 type ConfigManager struct {
 	config             map[string]interface{}
@@ -35,6 +48,23 @@ func NewConfigManager() *ConfigManager {
 		configMapName:      "whatap-open-agent-config",
 	}
 
+	// Check force standalone mode first
+	if forceStandaloneMode {
+		log.Printf("Force standalone configuration mode enabled, using file watcher")
+		// Set k8s client to standalone mode to prevent initialization
+		k8s.SetStandaloneMode(true)
+
+		cm.fileWatcherEnabled = true
+		cm.fileWatcherStop = make(chan struct{})
+
+		go cm.watchConfigFile()
+		// Initial file load
+		if err := cm.LoadConfig(); err != nil {
+			log.Printf("Failed to load configuration: %v", err)
+			return nil
+		}
+		return cm
+	}
 	// Initialize k8s client
 	cm.k8sClient = k8s.GetInstance()
 
@@ -67,7 +97,7 @@ func NewConfigManager() *ConfigManager {
 // LoadConfig loads the configuration from informer cache or YAML file
 func (cm *ConfigManager) LoadConfig() error {
 	// k8s environment: use informer cache directly
-	if cm.k8sClient.IsInitialized() {
+	if cm.k8sClient != nil && cm.k8sClient.IsInitialized() && forceStandaloneMode == false {
 		configMap, err := cm.k8sClient.GetConfigMap(cm.configMapNamespace, cm.configMapName)
 		if err != nil || configMap == nil {
 			return fmt.Errorf("ConfigMap %s/%s not found: %v", cm.configMapNamespace, cm.configMapName, err)
@@ -142,7 +172,7 @@ func (cm *ConfigManager) GetScrapeInterval() string {
 // GetScrapeConfigs returns the scrape_configs section or the openAgent.scrapConfigs/targets section if available
 func (cm *ConfigManager) GetScrapeConfigs() []map[string]interface{} {
 	// Always reload configuration from Informer cache in Kubernetes environment
-	if cm.k8sClient.IsInitialized() {
+	if cm.k8sClient != nil && cm.k8sClient.IsInitialized() {
 		log.Printf("GetScrapeConfigs: Reloading latest configuration from Informer cache")
 		if err := cm.LoadConfig(); err != nil {
 			log.Printf("GetScrapeConfigs: Failed to reload config from Informer cache: %v", err)

@@ -2,13 +2,6 @@ package k8s
 
 import (
 	"fmt"
-	"log"
-	"open-agent/tools/util/logutil"
-	"os"
-	"path/filepath"
-	"sync"
-	"time"
-
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -17,6 +10,12 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
+	"log"
+	"open-agent/tools/util/logutil"
+	"os"
+	"path/filepath"
+	"sync"
+	"time"
 )
 
 // K8sClient is a wrapper around the Kubernetes client
@@ -43,11 +42,18 @@ var (
 	once     sync.Once
 	// kubeconfigPath is the path to the kubeconfig file
 	kubeconfigPath string
+	// standaloneMode indicates if the client should skip initialization
+	standaloneMode bool = false
 )
 
 // SetKubeconfigPath sets the path to the kubeconfig file
 func SetKubeconfigPath(path string) {
 	kubeconfigPath = path
+}
+
+// SetStandaloneMode sets the standalone mode flag
+func SetStandaloneMode(standalone bool) {
+	standaloneMode = standalone
 }
 
 // GetInstance returns the singleton instance of K8sClient
@@ -57,7 +63,10 @@ func GetInstance() *K8sClient {
 			stopCh:      make(chan struct{}),
 			initialized: false,
 		}
-		instance.initialize()
+		// Don't initialize if in standalone mode
+		if !standaloneMode {
+			instance.initialize()
+		}
 	})
 	return instance
 }
@@ -263,7 +272,7 @@ func (c *K8sClient) GetPodsByLabels(namespace string, labelSelector map[string]s
 		}
 	}
 
-	logutil.Printf("DEBUG", "GetPodsByLabels - Total pods in store: %d, pods in namespace %s: %d, matching pods: %d", 
+	logutil.Printf("DEBUG", "GetPodsByLabels - Total pods in store: %d, pods in namespace %s: %d, matching pods: %d",
 		totalPodsInStore, namespace, podsInNamespace, len(pods))
 
 	return pods, nil

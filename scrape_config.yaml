@@ -4,14 +4,12 @@ features:
     enabled: true
     targets:
 #     1. StaticEndpoints: Direct URL for metrics collection
-      - targetName: local-endpoint
+      - targetName: test-exporter
         type: StaticEndpoints
         # Target is enabled by default (enabled: true), this can be omitted
         enabled: true
         endpoints:
-          - address: "127.0.0.1:52684"
+          - address: "127.0.0.1:9090"
             path: "/metrics"
-            scheme: "https"
-            interval: "30s"
-            tlsConfig:
-              insecureSkipVerify: false  # Skip certificate verification
+            scheme: "http"
+            interval: "15s"
