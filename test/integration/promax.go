@@ -29,9 +29,9 @@ func main() {
 	license := os.Getenv("WHATAP_LICENSE")
 	host := os.Getenv("WHATAP_HOST")
 	port := os.Getenv("WHATAP_PORT")
-	license = "x208gorb3c4c1-zvduoi0m5ajsd-x6tto2th6n1haj"
-	host = "59.13.101.109"
-	port = "61574"
+	//license = "x208gorb3c4c1-zvduoi0m5ajsd-x6tto2th6n1haj"
+	//host = "59.13.101.109"
+	//port = "61574"
 	if license == "" || host == "" || port == "" {
 		fmt.Println("Please set the following environment variables:")
 		fmt.Println("WHATAP_LICENSE - The license key for the WHATAP server")
@@ -66,6 +66,7 @@ func process(logger *logfile.FileLogger) {
 
 	// Create help information if needed
 	helpItems := make([]*model.OpenMxHelp, 0)
+	//startTime, _ := time.Parse("2006/01/02 15:04:05", "2025/07/11 10:45:00")
 	now := time.Now().UnixMilli()
 
 	// Send help information only once per minute
