@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -266,6 +267,130 @@ func (c *HTTPClient) ExecuteGetWithTLSConfig(targetURL string, tlsConfig *TLSCon
 	}
 
 	return string(body), nil
+}
+
+// ExecuteGetStream performs an HTTP GET request and returns a streaming response
+// This method is more memory-efficient for large responses as it doesn't load the entire response into memory
+func (c *HTTPClient) ExecuteGetStream(targetURL string) (io.ReadCloser, error) {
+	return c.ExecuteGetStreamWithTLSConfig(targetURL, nil)
+}
+
+// ExecuteGetStreamWithTLSConfig performs an HTTP GET request with custom TLS configuration and returns a streaming response
+func (c *HTTPClient) ExecuteGetStreamWithTLSConfig(targetURL string, tlsConfig *TLSConfig) (io.ReadCloser, error) {
+	formattedURL := FormatURL(targetURL)
+
+	// Log the request if debug is enabled
+	if config.IsDebugEnabled() {
+		if c.isMinikube {
+			log.Printf("[DEBUG] HTTP Stream Request (Minikube client): GET %s", formattedURL)
+		} else {
+			log.Printf("[DEBUG] HTTP Stream Request: GET %s", formattedURL)
+		}
+	}
+
+	req, err := http.NewRequest("GET", formattedURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %v", err)
+	}
+
+	// Skip token authentication for Minikube as it uses client certificates
+	if !c.isMinikube {
+		// Try to add service account token for authentication
+		token, err := GetServiceAccountToken()
+		if err == nil {
+			req.Header.Set("Authorization", "Bearer "+token)
+			if config.IsDebugEnabled() {
+				log.Printf("[DEBUG] Added Authorization header with Bearer token")
+			}
+		} else if config.IsDebugEnabled() {
+			log.Printf("[DEBUG] No service account token available: %v", err)
+		}
+	} else if config.IsDebugEnabled() {
+		log.Printf("[DEBUG] Skipping token authentication for Minikube")
+	}
+
+	// Set headers for Prometheus metrics scraping
+	req.Header.Set("Accept", "text/plain; version=0.0.4; charset=utf-8, application/openmetrics-text")
+	req.Header.Set("Accept-Encoding", "gzip")
+
+	// Use the default client or create a new one with custom TLS config
+	client := c.client
+
+	// For Minikube, we already have a client with the correct TLS config
+	// We don't need to create a new one unless a custom TLS config is provided
+	if c.isMinikube {
+		if config.IsDebugEnabled() {
+			log.Printf("[DEBUG] Using existing Minikube client with client certificates")
+		}
+	} else if tlsConfig != nil {
+		if config.IsDebugEnabled() {
+			log.Printf("[DEBUG] Using custom TLS config with InsecureSkipVerify=%v", tlsConfig.InsecureSkipVerify)
+		}
+
+		// Create a custom transport with the specified TLS config
+		transport := &http.Transport{
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: tlsConfig.InsecureSkipVerify,
+			},
+		}
+
+		// If we have a Kubernetes CA cert and InsecureSkipVerify is false, add it to the cert pool
+		if !tlsConfig.InsecureSkipVerify {
+			if cert, err := loadKubernetesCACert(); err == nil {
+				rootCAs, _ := x509.SystemCertPool()
+				if rootCAs == nil {
+					rootCAs = x509.NewCertPool()
+				}
+				rootCAs.AddCert(cert)
+				transport.TLSClientConfig.RootCAs = rootCAs
+
+				if config.IsDebugEnabled() {
+					log.Printf("[DEBUG] Added Kubernetes CA cert to root CA pool")
+				}
+			} else if config.IsDebugEnabled() {
+				log.Printf("[DEBUG] Failed to load Kubernetes CA cert: %v", err)
+			}
+		}
+
+		// Create a new client with the custom transport
+		client = &http.Client{
+			Timeout:   c.client.Timeout,
+			Transport: transport,
+		}
+	}
+
+	// Log the request start time if debug is enabled
+	var startTime time.Time
+	if config.IsDebugEnabled() {
+		startTime = time.Now()
+		log.Printf("[DEBUG] Sending HTTP stream request to %s", formattedURL)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		if config.IsDebugEnabled() {
+			log.Printf("[DEBUG] HTTP stream request failed: %v", err)
+		}
+		return nil, fmt.Errorf("error executing request: %v", err)
+	}
+
+	// Log the response if debug is enabled
+	if config.IsDebugEnabled() {
+		duration := time.Since(startTime)
+		log.Printf("[DEBUG] HTTP Stream Response: %d %s (took %v)", resp.StatusCode, resp.Status, duration)
+		log.Printf("[DEBUG] Response Headers: %v", resp.Header)
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		resp.Body.Close()
+		if config.IsDebugEnabled() {
+			log.Printf("[DEBUG] HTTP error: %d %s", resp.StatusCode, resp.Status)
+		}
+		return nil, fmt.Errorf("HTTP error: %d %s", resp.StatusCode, resp.Status)
+	}
+
+	// Return the response body as a stream - caller is responsible for closing it
+	return resp.Body, nil
 }
 
 // createMinikubeTLSConfig creates a TLS configuration with Minikube certificates

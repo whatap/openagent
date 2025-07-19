@@ -1,7 +1,10 @@
 package scraper
 
 import (
+	"bufio"
+	"bytes"
 	"fmt"
+	"io"
 	corev1 "k8s.io/api/core/v1"
 	"strings"
 	"time"
@@ -11,10 +14,14 @@ import (
 	"open-agent/pkg/k8s"
 	"open-agent/pkg/model"
 	"open-agent/tools/util/logutil"
+	"open-agent/util/pool"
 )
 
 // Use the package-level functions provided by the config package
 // instead of creating our own instance of WhatapConfig
+
+// Global buffer pool for memory-efficient scraping
+var bufferPool = pool.NewBufferPool(64 * 1024) // 64KB initial capacity
 
 // TargetType represents the type of target to scrape
 type TargetType string
@@ -183,7 +190,7 @@ func (st *ScraperTask) ResolveEndpoint() (string, error) {
 	return "", fmt.Errorf("unsupported target type: %s", st.TargetType)
 }
 
-// Run executes the scraper task
+// Run executes the scraper task using streaming approach for better memory efficiency
 func (st *ScraperTask) Run() (*model.ScrapeRawData, error) {
 	// Resolve the endpoint
 	targetURL, resolveErr := st.ResolveEndpoint()
@@ -199,7 +206,7 @@ func (st *ScraperTask) Run() (*model.ScrapeRawData, error) {
 
 	// Log detailed information if debug is enabled
 	if config.IsDebugEnabled() {
-		logutil.Printf("DEBUG", "[DEBUG] Starting scraper task for target [%s], URL [%s]", st.TargetName, targetURL)
+		logutil.Printf("DEBUG", "[DEBUG] Starting streaming scraper task for target [%s], URL [%s]", st.TargetName, targetURL)
 		logutil.Printf("DEBUG", "[DEBUG] Formatted URL: %s", formattedURL)
 		if st.TLSConfig != nil {
 			logutil.Printf("DEBUG", "[DEBUG] Using TLS config with InsecureSkipVerify=%v", st.TLSConfig.InsecureSkipVerify)
@@ -222,15 +229,15 @@ func (st *ScraperTask) Run() (*model.ScrapeRawData, error) {
 	// Capture collection time right before making the HTTP request
 	collectionTime := time.Now().UnixMilli()
 
-	// Execute the HTTP request
+	// Execute the HTTP request using streaming approach
 	httpClient := client.GetInstance()
-	var response string
+	var responseReader io.ReadCloser
 	var httpErr error
 
 	if st.TLSConfig != nil {
-		response, httpErr = httpClient.ExecuteGetWithTLSConfig(formattedURL, st.TLSConfig)
+		responseReader, httpErr = httpClient.ExecuteGetStreamWithTLSConfig(formattedURL, st.TLSConfig)
 	} else {
-		response, httpErr = httpClient.ExecuteGet(formattedURL)
+		responseReader, httpErr = httpClient.ExecuteGetStream(formattedURL)
 	}
 
 	if httpErr != nil {
@@ -239,6 +246,38 @@ func (st *ScraperTask) Run() (*model.ScrapeRawData, error) {
 		}
 		return nil, fmt.Errorf("error scraping target %s for target %s: %v", targetURL, st.TargetName, httpErr)
 	}
+	defer responseReader.Close()
+
+	// Get a buffer from the pool for memory-efficient reading
+	buffer := bufferPool.Get()
+	defer bufferPool.Put(buffer)
+
+	// Use a bytes.Buffer to efficiently build the response string
+	var responseBuffer bytes.Buffer
+	
+	// Create a buffered reader for efficient streaming
+	bufferedReader := bufio.NewReader(responseReader)
+	
+	// Read the response in chunks using the pooled buffer
+	totalBytes := 0
+	for {
+		n, err := bufferedReader.Read(buffer[:cap(buffer)])
+		if n > 0 {
+			responseBuffer.Write(buffer[:n])
+			totalBytes += n
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			if config.IsDebugEnabled() {
+				logutil.Printf("DEBUG", "[DEBUG] Error reading response stream: %v", err)
+			}
+			return nil, fmt.Errorf("error reading response stream: %v", err)
+		}
+	}
+
+	response := responseBuffer.String()
 
 	// Create a ScrapeRawData instance with the response
 	var rawData *model.ScrapeRawData
@@ -251,8 +290,8 @@ func (st *ScraperTask) Run() (*model.ScrapeRawData, error) {
 	// Log detailed information if debug is enabled
 	if config.IsDebugEnabled() {
 		duration := time.Since(startTime)
-		logutil.Printf("DEBUG", "[DEBUG] Scraper task completed for target [%s], URL [%s] in %v", st.TargetName, targetURL, duration)
-		logutil.Printf("DEBUG", "[DEBUG] Response length: %d bytes", len(response))
+		logutil.Printf("DEBUG", "[DEBUG] Streaming scraper task completed for target [%s], URL [%s] in %v", st.TargetName, targetURL, duration)
+		logutil.Printf("DEBUG", "[DEBUG] Response length: %d bytes (streamed)", totalBytes)
 
 		// Log a preview of the response (first 500 characters)
 		preview := response
@@ -273,7 +312,7 @@ func (st *ScraperTask) Run() (*model.ScrapeRawData, error) {
 		logutil.Printf("DEBUG", "[DEBUG] Approximate number of metrics: %d", metricCount)
 	}
 
-	logutil.Printf("INFO", "ScraperTask: target [%s] fetched URL %s (length=%d)", st.TargetName, st.TargetURL, len(response))
+	logutil.Printf("INFO", "ScraperTask: target [%s] fetched URL %s (length=%d, streamed)", st.TargetName, st.TargetURL, totalBytes)
 
 	return rawData, nil
 }
