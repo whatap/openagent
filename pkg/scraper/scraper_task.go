@@ -248,33 +248,34 @@ func (st *ScraperTask) Run() (*model.ScrapeRawData, error) {
 	}
 	defer responseReader.Close()
 
-	// Get a buffer from the pool for memory-efficient reading
-	buffer := bufferPool.Get()
-	defer bufferPool.Put(buffer)
-
 	// Use a bytes.Buffer to efficiently build the response string
 	var responseBuffer bytes.Buffer
 	
-	// Create a buffered reader for efficient streaming
-	bufferedReader := bufio.NewReader(responseReader)
+	// Create a scanner for line-by-line reading to prevent metric lines from being split
+	scanner := bufio.NewScanner(responseReader)
 	
-	// Read the response in chunks using the pooled buffer
+	// Set a larger buffer size for the scanner to handle long metric lines
+	const maxScanTokenSize = 1024 * 1024 // 1MB buffer for very long lines
+	buf := make([]byte, maxScanTokenSize)
+	scanner.Buffer(buf, maxScanTokenSize)
+	
+	// Read the response line by line using the scanner
 	totalBytes := 0
-	for {
-		n, err := bufferedReader.Read(buffer[:cap(buffer)])
-		if n > 0 {
-			responseBuffer.Write(buffer[:n])
-			totalBytes += n
+	lineCount := 0
+	for scanner.Scan() {
+		line := scanner.Text()
+		responseBuffer.WriteString(line)
+		responseBuffer.WriteString("\n")
+		totalBytes += len(line) + 1 // +1 for newline
+		lineCount++
+	}
+	
+	// Check for scanner errors
+	if err := scanner.Err(); err != nil {
+		if config.IsDebugEnabled() {
+			logutil.Printf("DEBUG", "[DEBUG] Error reading response stream: %v", err)
 		}
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			if config.IsDebugEnabled() {
-				logutil.Printf("DEBUG", "[DEBUG] Error reading response stream: %v", err)
-			}
-			return nil, fmt.Errorf("error reading response stream: %v", err)
-		}
+		return nil, fmt.Errorf("error reading response stream: %v", err)
 	}
 
 	response := responseBuffer.String()
@@ -290,8 +291,8 @@ func (st *ScraperTask) Run() (*model.ScrapeRawData, error) {
 	// Log detailed information if debug is enabled
 	if config.IsDebugEnabled() {
 		duration := time.Since(startTime)
-		logutil.Printf("DEBUG", "[DEBUG] Streaming scraper task completed for target [%s], URL [%s] in %v", st.TargetName, targetURL, duration)
-		logutil.Printf("DEBUG", "[DEBUG] Response length: %d bytes (streamed)", totalBytes)
+		logutil.Printf("DEBUG", "[DEBUG] Line-based streaming scraper task completed for target [%s], URL [%s] in %v", st.TargetName, targetURL, duration)
+		logutil.Printf("DEBUG", "[DEBUG] Response: %d bytes, %d lines (line-based streaming)", totalBytes, lineCount)
 
 		// Log a preview of the response (first 500 characters)
 		preview := response

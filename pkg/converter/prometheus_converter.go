@@ -351,16 +351,33 @@ func parseRecordLine(line string, timestamp int64) (*model.OpenMx, error) {
 	var value float64
 	var labels []model.Label
 
+	// Basic line validation
+	line = strings.TrimSpace(line)
+	if len(line) < 3 {
+		return nil, fmt.Errorf("line too short: %s", line)
+	}
+
 	// Check if the line has labels
 	braceIndex := strings.Index(line, "{")
 	if braceIndex != -1 {
 		metricName = strings.TrimSpace(line[:braceIndex])
 		endBrace := strings.Index(line, "}")
+		
+		// Critical: Validate brace indices to prevent slice bounds errors
 		if endBrace == -1 {
-			return nil, fmt.Errorf("invalid metric format: missing closing brace")
+			return nil, fmt.Errorf("invalid metric format: missing closing brace in line: %s", line)
+		}
+		
+		if braceIndex >= endBrace {
+			return nil, fmt.Errorf("invalid metric format: brace order error (start=%d, end=%d) in line: %s", braceIndex, endBrace, line)
+		}
+		
+		// Additional safety check for line length
+		if endBrace >= len(line) {
+			return nil, fmt.Errorf("invalid metric format: endBrace out of bounds in line: %s", line)
 		}
 
-		// Parse labels
+		// Parse labels - now safe to slice
 		labelContent := line[braceIndex+1 : endBrace]
 		if labelContent != "" {
 			labelPairs := strings.Split(labelContent, ",")
