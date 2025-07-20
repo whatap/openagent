@@ -61,7 +61,7 @@ func (kd *KubernetesDiscovery) Start(ctx context.Context) error {
 	// Start periodic discovery
 	go kd.discoveryLoop()
 
-	logutil.Printf("INFO", "Kubernetes service discovery started")
+	logutil.Printf("INFO", "[DISCOVERY] Kubernetes service discovery started")
 	return nil
 }
 
@@ -79,35 +79,8 @@ func (kd *KubernetesDiscovery) GetReadyTargets() []*Target {
 
 	// Debug logging for returned targets
 	if configPkg.IsDebugEnabled() {
-		logutil.Printf("DEBUG_GET_TARGETS", "GetReadyTargets: Found %d ready targets out of %d total targets",
+		logutil.Printf("DEBUG", "[DISCOVERY] Found %d ready targets out of %d total",
 			len(readyTargets), len(kd.targets))
-
-		for i, target := range readyTargets {
-			logutil.Printf("DEBUG_GET_TARGETS", "ReadyTarget[%d]: ID=%s, URL=%s, State=%s",
-				i, target.ID, target.URL, target.State)
-
-			// Check metricRelabelConfigs in metadata
-			if metricRelabelConfigs, ok := target.Metadata["metricRelabelConfigs"].([]interface{}); ok {
-				logutil.Printf("DEBUG_GET_TARGETS", "ReadyTarget[%d]: metricRelabelConfigs count=%d",
-					i, len(metricRelabelConfigs))
-
-				// Log first config for debugging
-				if len(metricRelabelConfigs) > 0 {
-					if configMap, ok := metricRelabelConfigs[0].(map[string]interface{}); ok {
-						logutil.Printf("DEBUG_GET_TARGETS", "ReadyTarget[%d]: First config - action=%v, regex=%v",
-							i, configMap["action"], configMap["regex"])
-					}
-				}
-			} else {
-				logutil.Printf("DEBUG_GET_TARGETS", "ReadyTarget[%d]: No metricRelabelConfigs found in metadata", i)
-			}
-
-			// Log target labels for debugging
-			logutil.Printf("DEBUG_GET_TARGETS", "ReadyTarget[%d]: Labels=%+v", i, target.Labels)
-
-			// Log last seen time to check if target is fresh
-			logutil.Printf("DEBUG_GET_TARGETS", "ReadyTarget[%d]: LastSeen=%s", i, target.LastSeen.Format("15:04:05"))
-		}
 	}
 
 	return readyTargets
@@ -116,7 +89,7 @@ func (kd *KubernetesDiscovery) GetReadyTargets() []*Target {
 // Stop stops the discovery process
 func (kd *KubernetesDiscovery) Stop() error {
 	close(kd.stopCh)
-	logutil.Printf("INFO", "Kubernetes service discovery stopped")
+	logutil.Printf("INFO", "[DISCOVERY] Kubernetes service discovery stopped")
 	return nil
 }
 
@@ -334,59 +307,53 @@ func (kd *KubernetesDiscovery) updateTarget(newTarget *Target) {
 // Helper methods (simplified versions of existing ScraperManager methods)
 
 func (kd *KubernetesDiscovery) getMatchingNamespaces(namespaceSelector map[string]interface{}) ([]string, error) {
-	logutil.Printf("DEBUG", "getMatchingNamespaces - namespaceSelector: %+v", namespaceSelector)
-
 	if namespaceSelector == nil {
-		logutil.Printf("DEBUG", "getMatchingNamespaces - No namespace selector provided, using default namespace")
 		return []string{"default"}, nil
 	}
 
 	// Handle matchNames
 	if matchNames, ok := namespaceSelector["matchNames"].([]interface{}); ok {
-		logutil.Printf("DEBUG", "getMatchingNamespaces - Found matchNames: %+v", matchNames)
 		var namespaces []string
 		for _, ns := range matchNames {
 			if nsStr, ok := ns.(string); ok {
 				namespaces = append(namespaces, nsStr)
-				logutil.Printf("DEBUG", "getMatchingNamespaces - Added namespace: %s", nsStr)
 			} else {
-				logutil.Printf("WARN", "getMatchingNamespaces - Invalid namespace name type: %T", ns)
+				logutil.Printf("WARN", "[DISCOVERY] Invalid namespace name type: %T", ns)
 			}
 		}
-		logutil.Printf("DEBUG", "getMatchingNamespaces - Final namespace list: %v", namespaces)
+		if configPkg.IsDebugEnabled() {
+			logutil.Printf("DEBUG", "[DISCOVERY] Found %d matching namespaces", len(namespaces))
+		}
 		return namespaces, nil
 	}
 
 	// For now, return default namespace if no specific selector
-	logutil.Printf("DEBUG", "getMatchingNamespaces - No matchNames found, using default namespace")
 	return []string{"default"}, nil
 }
 
 func (kd *KubernetesDiscovery) getMatchingPods(namespace string, selector map[string]interface{}) ([]*corev1.Pod, error) {
-	logutil.Printf("DEBUG", "getMatchingPods - namespace: %s, selector: %+v", namespace, selector)
-
 	if selector == nil {
-		logutil.Printf("ERROR", "getMatchingPods - No selector provided")
+		logutil.Printf("ERROR", "[DISCOVERY] No selector provided for pod matching")
 		return nil, fmt.Errorf("no selector provided")
 	}
 
 	// Handle matchLabels
 	if matchLabels, ok := selector["matchLabels"].(map[string]interface{}); ok {
-		logutil.Printf("DEBUG", "getMatchingPods - Found matchLabels: %+v", matchLabels)
 		labelSelector := make(map[string]string)
 		for k, v := range matchLabels {
 			if vStr, ok := v.(string); ok {
 				labelSelector[k] = vStr
-				logutil.Printf("DEBUG", "getMatchingPods - Added label selector: %s=%s", k, vStr)
 			} else {
-				logutil.Printf("WARN", "getMatchingPods - Invalid label value type for key %s: %T", k, v)
+				logutil.Printf("WARN", "[DISCOVERY] Invalid label value type for key %s: %T", k, v)
 			}
 		}
-		logutil.Printf("DEBUG", "getMatchingPods - Final label selector: %+v", labelSelector)
+		if configPkg.IsDebugEnabled() {
+			logutil.Printf("DEBUG", "[DISCOVERY] Matching pods in namespace %s with %d labels", namespace, len(labelSelector))
+		}
 		return kd.k8sClient.GetPodsByLabels(namespace, labelSelector)
 	}
 
-	logutil.Printf("ERROR", "getMatchingPods - Unsupported selector type, expected matchLabels")
+	logutil.Printf("ERROR", "[DISCOVERY] Unsupported selector type, expected matchLabels")
 	return nil, fmt.Errorf("unsupported selector type")
 }
 
@@ -538,26 +505,8 @@ func (kd *KubernetesDiscovery) processServiceTarget(service *corev1.Service, con
 						LastSeen: time.Now(),
 					}
 
-					// Debug log before updateTarget
-					logutil.Printf("DEBUG_TARGET_UPDATE", "BEFORE updateTarget - Target ID: %s", targetID)
-					logutil.Printf("DEBUG_TARGET_UPDATE", "BEFORE updateTarget - Target URL: %s", url)
-					logutil.Printf("DEBUG_TARGET_UPDATE", "BEFORE updateTarget - metricRelabelConfigs count: %d", len(endpointConfig.MetricRelabelConfigs))
-					if len(endpointConfig.MetricRelabelConfigs) > 0 {
-						for i, relabelConfig := range endpointConfig.MetricRelabelConfigs {
-							if configMap, ok := relabelConfig.(map[string]interface{}); ok {
-								logutil.Printf("DEBUG_TARGET_UPDATE", "BEFORE updateTarget - Config[%d]: action=%v, regex=%v",
-									i, configMap["action"], configMap["regex"])
-							}
-						}
-					} else {
-						logutil.Printf("DEBUG_TARGET_UPDATE", "BEFORE updateTarget - No metricRelabelConfigs found")
-					}
-
 					kd.updateTarget(target)
-
-					// Debug log after updateTarget
-					logutil.Printf("DEBUG_TARGET_UPDATE", "AFTER updateTarget - Target ID: %s successfully updated", targetID)
-					logutil.Printf("DEBUG", "Added ServiceMonitor target: %s (URL: %s)", targetID, url)
+					logutil.Printf("DEBUG", "[DISCOVERY] Added ServiceMonitor target: %s", targetID)
 				}
 
 				// Process not-ready addresses as pending
@@ -590,26 +539,8 @@ func (kd *KubernetesDiscovery) processServiceTarget(service *corev1.Service, con
 						LastSeen: time.Now(),
 					}
 
-					// Debug log before updateTarget (NotReady)
-					logutil.Printf("DEBUG_TARGET_UPDATE", "BEFORE updateTarget (NotReady) - Target ID: %s", targetID)
-					logutil.Printf("DEBUG_TARGET_UPDATE", "BEFORE updateTarget (NotReady) - Target URL: %s", url)
-					logutil.Printf("DEBUG_TARGET_UPDATE", "BEFORE updateTarget (NotReady) - metricRelabelConfigs count: %d", len(endpointConfig.MetricRelabelConfigs))
-					if len(endpointConfig.MetricRelabelConfigs) > 0 {
-						for i, relabelConfig := range endpointConfig.MetricRelabelConfigs {
-							if configMap, ok := relabelConfig.(map[string]interface{}); ok {
-								logutil.Printf("DEBUG_TARGET_UPDATE", "BEFORE updateTarget (NotReady) - Config[%d]: action=%v, regex=%v",
-									i, configMap["action"], configMap["regex"])
-							}
-						}
-					} else {
-						logutil.Printf("DEBUG_TARGET_UPDATE", "BEFORE updateTarget (NotReady) - No metricRelabelConfigs found")
-					}
-
 					kd.updateTarget(target)
-
-					// Debug log after updateTarget (NotReady)
-					logutil.Printf("DEBUG_TARGET_UPDATE", "AFTER updateTarget (NotReady) - Target ID: %s successfully updated", targetID)
-					logutil.Printf("DEBUG", "Added pending ServiceMonitor target: %s (URL: %s)", targetID, url)
+					logutil.Printf("DEBUG", "[DISCOVERY] Added pending ServiceMonitor target: %s", targetID)
 				}
 			}
 		} else {

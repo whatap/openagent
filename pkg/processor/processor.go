@@ -1,7 +1,6 @@
 package processor
 
 import (
-	"encoding/json"
 	"math"
 	"open-agent/tools/util/logutil"
 
@@ -41,88 +40,41 @@ func (p *Processor) processLoop() {
 
 // processRawData processes a single raw data item
 func (p *Processor) processRawData(rawData *model.ScrapeRawData) {
-	logutil.Printf("INFO", "Processing raw data from target: %s", rawData.TargetURL)
+	logutil.Printf("INFO", "[PROCESSOR] Processing raw data from target: %s", rawData.TargetURL)
 
-	// ===== METRIC RELABEL CONFIGS LOGGING (Before Processing) =====
+	// Log metric relabel configs (simplified)
 	if config.IsDebugEnabled() {
-		logutil.Printf("METRIC_RELABEL", "=== MetricRelabelConfigs Status ===")
-		logutil.Printf("METRIC_RELABEL", "Target: %s", rawData.TargetURL)
-		logutil.Printf("METRIC_RELABEL", "Total MetricRelabelConfigs: %d", len(rawData.MetricRelabelConfigs))
+		logutil.Printf("DEBUG", "[PROCESSOR] Processing target %s with %d relabel configs",
+			rawData.TargetURL, len(rawData.MetricRelabelConfigs))
 
-		if len(rawData.MetricRelabelConfigs) == 0 {
-			logutil.Printf("METRIC_RELABEL", "No MetricRelabelConfigs found - all metrics will be kept")
-		} else {
-			logutil.Printf("METRIC_RELABEL", "MetricRelabelConfigs details:")
-			for i, config := range rawData.MetricRelabelConfigs {
-				logutil.Printf("METRIC_RELABEL", "  Config[%d]:", i)
-				logutil.Printf("METRIC_RELABEL", "    Action: %s", config.Action)
-				logutil.Printf("METRIC_RELABEL", "    SourceLabels: %v", config.SourceLabels)
-				logutil.Printf("METRIC_RELABEL", "    Regex: %s", config.Regex)
-				logutil.Printf("METRIC_RELABEL", "    TargetLabel: %s", config.TargetLabel)
-				logutil.Printf("METRIC_RELABEL", "    Replacement: %s", config.Replacement)
-				logutil.Printf("METRIC_RELABEL", "    Separator: %s", config.Separator)
-			}
+		if len(rawData.MetricRelabelConfigs) > 0 {
+			// Log only first config for debugging
+			firstConfig := rawData.MetricRelabelConfigs[0]
+			logutil.Printf("DEBUG", "[PROCESSOR] First relabel config: Action=%s, Regex=%s",
+				firstConfig.Action, firstConfig.Regex)
 		}
-		logutil.Printf("METRIC_RELABEL", "=== End MetricRelabelConfigs Status ===")
 	}
 
-	// Debug logging for addNodeLabel functionality
-	if config.IsDebugEnabled() {
-		logutil.Printf("DEBUG_NODE", "NodeName: '%s', AddNodeLabel: %v", rawData.NodeName, rawData.AddNodeLabel)
-		if rawData.AddNodeLabel && rawData.NodeName != "" {
-			logutil.Printf("DEBUG_NODE", "Node label will be added to metrics: node=%s", rawData.NodeName)
-		} else if rawData.AddNodeLabel && rawData.NodeName == "" {
-			logutil.Printf("DEBUG_NODE", "AddNodeLabel is true but NodeName is empty - no node label will be added")
-		} else if !rawData.AddNodeLabel && rawData.NodeName != "" {
-			logutil.Printf("DEBUG_NODE", "NodeName is available (%s) but AddNodeLabel is false - no node label will be added", rawData.NodeName)
+	// Debug logging for node label functionality
+	if config.IsDebugEnabled() && rawData.AddNodeLabel {
+		if rawData.NodeName != "" {
+			logutil.Printf("DEBUG", "[PROCESSOR] Node label will be added: node=%s", rawData.NodeName)
 		} else {
-			logutil.Printf("DEBUG_NODE", "No node label will be added (AddNodeLabel: %v, NodeName: '%s')", rawData.AddNodeLabel, rawData.NodeName)
+			logutil.Printf("DEBUG", "[PROCESSOR] AddNodeLabel enabled but NodeName is empty")
 		}
 	}
 
 	// Convert the raw data to OpenMx format using the collection timestamp
 	conversionResult, err := converter.ConvertWithTimestamp(rawData.RawData, rawData.CollectionTime)
 	if err != nil {
-		logutil.Printf("ERROR", "Error converting raw data: %v", err)
+		logutil.Printf("ERROR", "[PROCESSOR] Error converting raw data: %v", err)
 		return
 	}
 
 	// Apply metric relabeling if configured
 	if len(rawData.MetricRelabelConfigs) > 0 {
-		logutil.Printf("INFO", "Applying metric relabeling with %d configs", len(rawData.MetricRelabelConfigs))
-
-		// Detailed logging of metric relabel configs
-		if config.IsDebugEnabled() {
-			for i, metricRelabelConfig := range rawData.MetricRelabelConfigs {
-				logutil.Printf("DEBUG", "MetricRelabelConfig[%d]: Action=%s, SourceLabels=%v, Regex=%s", 
-					i, metricRelabelConfig.Action, metricRelabelConfig.SourceLabels, metricRelabelConfig.Regex)
-			}
-		}
-
-		// Log metrics before applying relabel configs
-		if config.IsDebugEnabled() {
-			logutil.Printf("DEBUG", "Before applying relabel configs: %d metrics", len(conversionResult.GetOpenMxList()))
-			for i, metric := range conversionResult.GetOpenMxList() {
-				if i < 5 { // Log only first 5 metrics to avoid flooding logs
-					logutil.Printf("DEBUG", "Metric[%d] before relabeling: %s, Value=%v", i, metric.Metric, metric.Value)
-				}
-			}
-		}
-
+		logutil.Printf("INFO", "[PROCESSOR] Applying %d metric relabel configs", len(rawData.MetricRelabelConfigs))
 		converter.ApplyRelabelConfigs(conversionResult.GetOpenMxList(), rawData.MetricRelabelConfigs)
-
-		// Log metrics after applying relabel configs
-		if config.IsDebugEnabled() {
-			// Count non-NaN metrics
-			nonNanCount := 0
-			for _, metric := range conversionResult.GetOpenMxList() {
-				if !math.IsNaN(metric.Value) {
-					nonNanCount++
-				}
-			}
-			logutil.Printf("DEBUG", "After applying relabel configs: %d non-NaN metrics out of %d total", 
-				nonNanCount, len(conversionResult.GetOpenMxList()))
-		}
 	}
 
 	// Filter out metrics with NaN and infinite values
@@ -141,12 +93,6 @@ func (p *Processor) processRawData(rawData *model.ScrapeRawData) {
 			if rawData.NodeName != "" && rawData.AddNodeLabel {
 				openMx.AddLabel("node", rawData.NodeName)
 				nodeLabelsAdded++
-
-				// Log first few metrics that get node labels for debugging
-				if config.IsDebugEnabled() && nodeLabelsAdded <= 3 {
-					logutil.Printf("DEBUG_NODE", "Added node label to metric[%d]: %s, node=%s", 
-						nodeLabelsAdded, openMx.Metric, rawData.NodeName)
-				}
 			}
 
 			filteredOpenMxList = append(filteredOpenMxList, openMx)
@@ -154,80 +100,40 @@ func (p *Processor) processRawData(rawData *model.ScrapeRawData) {
 	}
 
 	// Summary logging for node label addition
-	if config.IsDebugEnabled() && rawData.AddNodeLabel && rawData.NodeName != "" {
-		logutil.Printf("DEBUG_NODE", "Node label addition summary: %d out of %d valid metrics received node label (node=%s)", 
-			nodeLabelsAdded, totalValidMetrics, rawData.NodeName)
+	if config.IsDebugEnabled() && nodeLabelsAdded > 0 {
+		logutil.Printf("DEBUG", "[PROCESSOR] Added node labels to %d metrics", nodeLabelsAdded)
 	}
 	// Replace the original list with the filtered list
 	conversionResult.OpenMxList = filteredOpenMxList
 
 	// Add instance property to each OpenMxHelp
 	nodePropertiesAdded := 0
-	totalHelpItems := len(conversionResult.GetOpenMxHelpList())
 
-	for i, openMxHelp := range conversionResult.GetOpenMxHelpList() {
+	for _, openMxHelp := range conversionResult.GetOpenMxHelpList() {
 		openMxHelp.Put("instance", rawData.TargetURL)
 
 		// Add node property if available and enabled
 		if rawData.NodeName != "" && rawData.AddNodeLabel {
 			openMxHelp.Put("node", rawData.NodeName)
 			nodePropertiesAdded++
-
-			// Log first few help items that get node properties for debugging
-			if config.IsDebugEnabled() && nodePropertiesAdded <= 3 {
-				logutil.Printf("DEBUG_NODE", "Added node property to OpenMxHelp[%d]: metric=%s, node=%s", 
-					i+1, openMxHelp.Metric, rawData.NodeName)
-			}
 		}
 	}
 
 	// Summary logging for node property addition
-	if config.IsDebugEnabled() && rawData.AddNodeLabel && rawData.NodeName != "" {
-		logutil.Printf("DEBUG_NODE", "Node property addition summary: %d out of %d help items received node property (node=%s)", 
-			nodePropertiesAdded, totalHelpItems, rawData.NodeName)
+	if config.IsDebugEnabled() && nodePropertiesAdded > 0 {
+		logutil.Printf("DEBUG", "[PROCESSOR] Added node properties to %d help items", nodePropertiesAdded)
 	}
 
-	// Check if debug is enabled in whatap.conf
+	// Summary logging for processed data
 	if config.IsDebugEnabled() {
-		// Output metric data to stdout
-		logutil.Println("DEBUG", "=== DEBUG: Metrics Data ===")
-
-		// Print OpenMx list
-		logutil.Printf("DEBUG", "OpenMx List (%d items):\n", len(conversionResult.GetOpenMxList()))
-		for i, openMx := range conversionResult.GetOpenMxList() {
-			// Skip metrics with NaN values
-			if math.IsNaN(openMx.Value) {
-				logutil.Printf("DEBUG", "[%d] Skipped (NaN value)\n", i)
-				continue
+		validMetrics := 0
+		for _, openMx := range conversionResult.GetOpenMxList() {
+			if !math.IsNaN(openMx.Value) && !math.IsInf(openMx.Value, 0) {
+				validMetrics++
 			}
-			// Skip metrics with infinite values
-			if math.IsInf(openMx.Value, 0) {
-				logutil.Printf("DEBUG", "[%d] Skipped (infinite value: %v)\n", i, openMx.Value)
-				continue
-			}
-
-			// Convert to JSON for better readability
-			jsonData, err := json.MarshalIndent(openMx, "", "  ")
-			if err != nil {
-				logutil.Printf("ERROR", "Error marshaling OpenMx to JSON: %v\n", err)
-				continue
-			}
-			logutil.Printf("DEBUG", "[%d] %s\n", i, string(jsonData))
 		}
-
-		// Print OpenMxHelp list
-		logutil.Printf("DEBUG", "\nOpenMxHelp List (%d items):\n", len(conversionResult.GetOpenMxHelpList()))
-		for i, openMxHelp := range conversionResult.GetOpenMxHelpList() {
-			// Convert to JSON for better readability
-			jsonData, err := json.MarshalIndent(openMxHelp, "", "  ")
-			if err != nil {
-				logutil.Printf("ERROR", "Error marshaling OpenMxHelp to JSON: %v\n", err)
-				continue
-			}
-			logutil.Printf("DEBUG", "[%d] %s\n", i, string(jsonData))
-		}
-
-		logutil.Println("DEBUG", "=== END DEBUG ===")
+		logutil.Printf("DEBUG", "[PROCESSOR] Processing complete: %d valid metrics, %d help items",
+			validMetrics, len(conversionResult.GetOpenMxHelpList()))
 	}
 
 	// Add the processed data to the queue

@@ -442,7 +442,7 @@ func (sm *ScraperManager) targetManagementLoop() {
 		managementInterval = 5 * time.Second
 	}
 
-	logutil.Printf("INFO", "Starting target management loop with interval: %v", managementInterval)
+	logutil.Printf("INFO", "[SCRAPER] Starting target management loop with interval: %v", managementInterval)
 	ticker := time.NewTicker(managementInterval)
 	defer ticker.Stop()
 
@@ -581,7 +581,7 @@ func (sm *ScraperManager) startTargetScheduler(target *discovery.Target) {
 	go func() {
 		defer scheduler.ticker.Stop()
 
-		logutil.Printf("INFO", "Started scheduler for target %s with interval %v", target.ID, interval)
+		logutil.Printf("INFO", "[SCRAPER] Started scheduler for target %s with interval %v", target.ID, interval)
 
 		for {
 			select {
@@ -590,7 +590,7 @@ func (sm *ScraperManager) startTargetScheduler(target *discovery.Target) {
 				currentTarget := scheduler.getTarget()
 				sm.scrapeTarget(currentTarget)
 			case <-scheduler.stopCh:
-				logutil.Printf("INFO", "Stopped scheduler for target %s", target.ID)
+				logutil.Printf("INFO", "[SCRAPER] Stopped scheduler for target %s", target.ID)
 				return
 			}
 		}
@@ -724,21 +724,15 @@ func (sm *ScraperManager) logScrapingInterval(target *discovery.Target) {
 
 		// Log the interval information (debug only)
 		if config.IsDebugEnabled() {
-			logutil.Printf("SCRAPE_INTERVAL", "Target %s: Configured=%v, Actual=%v, Deviation=%v",
-				target.ID, configuredInterval, actualInterval, actualInterval-configuredInterval)
+			logutil.Printf("DEBUG", "[SCRAPER] Target %s: interval deviation %v",
+				target.ID, actualInterval-configuredInterval)
 		}
 
 		// Log warning if deviation is significant (more than 1 second)
 		deviation := actualInterval - configuredInterval
 		if deviation > time.Second || deviation < -time.Second {
-			logutil.Printf("WARN", "Target %s has significant interval deviation: expected %v, actual %v (deviation: %v)",
-				target.ID, configuredInterval, actualInterval, deviation)
-		}
-	} else {
-		// First scrape for this target (debug only)
-		if config.IsDebugEnabled() {
-			logutil.Printf("SCRAPE_INTERVAL", "Target %s: First scrape, configured interval=%v",
-				target.ID, configuredInterval)
+			logutil.Printf("WARN", "[SCRAPER] Target %s has significant interval deviation: %v",
+				target.ID, deviation)
 		}
 	}
 }
@@ -780,66 +774,39 @@ func (sm *ScraperManager) createScraperTaskFromTarget(target *discovery.Target) 
 
 	// Debug log for target information (debug only)
 	if config.IsDebugEnabled() {
-		logutil.Printf("CreateScraperTask", "Creating scraper task for target: %s (URL: %s)", targetName, target.URL)
-		logutil.Printf("CreateScraperTask", "Target labels: %+v", target.Labels)
-
-		// Log metadata for debugging
-		logutil.Printf("CreateScraperTask", "Target metadata keys: %v", getMapKeys(target.Metadata))
+		logutil.Printf("DEBUG", "[SCRAPER] Creating scraper task for target: %s", targetName)
 	}
 
 	// Parse metric relabel configs
 	var relabelConfigs model.RelabelConfigs
 	if metricRelabelConfigs != nil {
-		if config.IsDebugEnabled() {
-			logutil.Printf("CreateScraperTask", "Found %d metric relabel configs", len(metricRelabelConfigs))
-		}
 		relabelConfigs = model.ParseRelabelConfigs(metricRelabelConfigs)
-	} else {
 		if config.IsDebugEnabled() {
-			logutil.Printf("CreateScraperTask", "No metric relabel configs found")
+			logutil.Printf("DEBUG", "[SCRAPER] Found %d metric relabel configs", len(metricRelabelConfigs))
 		}
 	}
 
 	// Create TLS config if present
 	var tlsConfig *client.TLSConfig
 	if endpoint, ok := target.Metadata["endpoint"].(discovery.EndpointConfig); ok {
-		if config.IsDebugEnabled() {
-			logutil.Printf("CreateScraperTask", "Found endpoint config: path=%s, scheme=%s, interval=%s",
-				endpoint.Path, endpoint.Scheme, endpoint.Interval)
-		}
-
 		if endpoint.TLSConfig != nil {
 			tlsConfig = &client.TLSConfig{}
 			if insecureSkipVerify, ok := endpoint.TLSConfig["insecureSkipVerify"].(bool); ok {
 				tlsConfig.InsecureSkipVerify = insecureSkipVerify
 				if config.IsDebugEnabled() {
-					logutil.Printf("CreateScraperTask", "TLS config: insecureSkipVerify=%v", insecureSkipVerify)
+					logutil.Printf("DEBUG", "[SCRAPER] TLS config: insecureSkipVerify=%v", insecureSkipVerify)
 				}
 			}
-		} else {
-			if config.IsDebugEnabled() {
-				logutil.Printf("CreateScraperTask", "No TLS config found")
-			}
-		}
-	} else {
-		if config.IsDebugEnabled() {
-			logutil.Printf("CreateScraperTask", "No endpoint config found in metadata")
 		}
 	}
 
 	// Extract node information for proper node label handling
 	nodeName, _ := target.Labels["node"]
 	addNodeLabel, _ := target.Metadata["addNodeLabel"].(bool)
-	if config.IsDebugEnabled() {
-		logutil.Printf("CreateScraperTask", "Node info: nodeName=%s, addNodeLabel=%v", nodeName, addNodeLabel)
-	}
 
-	// Extract URL components for debugging
+	// Extract URL components
 	path := extractPathFromURL(target.URL)
 	scheme := extractSchemeFromURL(target.URL)
-	if config.IsDebugEnabled() {
-		logutil.Printf("CreateScraperTask", "URL components: scheme=%s, path=%s", scheme, path)
-	}
 
 	// Create the scraper task using StaticEndpoints approach
 	// ServiceDiscovery has already resolved the complete URL, so we use it directly
@@ -857,10 +824,9 @@ func (sm *ScraperManager) createScraperTaskFromTarget(target *discovery.Target) 
 	scraperTask.AddNodeLabel = addNodeLabel
 
 	// Debug log for created scraper task
-	logutil.Printf("CreateScraperTask", "Created scraper task: type=%s, targetName=%s, targetURL=%s, path=%s, scheme=%s",
-		scraperTask.TargetType, scraperTask.TargetName, scraperTask.TargetURL, scraperTask.Path, scraperTask.Scheme)
-	logutil.Printf("CreateScraperTask", "Scraper task node info: nodeName=%s, addNodeLabel=%v",
-		scraperTask.NodeName, scraperTask.AddNodeLabel)
+	if config.IsDebugEnabled() {
+		logutil.Printf("DEBUG", "[SCRAPER] Created scraper task: %s", scraperTask.TargetName)
+	}
 
 	return scraperTask
 }
