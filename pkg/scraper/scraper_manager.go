@@ -802,9 +802,9 @@ func (sm *ScraperManager) createScraperTaskFromTarget(target *discovery.Target) 
 	scraperTask.AddNodeLabel = addNodeLabel
 
 	// Debug log for created scraper task - show original type for clarity
-	logutil.Printf("CreateScraperTask", "Created scraper task: type=%s (original: %s), targetName=%s, targetURL=%s, path=%s, scheme=%s",
+	logutil.Infof("CreateScraperTask", "Created scraper task: type=%s (original: %s), targetName=%s, targetURL=%s, path=%s, scheme=%s",
 		scraperTask.TargetType, originalType, scraperTask.TargetName, scraperTask.TargetURL, scraperTask.Path, scraperTask.Scheme)
-	logutil.Printf("CreateScraperTask", "Scraper task node info: nodeName=%s, addNodeLabel=%v",
+	logutil.Infof("CreateScraperTask", "Scraper task node info: nodeName=%s, addNodeLabel=%v",
 		scraperTask.NodeName, scraperTask.AddNodeLabel)
 
 	return scraperTask
