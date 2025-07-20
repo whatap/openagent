@@ -1,6 +1,9 @@
 package scraper
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"strings"
 	"sync"
 	"time"
@@ -20,6 +23,21 @@ type TargetScheduler struct {
 	ticker   *time.Ticker
 	stopCh   chan struct{}
 	sm       *ScraperManager
+	mutex    sync.RWMutex // target 접근 보호
+}
+
+// updateTarget safely updates the target reference
+func (ts *TargetScheduler) updateTarget(newTarget *discovery.Target) {
+	ts.mutex.Lock()
+	defer ts.mutex.Unlock()
+	ts.target = newTarget
+}
+
+// getTarget safely gets the current target
+func (ts *TargetScheduler) getTarget() *discovery.Target {
+	ts.mutex.RLock()
+	defer ts.mutex.RUnlock()
+	return ts.target
 }
 
 // ScraperManager is responsible for managing scraper tasks
@@ -438,6 +456,38 @@ func (sm *ScraperManager) targetManagementLoop() {
 	}
 }
 
+// calculateEndpointHash calculates SHA256 hash of endpoint configuration
+func (sm *ScraperManager) calculateEndpointHash(endpoint interface{}) string {
+	if endpoint == nil {
+		return "null"
+	}
+
+	data, err := json.Marshal(endpoint)
+	if err != nil {
+		logutil.Printf("WARN", "Failed to marshal endpoint for hashing: %v", err)
+		// Fallback: 강제로 변경된 것으로 처리
+		return "error-" + string(time.Now().UnixNano())
+	}
+
+	hash := sha256.Sum256(data)
+	return hex.EncodeToString(hash[:])
+}
+
+// hasEndpointChanged checks if endpoint configuration has changed
+func (sm *ScraperManager) hasEndpointChanged(oldTarget, newTarget *discovery.Target) bool {
+	oldHash := sm.calculateEndpointHash(oldTarget.Metadata["endpoint"])
+	newHash := sm.calculateEndpointHash(newTarget.Metadata["endpoint"])
+
+	changed := oldHash != newHash
+
+	if changed {
+		logutil.Infof("hasEndpointChanged", "Endpoint changed for target %s: hash %s -> %s",
+			newTarget.ID, oldHash[:8], newHash[:8])
+	}
+
+	return changed
+}
+
 // updateTargetSchedulers manages the lifecycle of individual target schedulers
 func (sm *ScraperManager) updateTargetSchedulers() {
 	// Get current ready targets
@@ -460,13 +510,22 @@ func (sm *ScraperManager) updateTargetSchedulers() {
 			// Start new scheduler for this target
 			sm.startTargetScheduler(target)
 		} else {
-			// Check if interval has changed
+			// Check if interval has changed (requires scheduler restart)
 			newInterval := sm.getTargetInterval(target)
 			if existingScheduler.interval != newInterval {
 				logutil.Printf("INFO", "Target %s interval changed from %v to %v, restarting scheduler",
 					target.ID, existingScheduler.interval, newInterval)
 				sm.stopTargetScheduler(target.ID)
 				sm.startTargetScheduler(target)
+			} else if sm.hasEndpointChanged(existingScheduler.getTarget(), target) {
+				// Endpoint changed but interval unchanged - graceful update without restart
+				logutil.Printf("INFO", "Target %s endpoint configuration changed, applying from next scrape cycle", target.ID)
+				existingScheduler.updateTarget(target)
+
+				if config.IsDebugEnabled() {
+					logutil.Printf("DEBUG", "Updated target reference for %s, new endpoint hash: %s",
+						target.ID, sm.calculateEndpointHash(target.Metadata["endpoint"])[:8])
+				}
 			}
 		}
 	}
@@ -526,7 +585,9 @@ func (sm *ScraperManager) startTargetScheduler(target *discovery.Target) {
 		for {
 			select {
 			case <-scheduler.ticker.C:
-				sm.scrapeTarget(scheduler.target)
+				// Use getTarget() to get the latest target information
+				currentTarget := scheduler.getTarget()
+				sm.scrapeTarget(currentTarget)
 			case <-scheduler.stopCh:
 				logutil.Printf("INFO", "Stopped scheduler for target %s", target.ID)
 				return
