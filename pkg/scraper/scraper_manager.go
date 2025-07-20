@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -466,7 +467,7 @@ func (sm *ScraperManager) calculateEndpointHash(endpoint interface{}) string {
 	if err != nil {
 		logutil.Printf("WARN", "Failed to marshal endpoint for hashing: %v", err)
 		// Fallback: 강제로 변경된 것으로 처리
-		return "error-" + string(time.Now().UnixNano())
+		return "error-" + strconv.FormatInt(time.Now().UnixNano(), 10)
 	}
 
 	hash := sha256.Sum256(data)
