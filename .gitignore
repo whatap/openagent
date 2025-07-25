@@ -177,3 +177,4 @@ logs/
 whatap_openagent.sock
 docs
 istio/
+openagent/
