@@ -2,13 +2,14 @@ package config
 
 import (
 	"bufio"
-	"log"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"open-agent/tools/util/logutil"
 )
 
 // singleton instance of WhatapConfig
@@ -255,7 +256,7 @@ func (wc *WhatapConfig) GetConfig() *Config {
 		}
 		intValue, err := strconv.Atoi(value)
 		if err != nil {
-			log.Printf("Error converting %s to integer: %v", value, err)
+			logutil.Infof("CONFIG", "Error converting %s to integer: %v", value, err)
 			return defaultValue
 		}
 		return intValue
@@ -311,7 +312,7 @@ func (wc *WhatapConfig) GetInt(key string) int {
 
 	intValue, err := strconv.Atoi(value)
 	if err != nil {
-		log.Printf("Error converting %s to integer: %v", value, err)
+		logutil.Infof("CONFIG", "Error converting %s to integer: %v", value, err)
 		return 0
 	}
 
@@ -328,7 +329,7 @@ func (wc *WhatapConfig) GetIntWithDefault(key string, defaultValue int) int {
 
 	intValue, err := strconv.Atoi(value)
 	if err != nil {
-		log.Printf("Error converting %s to integer: %v", value, err)
+		logutil.Infof("CONFIG", "Error converting %s to integer: %v", value, err)
 		return defaultValue
 	}
 
@@ -356,16 +357,16 @@ func (wc *WhatapConfig) watchConfig() {
 			// Check if the file has been modified
 			fileInfo, err := os.Stat(wc.configFile)
 			if err != nil {
-				log.Printf("Error checking config file: %v", err)
+				logutil.Infof("CONFIG", "Error checking config file: %v", err)
 				continue
 			}
 
 			// If the file has been modified since the last check, reload it
 			if fileInfo.ModTime().After(lastModTime) {
-				log.Printf("Config file changed, reloading...")
+				logutil.Infof("CONFIG", "Config file changed, reloading...")
 				lastModTime = fileInfo.ModTime()
 				if err := wc.LoadConfig(); err != nil {
-					log.Printf("Error reloading config: %v", err)
+					logutil.Infof("CONFIG", "Error reloading config: %v", err)
 				}
 			}
 		case <-wc.stopCh:

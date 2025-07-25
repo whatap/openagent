@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"open-agent/pkg/client"
-	"open-agent/pkg/config"
 	"open-agent/pkg/k8s"
 	"open-agent/pkg/model"
 	"open-agent/tools/util/logutil"
@@ -188,36 +187,33 @@ func (st *ScraperTask) Run() (*model.ScrapeRawData, error) {
 	// Resolve the endpoint
 	targetURL, resolveErr := st.ResolveEndpoint()
 	if resolveErr != nil {
-		if config.IsDebugEnabled() {
-			logutil.Printf("DEBUG", "[DEBUG] Error resolving endpoint for target %s: %v", st.TargetName, resolveErr)
-		}
+		logutil.Infof("SCRAPER", "Failed to resolve endpoint for target [%s]: %v", st.TargetName, resolveErr)
+		logutil.Debugf("SCRAPER", "Error resolving endpoint for target %s: %v", st.TargetName, resolveErr)
 		return nil, fmt.Errorf("error resolving endpoint for target %s: %v", st.TargetName, resolveErr)
 	}
 
 	// Format the URL
 	formattedURL := client.FormatURL(targetURL)
 
-	// Log detailed information if debug is enabled
-	if config.IsDebugEnabled() {
-		logutil.Printf("DEBUG", "[DEBUG] Starting scraper task for target [%s], URL [%s]", st.TargetName, targetURL)
-		logutil.Printf("DEBUG", "[DEBUG] Formatted URL: %s", formattedURL)
-		if st.TLSConfig != nil {
-			logutil.Printf("DEBUG", "[DEBUG] Using TLS config with InsecureSkipVerify=%v", st.TLSConfig.InsecureSkipVerify)
-		}
-		if len(st.MetricRelabelConfigs) > 0 {
-			logutil.Printf("DEBUG", "[DEBUG] Using %d metric relabel configs", len(st.MetricRelabelConfigs))
-			for i, config := range st.MetricRelabelConfigs {
-				logutil.Printf("DEBUG", "[DEBUG] Relabel config #%d: Action=%s, SourceLabels=%v, TargetLabel=%s, Regex=%s",
-					i+1, config.Action, config.SourceLabels, config.TargetLabel, config.Regex)
-			}
+	// Log basic collection information at INFO level
+	logutil.Infof("SCRAPER", "Starting collection from target [%s] at URL [%s]", st.TargetName, targetURL)
+
+	// Log detailed information
+	logutil.Debugf("SCRAPER", "Starting scraper task for target [%s], URL [%s]", st.TargetName, targetURL)
+	logutil.Debugf("SCRAPER", "Formatted URL: %s", formattedURL)
+	if st.TLSConfig != nil {
+		logutil.Debugf("SCRAPER", "Using TLS config with InsecureSkipVerify=%v", st.TLSConfig.InsecureSkipVerify)
+	}
+	if len(st.MetricRelabelConfigs) > 0 {
+		logutil.Debugf("SCRAPER", "Using %d metric relabel configs", len(st.MetricRelabelConfigs))
+		for i, config := range st.MetricRelabelConfigs {
+			logutil.Debugf("SCRAPER", "Relabel config #%d: Action=%s, SourceLabels=%v, TargetLabel=%s, Regex=%s",
+				i+1, config.Action, config.SourceLabels, config.TargetLabel, config.Regex)
 		}
 	}
 
-	// Record start time for performance measurement if debug is enabled
-	var startTime time.Time
-	if config.IsDebugEnabled() {
-		startTime = time.Now()
-	}
+	// Record start time for performance measurement
+	startTime := time.Now()
 
 	// Capture collection time right before making the HTTP request
 	collectionTime := time.Now().UnixMilli()
@@ -234,9 +230,8 @@ func (st *ScraperTask) Run() (*model.ScrapeRawData, error) {
 	}
 
 	if httpErr != nil {
-		if config.IsDebugEnabled() {
-			logutil.Printf("DEBUG", "[DEBUG] Error scraping target %s for target %s: %v", targetURL, st.TargetName, httpErr)
-		}
+		logutil.Infof("SCRAPER", "Failed to collect from target [%s]: %v", st.TargetName, httpErr)
+		logutil.Debugf("SCRAPER", "Error scraping target %s for target %s: %v", targetURL, st.TargetName, httpErr)
 		return nil, fmt.Errorf("error scraping target %s for target %s: %v", targetURL, st.TargetName, httpErr)
 	}
 
@@ -248,32 +243,34 @@ func (st *ScraperTask) Run() (*model.ScrapeRawData, error) {
 		rawData = model.NewScrapeRawData(targetURL, response, st.MetricRelabelConfigs, collectionTime)
 	}
 
-	// Log detailed information if debug is enabled
-	if config.IsDebugEnabled() {
-		duration := time.Since(startTime)
-		logutil.Printf("DEBUG", "[DEBUG] Scraper task completed for target [%s], URL [%s] in %v", st.TargetName, targetURL, duration)
-		logutil.Printf("DEBUG", "[DEBUG] Response length: %d bytes", len(response))
+	// Log detailed information
+	duration := time.Since(startTime)
+	logutil.Debugf("SCRAPER", "Scraper task completed for target [%s], URL [%s] in %v", st.TargetName, targetURL, duration)
+	logutil.Debugf("SCRAPER", "Response length: %d bytes", len(response))
 
-		// Log a preview of the response (first 500 characters)
-		preview := response
-		if len(preview) > 500 {
-			preview = preview[:500] + "..."
-		}
-		logutil.Printf("DEBUG", "[DEBUG] Response preview: %s", preview)
+	// Log a preview of the response (first 500 characters)
+	preview := response
+	if len(preview) > 500 {
+		preview = preview[:500] + "..."
+	}
+	logutil.Debugf("SCRAPER", "Response preview: %s", preview)
 
-		// Count the number of metrics in the response (approximate)
-		metricCount := 0
-		for _, line := range strings.Split(response, "\n") {
-			// Skip empty lines, comments, and metadata lines
-			if line == "" || strings.HasPrefix(line, "#") {
-				continue
-			}
-			metricCount++
+	// Count the number of metrics in the response (approximate)
+	metricCount := 0
+	for _, line := range strings.Split(response, "\n") {
+		// Skip empty lines, comments, and metadata lines
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
 		}
-		logutil.Printf("DEBUG", "[DEBUG] Approximate number of metrics: %d", metricCount)
+		metricCount++
 	}
 
-	logutil.Printf("INFO", "ScraperTask: target [%s] fetched URL %s (length=%d)", st.TargetName, st.TargetURL, len(response))
+	// Log collection success with essential information at INFO level
+	logutil.Infof("SCRAPER", "Successfully collected from target [%s]: %d metrics, %d bytes, took %v",
+		st.TargetName, metricCount, len(response), duration)
+
+	// Keep detailed debug information
+	logutil.Debugf("SCRAPER", "Approximate number of metrics: %d", metricCount)
 
 	return rawData, nil
 }

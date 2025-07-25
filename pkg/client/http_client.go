@@ -5,14 +5,13 @@ import (
 	"crypto/x509"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
-	"open-agent/pkg/config"
+	"open-agent/tools/util/logutil"
 )
 
 const (
@@ -137,13 +136,11 @@ func (c *HTTPClient) ExecuteGet(targetURL string) (string, error) {
 func (c *HTTPClient) ExecuteGetWithTLSConfig(targetURL string, tlsConfig *TLSConfig) (string, error) {
 	formattedURL := FormatURL(targetURL)
 
-	// Log the request if debug is enabled
-	if config.IsDebugEnabled() {
-		if c.isMinikube {
-			log.Printf("[DEBUG] HTTP Request (Minikube client): GET %s", formattedURL)
-		} else {
-			log.Printf("[DEBUG] HTTP Request: GET %s", formattedURL)
-		}
+	// Log the request
+	if c.isMinikube {
+		logutil.Debugf("HTTP_CLIENT", "HTTP Request (Minikube client): GET %s", formattedURL)
+	} else {
+		logutil.Debugf("HTTP_CLIENT", "HTTP Request: GET %s", formattedURL)
 	}
 
 	req, err := http.NewRequest("GET", formattedURL, nil)
@@ -157,14 +154,12 @@ func (c *HTTPClient) ExecuteGetWithTLSConfig(targetURL string, tlsConfig *TLSCon
 		token, err := GetServiceAccountToken()
 		if err == nil {
 			req.Header.Set("Authorization", "Bearer "+token)
-			if config.IsDebugEnabled() {
-				log.Printf("[DEBUG] Added Authorization header with Bearer token")
-			}
-		} else if config.IsDebugEnabled() {
-			log.Printf("[DEBUG] No service account token available: %v", err)
+			logutil.Debugf("HTTP_CLIENT", "Added Authorization header with Bearer token")
+		} else {
+			logutil.Debugf("HTTP_CLIENT", "No service account token available: %v", err)
 		}
-	} else if config.IsDebugEnabled() {
-		log.Printf("[DEBUG] Skipping token authentication for Minikube")
+	} else {
+		logutil.Debugf("HTTP_CLIENT", "Skipping token authentication for Minikube")
 	}
 
 	req.Header.Set("Accept", "application/json")
@@ -175,13 +170,9 @@ func (c *HTTPClient) ExecuteGetWithTLSConfig(targetURL string, tlsConfig *TLSCon
 	// For Minikube, we already have a client with the correct TLS config
 	// We don't need to create a new one unless a custom TLS config is provided
 	if c.isMinikube {
-		if config.IsDebugEnabled() {
-			log.Printf("[DEBUG] Using existing Minikube client with client certificates")
-		}
+		logutil.Debugf("HTTP_CLIENT", "Using existing Minikube client with client certificates")
 	} else if tlsConfig != nil {
-		if config.IsDebugEnabled() {
-			log.Printf("[DEBUG] Using custom TLS config with InsecureSkipVerify=%v", tlsConfig.InsecureSkipVerify)
-		}
+		logutil.Debugf("HTTP_CLIENT", "Using custom TLS config with InsecureSkipVerify=%v", tlsConfig.InsecureSkipVerify)
 
 		// Create a custom transport with the specified TLS config
 		transport := &http.Transport{
@@ -200,11 +191,9 @@ func (c *HTTPClient) ExecuteGetWithTLSConfig(targetURL string, tlsConfig *TLSCon
 				rootCAs.AddCert(cert)
 				transport.TLSClientConfig.RootCAs = rootCAs
 
-				if config.IsDebugEnabled() {
-					log.Printf("[DEBUG] Added Kubernetes CA cert to root CA pool")
-				}
-			} else if config.IsDebugEnabled() {
-				log.Printf("[DEBUG] Failed to load Kubernetes CA cert: %v", err)
+				logutil.Debugf("HTTP_CLIENT", "Added Kubernetes CA cert to root CA pool")
+			} else {
+				logutil.Debugf("HTTP_CLIENT", "Failed to load Kubernetes CA cert: %v", err)
 			}
 		}
 
@@ -216,54 +205,41 @@ func (c *HTTPClient) ExecuteGetWithTLSConfig(targetURL string, tlsConfig *TLSCon
 	}
 
 	// Log the request start time if debug is enabled
-	var startTime time.Time
-	if config.IsDebugEnabled() {
-		startTime = time.Now()
-		log.Printf("[DEBUG] Sending HTTP request to %s", formattedURL)
-	}
+	startTime := time.Now()
+	logutil.Debugf("HTTP_CLIENT", "Sending HTTP request to %s", formattedURL)
 
 	resp, err := client.Do(req)
 	if err != nil {
-		if config.IsDebugEnabled() {
-			log.Printf("[DEBUG] HTTP request failed: %v", err)
-		}
+		logutil.Debugf("HTTP_CLIENT", "HTTP request failed: %v", err)
 		return "", fmt.Errorf("error executing request: %v", err)
 	}
 	defer resp.Body.Close()
 
 	// Log the response if debug is enabled
-	if config.IsDebugEnabled() {
-		duration := time.Since(startTime)
-		log.Printf("[DEBUG] HTTP Response: %d %s (took %v)", resp.StatusCode, resp.Status, duration)
-		log.Printf("[DEBUG] Response Headers: %v", resp.Header)
-	}
+	duration := time.Since(startTime)
+	logutil.Debugf("HTTP_CLIENT", "HTTP Response: %d %s (took %v)", resp.StatusCode, resp.Status, duration)
+	logutil.Debugf("HTTP_CLIENT", "Response Headers: %v", resp.Header)
 
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		if config.IsDebugEnabled() {
-			log.Printf("[DEBUG] Error reading response body: %v", err)
-		}
+		logutil.Debugf("HTTP_CLIENT", "Error reading response body: %v", err)
 		return "", fmt.Errorf("error reading response body: %v", err)
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		if config.IsDebugEnabled() {
-			log.Printf("[DEBUG] HTTP error: %d %s", resp.StatusCode, resp.Status)
-			log.Printf("[DEBUG] Response body: %s", string(body))
-		}
+		logutil.Debugf("HTTP_CLIENT", "HTTP error: %d %s", resp.StatusCode, resp.Status)
+		logutil.Debugf("HTTP_CLIENT", "Response body: %s", string(body))
 		return "", fmt.Errorf("HTTP error: %d %s", resp.StatusCode, resp.Status)
 	}
 
 	// Log the response body length if debug is enabled
-	if config.IsDebugEnabled() {
-		log.Printf("[DEBUG] Response body length: %d bytes", len(body))
-		// Log a preview of the response body (first 500 characters)
-		preview := string(body)
-		if len(preview) > 500 {
-			preview = preview[:500] + "..."
-		}
-		log.Printf("[DEBUG] Response body preview: %s", preview)
+	logutil.Debugf("HTTP_CLIENT", "Response body length: %d bytes", len(body))
+	// Log a preview of the response body (first 500 characters)
+	preview := string(body)
+	if len(preview) > 500 {
+		preview = preview[:500] + "..."
 	}
+	logutil.Debugf("HTTP_CLIENT", "Response body preview: %s", preview)
 
 	return string(body), nil
 }
@@ -275,7 +251,7 @@ func createMinikubeTLSConfig(home string) (*tls.Config, error) {
 	clientCertPath := filepath.Join(home, ".minikube", "profiles", "minikube", "client.crt")
 	clientKeyPath := filepath.Join(home, ".minikube", "profiles", "minikube", "client.key")
 
-	log.Printf("Loading Minikube certificates from: CA=%s, Cert=%s, Key=%s", caCertPath, clientCertPath, clientKeyPath)
+	logutil.Infof("HTTP_CLIENT", "Loading Minikube certificates from: CA=%s, Cert=%s, Key=%s", caCertPath, clientCertPath, clientKeyPath)
 
 	// Check if files exist
 	if _, err := os.Stat(caCertPath); os.IsNotExist(err) {
@@ -293,21 +269,21 @@ func createMinikubeTLSConfig(home string) (*tls.Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error loading CA certificate: %v", err)
 	}
-	log.Printf("Successfully loaded CA certificate (%d bytes)", len(caCert))
+	logutil.Infof("HTTP_CLIENT", "Successfully loaded CA certificate (%d bytes)", len(caCert))
 
 	// Create CA cert pool and add the CA cert
 	caCertPool := x509.NewCertPool()
 	if ok := caCertPool.AppendCertsFromPEM(caCert); !ok {
 		return nil, fmt.Errorf("failed to append CA certificate to cert pool")
 	}
-	log.Printf("Successfully added CA certificate to cert pool")
+	logutil.Infof("HTTP_CLIENT", "Successfully added CA certificate to cert pool")
 
 	// Load client cert and key
 	clientCert, err := tls.LoadX509KeyPair(clientCertPath, clientKeyPath)
 	if err != nil {
 		return nil, fmt.Errorf("error loading client certificate and key: %v", err)
 	}
-	log.Printf("Successfully loaded client certificate and key")
+	logutil.Infof("HTTP_CLIENT", "Successfully loaded client certificate and key")
 
 	// Create TLS config
 	tlsConfig := &tls.Config{
@@ -322,13 +298,13 @@ func createMinikubeTLSConfig(home string) (*tls.Config, error) {
 
 // SetupMinikubeClient sets up the HTTP client with Minikube certificates
 func SetupMinikubeClient(home string) error {
-	log.Printf("Setting up Minikube client with certificates from %s", home)
+	logutil.Infof("HTTP_CLIENT", "Setting up Minikube client with certificates from %s", home)
 	tlsConfig, err := createMinikubeTLSConfig(home)
 	if err != nil {
-		log.Printf("Error creating Minikube TLS config: %v", err)
+		logutil.Infof("HTTP_CLIENT", "Error creating Minikube TLS config: %v", err)
 		return err
 	}
-	log.Printf("Successfully created Minikube TLS config with %d certificates", len(tlsConfig.Certificates))
+	logutil.Infof("HTTP_CLIENT", "Successfully created Minikube TLS config with %d certificates", len(tlsConfig.Certificates))
 
 	// Create a transport with the TLS config
 	transport := &http.Transport{

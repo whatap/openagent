@@ -538,12 +538,12 @@ func (this *Logger) Infoln(args ...interface{}) {
 
 // Debugf logs a debug message, patterned after log.Printf.
 func (this *Logger) Debugf(format string, args ...interface{}) {
-	Infof("DEBUG", format, args...)
+	this.debug("DEBUG", fmt.Sprintf(format, args...))
 }
 
 // Debug logs a debug message, patterned after log.Print.
 func (this *Logger) Debug(args ...interface{}) {
-	Infoln("DEBUG", args...)
+	this.debug("DEBUG", fmt.Sprint(args...))
 }
 
 // whatap cache log
