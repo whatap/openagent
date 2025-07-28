@@ -63,22 +63,22 @@ func startPprofServer(logger *logfile.FileLogger) {
 
 	pprofPort, err := strconv.Atoi(pprofPortStr)
 	if err != nil {
-		logger.Println("pprof", "Invalid PPROF_PORT value, using default 6060")
+		logger.Infoln("pprof", "Invalid PPROF_PORT value, using default 6060")
 		pprofPort = 6060
 	}
 
 	pprofAddr := fmt.Sprintf(":%d", pprofPort)
 
 	go func() {
-		logger.Println("pprof", fmt.Sprintf("Starting pprof server on %s", pprofAddr))
-		logger.Println("pprof", "Available endpoints:")
-		logger.Println("pprof", fmt.Sprintf("  - CPU Profile: http://localhost%s/debug/pprof/profile", pprofAddr))
-		logger.Println("pprof", fmt.Sprintf("  - Heap Profile: http://localhost%s/debug/pprof/heap", pprofAddr))
-		logger.Println("pprof", fmt.Sprintf("  - Goroutine Profile: http://localhost%s/debug/pprof/goroutine", pprofAddr))
-		logger.Println("pprof", fmt.Sprintf("  - All Profiles: http://localhost%s/debug/pprof/", pprofAddr))
+		logger.Infoln("pprof", fmt.Sprintf("Starting pprof server on %s", pprofAddr))
+		logger.Infoln("pprof", "Available endpoints:")
+		logger.Infoln("pprof", fmt.Sprintf("  - CPU Profile: http://localhost%s/debug/pprof/profile", pprofAddr))
+		logger.Infoln("pprof", fmt.Sprintf("  - Heap Profile: http://localhost%s/debug/pprof/heap", pprofAddr))
+		logger.Infoln("pprof", fmt.Sprintf("  - Goroutine Profile: http://localhost%s/debug/pprof/goroutine", pprofAddr))
+		logger.Infoln("pprof", fmt.Sprintf("  - All Profiles: http://localhost%s/debug/pprof/", pprofAddr))
 
 		if err := http.ListenAndServe(pprofAddr, nil); err != nil {
-			logger.Println("pprof", fmt.Sprintf("Failed to start pprof server: %v", err))
+			logger.Infoln("pprof", fmt.Sprintf("Failed to start pprof server: %v", err))
 		}
 	}()
 }
@@ -116,13 +116,13 @@ func run(home string, logger *logfile.FileLogger) {
 		defer func(f *os.File) {
 			err := f.Close()
 			if err != nil {
-				logger.Println("run", "Error closing stack dump file", err)
+				logger.Infoln("run", "Error closing stack dump file", err)
 			}
 		}(f)
 
 		err = pprof.Lookup("goroutine").WriteTo(f, 1)
 		if err != nil {
-			logger.Println("run", "Error writing stack dump file", err)
+			logger.Infoln("run", "Error writing stack dump file", err)
 			return
 		}
 
@@ -132,7 +132,7 @@ func run(home string, logger *logfile.FileLogger) {
 	// Start the agent
 	open.BootOpenAgent(version, commitHash, logger)
 
-	logger.Println("run", "Received termination signal, shutting down")
+	logger.Infoln("run", "Received termination signal, shutting down")
 	<-stopper
 }
 
@@ -140,7 +140,7 @@ func exitOnStdinClose(logger *logfile.FileLogger) {
 	ppid := os.Getppid()
 	for {
 		if ppid != os.Getppid() {
-			logger.Println("exit", "exit master", ppid, os.Getppid())
+			logger.Infoln("exit", "exit master", ppid, os.Getppid())
 			os.Exit(0)
 		}
 		time.Sleep(1 * time.Second)
@@ -149,22 +149,22 @@ func exitOnStdinClose(logger *logfile.FileLogger) {
 func startWorker(command string, logger *logfile.FileLogger) (*exec.Cmd, error) {
 	var cmd *exec.Cmd
 	if config.IsForceStandaloneMode() {
-		logger.Println("StartWorker", fmt.Sprintf("Start Worker Process(%s foreground standalone)", command))
+		logger.Infoln("StartWorker", fmt.Sprintf("Start Worker Process(%s foreground standalone)", command))
 		cmd = exec.Command(command, "foreground", "standalone")
 	} else {
-		logger.Println("StartWorker", fmt.Sprintf("Start Worker Process(%s foreground)", command))
+		logger.Infoln("StartWorker", fmt.Sprintf("Start Worker Process(%s foreground)", command))
 		cmd = exec.Command(command, "foreground")
 	}
 	err := cmd.Start()
 	if err != nil {
-		logger.Println("StartWorkerError", err)
+		logger.Infoln("StartWorkerError", err)
 		return nil, err
 	}
 	return cmd, nil
 }
 func superviseRun(childHealthChannel chan bool, logger *logfile.FileLogger) {
 	for {
-		logger.Println("superviseRun", "Worker Start")
+		logger.Infoln("superviseRun", "Worker Start")
 		cmd, err := startWorker(os.Args[0], logger)
 		if err != nil {
 			return
@@ -182,7 +182,7 @@ func superviseRun(childHealthChannel chan bool, logger *logfile.FileLogger) {
 						err = cmd.Wait()
 						childAlive = false
 					}
-					logger.Println("superviseCheck", "child health problem, child kill")
+					logger.Infoln("superviseCheck", "child health problem, child kill")
 				}
 			case <-time.After(time.Duration(3) * time.Minute):
 				if cmd != nil && cmd.Process != nil {
@@ -190,12 +190,12 @@ func superviseRun(childHealthChannel chan bool, logger *logfile.FileLogger) {
 					err = cmd.Wait()
 					childAlive = false
 				}
-				logger.Println("superviseCheck", "child health check timeout, child kill")
+				logger.Infoln("superviseCheck", "child health check timeout, child kill")
 			}
 		}
 
 		if err != nil {
-			logger.Println("superviseRunError", "command wait error : ", err)
+			logger.Infoln("superviseRunError", "command wait error : ", err)
 		}
 	}
 }
@@ -207,7 +207,7 @@ func sendKeepAliveMessage(logger *logfile.FileLogger, conn net.Conn) {
 		if open.IsOK() {
 			msgmap.PutString("Health", "OK")
 		} else {
-			logger.Println("KeepAlive", "HealthCheck Fail")
+			logger.Infoln("KeepAlive", "HealthCheck Fail")
 			msgmap.PutString("Health", "PROBLEM")
 		}
 
@@ -218,7 +218,7 @@ func sendKeepAliveMessage(logger *logfile.FileLogger, conn net.Conn) {
 		dout.WriteIntBytes(doutx.ToByteArray())
 		err = writer.WriteBytes(dout.ToByteArray(), 30*time.Second)
 		if err != nil {
-			logger.Println("KeepAliveWriteFail", "KeepAliveFail")
+			logger.Infoln("KeepAliveWriteFail", "KeepAliveFail")
 		}
 
 		time.Sleep(60 * time.Second)
@@ -226,10 +226,10 @@ func sendKeepAliveMessage(logger *logfile.FileLogger, conn net.Conn) {
 }
 func keepAliveSender(logger *logfile.FileLogger) {
 	for {
-		logger.Println("keepAliveSender", "keepAliveSender Start")
+		logger.Infoln("keepAliveSender", "keepAliveSender Start")
 		sockAddr := getAliveSockAddr()
 		if _, err := os.Stat(sockAddr); os.IsNotExist(err) {
-			logger.Println("keepAliveSenderError-1", "keepAliveSocketNotExist", sockAddr)
+			logger.Infoln("keepAliveSenderError-1", "keepAliveSocketNotExist", sockAddr)
 			continue
 		}
 		socktype := "unix"
@@ -238,7 +238,7 @@ func keepAliveSender(logger *logfile.FileLogger) {
 		for serverconn == nil || (reflect.ValueOf(serverconn).Kind() == reflect.Ptr && reflect.ValueOf(serverconn).IsNil()) {
 			conn, err := net.DialUnix(socktype, nil, &laddr)
 			if err != nil {
-				logger.Println("keepAliveSenderError-2", "Dial Error", err)
+				logger.Infoln("keepAliveSenderError-2", "Dial Error", err)
 				time.Sleep(3 * time.Second)
 				continue
 			}
@@ -265,13 +265,13 @@ func keepAlive(conn net.Conn, childHealthChannel chan bool, logger *logfile.File
 	for {
 		protocol, err := reader.ReadShort()
 		if err != nil || protocol != KEEP_ALIVE_PROTOCOL {
-			logger.Println("keepAliveError-1", err)
+			logger.Infoln("keepAliveError-1", err)
 			return
 		}
 
 		msgbytes, err := reader.ReadIntBytesLimit(2048)
 		if err != nil {
-			logger.Println("keepAliveError-2", err)
+			logger.Infoln("keepAliveError-2", err)
 			return
 		}
 
@@ -287,7 +287,7 @@ func keepAlive(conn net.Conn, childHealthChannel chan bool, logger *logfile.File
 	}
 }
 func monitorChildHealth(childHealthChannel chan bool, logger *logfile.FileLogger) {
-	logger.Println("childHealthCheck", "childHealthCheck Start")
+	logger.Infoln("childHealthCheck", "childHealthCheck Start")
 	for {
 		sockAddr := getAliveSockAddr()
 		if err := os.RemoveAll(sockAddr); err != nil {
@@ -296,7 +296,7 @@ func monitorChildHealth(childHealthChannel chan bool, logger *logfile.FileLogger
 
 		l, err := net.Listen("unix", sockAddr)
 		if err != nil {
-			logger.Println("childHealthCheckError-2", err)
+			logger.Infoln("childHealthCheckError-2", err)
 			continue
 		}
 
@@ -307,7 +307,7 @@ func monitorChildHealth(childHealthChannel chan bool, logger *logfile.FileLogger
 				if conn != nil {
 					conn.Close()
 				}
-				logger.Println("childHealthCheckError-3", err)
+				logger.Infoln("childHealthCheckError-3", err)
 				errorCount += 1
 				time.Sleep(3 * time.Second)
 			}
@@ -317,7 +317,7 @@ func monitorChildHealth(childHealthChannel chan bool, logger *logfile.FileLogger
 					conn.Close()
 				}
 
-				logger.Println("childHealthCheckError-4", "ErrorCount Over 10")
+				logger.Infoln("childHealthCheckError-4", "ErrorCount Over 10")
 				break
 			}
 
