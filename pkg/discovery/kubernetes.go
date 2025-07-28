@@ -79,7 +79,7 @@ func (kd *KubernetesDiscovery) GetReadyTargets() []*Target {
 
 	// Debug logging for returned targets
 	if configPkg.IsDebugEnabled() {
-		logutil.Printf("DEBUG", "[DISCOVERY] Found %d ready targets out of %d total",
+		logutil.Debugf("DISCOVERY", "Found %d ready targets out of %d total",
 			len(readyTargets), len(kd.targets))
 	}
 
@@ -136,7 +136,7 @@ func (kd *KubernetesDiscovery) discoverTargets() {
 		// Skip disabled targets
 		if !parseDiscoveryConfig.Enabled {
 			if configPkg.IsDebugEnabled() {
-				logutil.Printf("DEBUG", "Target %s is disabled, skipping", parseDiscoveryConfig.TargetName)
+				logutil.Debugf("DISCOVERY", "Target %s is disabled, skipping", parseDiscoveryConfig.TargetName)
 			}
 			continue
 		}
@@ -145,7 +145,7 @@ func (kd *KubernetesDiscovery) discoverTargets() {
 	}
 
 	if configPkg.IsDebugEnabled() {
-		logutil.Printf("DEBUG", "Using %d current discovery configurations from latest ConfigManager data", len(currentConfigs))
+		logutil.Debugf("DISCOVERY", "Using %d current discovery configurations from latest ConfigManager data", len(currentConfigs))
 	}
 
 	// Execute discovery with latest configurations
@@ -166,7 +166,7 @@ func (kd *KubernetesDiscovery) discoverTargets() {
 // discoverPodTargets discovers Pod-based targets
 func (kd *KubernetesDiscovery) discoverPodTargets(config DiscoveryConfig) {
 	if configPkg.IsDebugEnabled() {
-		logutil.Printf("DEBUG", "Discovering PodMonitor targets for %s", config.TargetName)
+		logutil.Debugf("DISCOVERY", "Discovering PodMonitor targets for %s", config.TargetName)
 	}
 
 	if !kd.k8sClient.IsInitialized() {
@@ -175,8 +175,10 @@ func (kd *KubernetesDiscovery) discoverPodTargets(config DiscoveryConfig) {
 	}
 
 	// Debug: Log the configuration being used
-	logutil.Printf("DEBUG", "PodMonitor %s - NamespaceSelector: %+v", config.TargetName, config.NamespaceSelector)
-	logutil.Printf("DEBUG", "PodMonitor %s - Selector: %+v", config.TargetName, config.Selector)
+	if configPkg.IsDebugEnabled() {
+		logutil.Debugf("DISCOVERY", "PodMonitor %s - NamespaceSelector: %+v", config.TargetName, config.NamespaceSelector)
+		logutil.Debugf("DISCOVERY", "PodMonitor %s - Selector: %+v", config.TargetName, config.Selector)
+	}
 
 	// Get matching namespaces
 	namespaces, err := kd.getMatchingNamespaces(config.NamespaceSelector)
@@ -185,7 +187,9 @@ func (kd *KubernetesDiscovery) discoverPodTargets(config DiscoveryConfig) {
 		return
 	}
 
-	logutil.Printf("DEBUG", "PodMonitor %s - Found %d matching namespaces: %v", config.TargetName, len(namespaces), namespaces)
+	if configPkg.IsDebugEnabled() {
+		logutil.Debugf("DISCOVERY", "PodMonitor %s - Found %d matching namespaces: %v", config.TargetName, len(namespaces), namespaces)
+	}
 
 	totalPodsFound := 0
 	for _, namespace := range namespaces {
@@ -196,15 +200,21 @@ func (kd *KubernetesDiscovery) discoverPodTargets(config DiscoveryConfig) {
 			continue
 		}
 
-		logutil.Printf("DEBUG", "PodMonitor %s - Found %d pods in namespace %s", config.TargetName, len(pods), namespace)
+		if configPkg.IsDebugEnabled() {
+			logutil.Debugf("DISCOVERY", "PodMonitor %s - Found %d pods in namespace %s", config.TargetName, len(pods), namespace)
+		}
 		totalPodsFound += len(pods)
 
 		for _, pod := range pods {
-			logutil.Printf("DEBUG", "PodMonitor %s - Processing pod %s/%s with labels: %+v", config.TargetName, pod.Namespace, pod.Name, pod.Labels)
+			if configPkg.IsDebugEnabled() {
+				logutil.Debugf("DISCOVERY", "PodMonitor %s - Processing pod %s/%s with labels: %+v", config.TargetName, pod.Namespace, pod.Name, pod.Labels)
+			}
 			kd.processPodTarget(pod, config)
 		}
 	}
-	logutil.Printf("DEBUG", "PodMonitor %s - Total pods discovered: %d", config.TargetName, totalPodsFound)
+	if configPkg.IsDebugEnabled() {
+		logutil.Debugf("DISCOVERY", "PodMonitor %s - Total pods discovered: %d", config.TargetName, totalPodsFound)
+	}
 }
 
 // processPodTarget processes a single pod target
@@ -220,7 +230,9 @@ func (kd *KubernetesDiscovery) processPodTarget(pod *corev1.Pod, config Discover
 		// Get pod IP
 		podIP := pod.Status.PodIP
 		if podIP == "" {
-			logutil.Printf("DEBUG", "Pod %s/%s has no IP yet", pod.Namespace, pod.Name)
+			if configPkg.IsDebugEnabled() {
+				logutil.Debugf("DISCOVERY", "Pod %s/%s has no IP yet", pod.Namespace, pod.Name)
+			}
 			continue
 		}
 
@@ -262,7 +274,9 @@ func (kd *KubernetesDiscovery) processPodTarget(pod *corev1.Pod, config Discover
 			target.State = TargetStateReady
 		} else {
 			target.State = TargetStatePending
-			logutil.Printf("DEBUG", "Pod %s/%s is not ready yet", pod.Namespace, pod.Name)
+			if configPkg.IsDebugEnabled() {
+				logutil.Debugf("DISCOVERY", "Pod %s/%s is not ready yet", pod.Namespace, pod.Name)
+			}
 		}
 
 		kd.updateTarget(target)
@@ -295,12 +309,16 @@ func (kd *KubernetesDiscovery) updateTarget(newTarget *Target) {
 	if !exists {
 		// New target
 		kd.targets[newTarget.ID] = newTarget
-		logutil.Printf("DEBUG", "Added new target: %s (state: %s)", newTarget.ID, newTarget.State)
+		if configPkg.IsDebugEnabled() {
+			logutil.Debugf("DISCOVERY", "Added new target: %s (state: %s)", newTarget.ID, newTarget.State)
+		}
 	} else {
 		// Always update target to ensure metadata changes are reflected
 		// This includes metricRelabelConfigs changes from ConfigMap updates
 		kd.targets[newTarget.ID] = newTarget
-		logutil.Printf("DEBUG", "Updated target: %s (forced update to ensure metadata sync)", newTarget.ID)
+		if configPkg.IsDebugEnabled() {
+			logutil.Debugf("DISCOVERY", "Updated target: %s (forced update to ensure metadata sync)", newTarget.ID)
+		}
 	}
 }
 
@@ -322,7 +340,7 @@ func (kd *KubernetesDiscovery) getMatchingNamespaces(namespaceSelector map[strin
 			}
 		}
 		if configPkg.IsDebugEnabled() {
-			logutil.Printf("DEBUG", "[DISCOVERY] Found %d matching namespaces", len(namespaces))
+			logutil.Debugf("DISCOVERY", "Found %d matching namespaces", len(namespaces))
 		}
 		return namespaces, nil
 	}
@@ -348,7 +366,7 @@ func (kd *KubernetesDiscovery) getMatchingPods(namespace string, selector map[st
 			}
 		}
 		if configPkg.IsDebugEnabled() {
-			logutil.Printf("DEBUG", "[DISCOVERY] Matching pods in namespace %s with %d labels", namespace, len(labelSelector))
+			logutil.Debugf("DISCOVERY", "Matching pods in namespace %s with %d labels", namespace, len(labelSelector))
 		}
 		return kd.k8sClient.GetPodsByLabels(namespace, labelSelector)
 	}
@@ -378,7 +396,9 @@ func (kd *KubernetesDiscovery) determineScheme(endpointScheme, port string, tlsC
 
 // ServiceMonitor and StaticEndpoints discovery implementations
 func (kd *KubernetesDiscovery) discoverServiceTargets(config DiscoveryConfig) {
-	logutil.Printf("DEBUG", "Discovering ServiceMonitor targets for %s", config.TargetName)
+	if configPkg.IsDebugEnabled() {
+		logutil.Debugf("DISCOVERY", "Discovering ServiceMonitor targets for %s", config.TargetName)
+	}
 
 	if !kd.k8sClient.IsInitialized() {
 		logutil.Printf("WARN", "Kubernetes client not initialized for ServiceMonitor: %s", config.TargetName)
@@ -468,7 +488,9 @@ func (kd *KubernetesDiscovery) processServiceTarget(service *corev1.Service, con
 				}
 
 				if endpointPort == 0 {
-					logutil.Printf("DEBUG", "Port %s not found in endpoints for service %s/%s", endpointConfig.Port, service.Namespace, service.Name)
+					if configPkg.IsDebugEnabled() {
+						logutil.Debugf("DISCOVERY", "Port %s not found in endpoints for service %s/%s", endpointConfig.Port, service.Namespace, service.Name)
+					}
 					continue
 				}
 
@@ -506,7 +528,9 @@ func (kd *KubernetesDiscovery) processServiceTarget(service *corev1.Service, con
 					}
 
 					kd.updateTarget(target)
-					logutil.Printf("DEBUG", "[DISCOVERY] Added ServiceMonitor target: %s", targetID)
+					if configPkg.IsDebugEnabled() {
+						logutil.Debugf("DISCOVERY", "Added ServiceMonitor target: %s", targetID)
+					}
 				}
 
 				// Process not-ready addresses as pending
@@ -540,17 +564,23 @@ func (kd *KubernetesDiscovery) processServiceTarget(service *corev1.Service, con
 					}
 
 					kd.updateTarget(target)
-					logutil.Printf("DEBUG", "[DISCOVERY] Added pending ServiceMonitor target: %s", targetID)
+					if configPkg.IsDebugEnabled() {
+						logutil.Debugf("DISCOVERY", "Added pending ServiceMonitor target: %s", targetID)
+					}
 				}
 			}
 		} else {
-			logutil.Printf("DEBUG", "No endpoints found for service %s/%s", service.Namespace, service.Name)
+			if configPkg.IsDebugEnabled() {
+				logutil.Debugf("DISCOVERY", "No endpoints found for service %s/%s", service.Namespace, service.Name)
+			}
 		}
 	}
 }
 
 func (kd *KubernetesDiscovery) discoverStaticTargets(config DiscoveryConfig) {
-	logutil.Printf("DEBUG", "Discovering StaticEndpoints targets for %s", config.TargetName)
+	if configPkg.IsDebugEnabled() {
+		logutil.Debugf("DISCOVERY", "Discovering StaticEndpoints targets for %s", config.TargetName)
+	}
 
 	// StaticEndpoints don't require Kubernetes API - just process the configured endpoints
 	if len(config.Endpoints) == 0 {
@@ -609,7 +639,9 @@ func (kd *KubernetesDiscovery) discoverStaticTargets(config DiscoveryConfig) {
 		}
 
 		kd.updateTarget(target)
-		logutil.Printf("DEBUG", "Added StaticEndpoints target: %s (URL: %s)", targetID, url)
+		if configPkg.IsDebugEnabled() {
+			logutil.Debugf("DISCOVERY", "Added StaticEndpoints target: %s (URL: %s)", targetID, url)
+		}
 	}
 }
 

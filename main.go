@@ -15,6 +15,8 @@ import (
 	"github.com/whatap/golib/util/dateutil"
 	"log"
 	"net"
+	"net/http"
+	_ "net/http/pprof"
 	"open-agent/open"
 	"open-agent/pkg/config"
 	"open-agent/util/io"
@@ -24,6 +26,7 @@ import (
 	"reflect"
 	"runtime"
 	"runtime/pprof"
+	"strconv"
 	"syscall"
 	"time"
 )
@@ -50,10 +53,43 @@ func getAliveSockAddr() string {
 	return fmt.Sprintf("%s/whatap_openagent.sock", cwd)
 }
 
+// startPprofServer starts the pprof HTTP server for performance profiling
+func startPprofServer(logger *logfile.FileLogger) {
+	// Get pprof port from environment variable, default to 6060
+	pprofPortStr := os.Getenv("PPROF_PORT")
+	if pprofPortStr == "" {
+		pprofPortStr = "6060"
+	}
+
+	pprofPort, err := strconv.Atoi(pprofPortStr)
+	if err != nil {
+		logger.Println("pprof", "Invalid PPROF_PORT value, using default 6060")
+		pprofPort = 6060
+	}
+
+	pprofAddr := fmt.Sprintf(":%d", pprofPort)
+
+	go func() {
+		logger.Println("pprof", fmt.Sprintf("Starting pprof server on %s", pprofAddr))
+		logger.Println("pprof", "Available endpoints:")
+		logger.Println("pprof", fmt.Sprintf("  - CPU Profile: http://localhost%s/debug/pprof/profile", pprofAddr))
+		logger.Println("pprof", fmt.Sprintf("  - Heap Profile: http://localhost%s/debug/pprof/heap", pprofAddr))
+		logger.Println("pprof", fmt.Sprintf("  - Goroutine Profile: http://localhost%s/debug/pprof/goroutine", pprofAddr))
+		logger.Println("pprof", fmt.Sprintf("  - All Profiles: http://localhost%s/debug/pprof/", pprofAddr))
+
+		if err := http.ListenAndServe(pprofAddr, nil); err != nil {
+			logger.Println("pprof", fmt.Sprintf("Failed to start pprof server: %v", err))
+		}
+	}()
+}
+
 func run(home string, logger *logfile.FileLogger) {
 	// Set up signal handling for graceful shutdown
 	stopper := make(chan os.Signal, 1)
 	signal.Notify(stopper, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
+
+	// Start pprof HTTP server for performance profiling
+	startPprofServer(logger)
 
 	// Enable CPU profiling
 	runtime.SetCPUProfileRate(1)

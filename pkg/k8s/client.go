@@ -10,7 +10,6 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
-	"log"
 	"open-agent/tools/util/logutil"
 	"os"
 	"path/filepath"
@@ -88,10 +87,10 @@ func (c *K8sClient) initialize() {
 				kubeconfig = filepath.Join(home, ".kube", "config")
 			}
 		}
-		log.Printf("Using kubeconfig: %s", kubeconfig)
+		logutil.Infof("K8S", "Using kubeconfig: %s", kubeconfig)
 		config, err = clientcmd.BuildConfigFromFlags("", kubeconfig)
 		if err != nil {
-			log.Printf("Error building kubeconfig: %v", err)
+			logutil.Infof("K8S", "Error building kubeconfig: %v", err)
 			return
 		}
 	}
@@ -99,7 +98,7 @@ func (c *K8sClient) initialize() {
 	// Create the clientset
 	c.clientset, err = kubernetes.NewForConfig(config)
 	if err != nil {
-		log.Printf("Error creating Kubernetes client: %v", err)
+		logutil.Infof("K8S", "Error creating Kubernetes client: %v", err)
 		return
 	}
 
@@ -153,7 +152,7 @@ func (c *K8sClient) initialize() {
 		c.serviceInformer.HasSynced,
 		c.namespaceInformer.HasSynced,
 		c.configMapInformer.HasSynced) {
-		log.Println("Timed out waiting for caches to sync")
+		logutil.Infof("K8S", "Timed out waiting for caches to sync")
 		return
 	}
 
@@ -161,7 +160,7 @@ func (c *K8sClient) initialize() {
 	c.initialized = true
 	c.mu.Unlock()
 
-	log.Println("Kubernetes client initialized successfully")
+	logutil.Infof("K8S", "Kubernetes client initialized successfully")
 }
 
 // IsInitialized returns true if the client is initialized
@@ -337,7 +336,7 @@ func (c *K8sClient) GetNamespacesByNames(names []string) ([]*corev1.Namespace, e
 		key := name
 		obj, exists, err := c.namespaceStore.GetByKey(key)
 		if err != nil || !exists {
-			log.Printf("Namespace %s not found in cache: %v", name, err)
+			logutil.Infof("K8S", "Namespace %s not found in cache: %v", name, err)
 			continue
 		}
 		namespaces = append(namespaces, obj.(*corev1.Namespace))

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"gopkg.in/yaml.v2"
 	"io/ioutil"
-	"log"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -13,6 +12,7 @@ import (
 	"time"
 
 	"open-agent/pkg/k8s"
+	"open-agent/tools/util/logutil"
 )
 
 // Force standalone mode flag
@@ -50,7 +50,7 @@ func NewConfigManager() *ConfigManager {
 
 	// Check force standalone mode first
 	if forceStandaloneMode {
-		log.Printf("Force standalone configuration mode enabled, using file watcher")
+		logutil.Infof("CONFIG", "Force standalone configuration mode enabled, using file watcher")
 		// Set k8s client to standalone mode to prevent initialization
 		k8s.SetStandaloneMode(true)
 
@@ -60,7 +60,7 @@ func NewConfigManager() *ConfigManager {
 		go cm.watchConfigFile()
 		// Initial file load
 		if err := cm.LoadConfig(); err != nil {
-			log.Printf("Failed to load configuration: %v", err)
+			logutil.Infof("CONFIG", "Failed to load configuration: %v", err)
 			return nil
 		}
 		return cm
@@ -69,24 +69,24 @@ func NewConfigManager() *ConfigManager {
 	cm.k8sClient = k8s.GetInstance()
 
 	if cm.k8sClient.IsInitialized() {
-		log.Printf("Kubernetes environment detected, using ConfigMap informer cache")
+		logutil.Infof("CONFIG", "Kubernetes environment detected, using ConfigMap informer cache")
 
 		// Initial configuration load
 		if err := cm.LoadConfig(); err != nil {
-			log.Printf("Failed to load initial configuration: %v", err)
+			logutil.Infof("CONFIG", "Failed to load initial configuration: %v", err)
 			return nil
 		}
 
 	} else {
 		// Non-k8s environment: file watcher
-		log.Printf("Non-Kubernetes environment detected, using file watcher")
+		logutil.Infof("CONFIG", "Non-Kubernetes environment detected, using file watcher")
 		cm.fileWatcherEnabled = true
 		cm.fileWatcherStop = make(chan struct{})
 		go cm.watchConfigFile()
 
 		// Initial file load
 		if err := cm.LoadConfig(); err != nil {
-			log.Printf("Failed to load configuration: %v", err)
+			logutil.Infof("CONFIG", "Failed to load configuration: %v", err)
 			return nil
 		}
 	}
@@ -118,7 +118,7 @@ func (cm *ConfigManager) LoadConfig() error {
 		cm.config = config
 		cm.mu.Unlock()
 
-		log.Printf("Configuration loaded from ConfigMap informer cache")
+		logutil.Infof("CONFIG", "Configuration loaded from ConfigMap informer cache")
 		return nil
 	}
 
@@ -146,7 +146,7 @@ func (cm *ConfigManager) LoadConfig() error {
 	cm.config = config
 	cm.mu.Unlock()
 
-	log.Printf("Configuration loaded from local file %s", configFile)
+	logutil.Infof("CONFIG", "Configuration loaded from local file %s", configFile)
 	return nil
 }
 
@@ -173,19 +173,27 @@ func (cm *ConfigManager) GetScrapeInterval() string {
 func (cm *ConfigManager) GetScrapeConfigs() []map[string]interface{} {
 	// Always reload configuration from Informer cache in Kubernetes environment
 	if cm.k8sClient != nil && cm.k8sClient.IsInitialized() {
-		log.Printf("GetScrapeConfigs: Reloading latest configuration from Informer cache")
+		if IsDebugEnabled() {
+			logutil.Debugf("CONFIG", "GetScrapeConfigs: Reloading latest configuration from Informer cache")
+		}
 		if err := cm.LoadConfig(); err != nil {
-			log.Printf("GetScrapeConfigs: Failed to reload config from Informer cache: %v", err)
+			if IsDebugEnabled() {
+				logutil.Debugf("CONFIG", "GetScrapeConfigs: Failed to reload config from Informer cache: %v", err)
+			}
 			// Continue with existing config as fallback
 		} else {
-			log.Printf("GetScrapeConfigs: Successfully reloaded configuration from Informer cache")
+			if IsDebugEnabled() {
+				logutil.Debugf("CONFIG", "GetScrapeConfigs: Successfully reloaded configuration from Informer cache")
+			}
 		}
 	}
 
 	cm.mu.RLock()
 	defer cm.mu.RUnlock()
 
-	log.Printf("GetScrapeConfigs: Processing current configuration")
+	if IsDebugEnabled() {
+		logutil.Debugf("CONFIG", "GetScrapeConfigs: Processing current configuration")
+	}
 
 	// First, try to get the openAgent section from the CR format
 	if cm.config != nil {
@@ -195,10 +203,14 @@ func (cm *ConfigManager) GetScrapeConfigs() []map[string]interface{} {
 			if openAgent, ok := features["openAgent"].(map[interface{}]interface{}); ok {
 				// Check if openAgent is enabled
 				if enabled, ok := openAgent["enabled"].(bool); ok && enabled {
-					log.Printf("GetScrapeConfigs: OpenAgent is enabled, checking for targets")
+					if IsDebugEnabled() {
+						logutil.Debugf("CONFIG", "GetScrapeConfigs: OpenAgent is enabled, checking for targets")
+					}
 					// First check if we have a targets section (new format)
 					if targets, ok := openAgent["targets"].([]interface{}); ok {
-						log.Printf("GetScrapeConfigs: Found %d targets in configuration", len(targets))
+						if IsDebugEnabled() {
+							logutil.Debugf("CONFIG", "GetScrapeConfigs: Found %d targets in configuration", len(targets))
+						}
 						result := make([]map[string]interface{}, 0, len(targets))
 						for i, target := range targets {
 							if targetMap, ok := target.(map[interface{}]interface{}); ok {
@@ -212,31 +224,47 @@ func (cm *ConfigManager) GetScrapeConfigs() []map[string]interface{} {
 
 								// Log target name for debugging
 								if targetName, ok := stringMap["targetName"].(string); ok {
-									log.Printf("GetScrapeConfigs: Processing target %d: %s", i+1, targetName)
+									if IsDebugEnabled() {
+										logutil.Debugf("CONFIG", "GetScrapeConfigs: Processing target %d: %s", i+1, targetName)
+									}
 								}
 
 								result = append(result, stringMap)
 							}
 						}
-						log.Printf("GetScrapeConfigs: Returning %d processed targets", len(result))
+						if IsDebugEnabled() {
+							logutil.Debugf("CONFIG", "GetScrapeConfigs: Returning %d processed targets", len(result))
+						}
 						return result
 					} else {
-						log.Printf("GetScrapeConfigs: No targets section found in openAgent configuration")
+						if IsDebugEnabled() {
+							logutil.Debugf("CONFIG", "GetScrapeConfigs: No targets section found in openAgent configuration")
+						}
 					}
 				} else {
-					log.Printf("GetScrapeConfigs: OpenAgent is disabled or enabled flag not found")
+					if IsDebugEnabled() {
+						logutil.Debugf("CONFIG", "GetScrapeConfigs: OpenAgent is disabled or enabled flag not found")
+					}
 				}
 			} else {
-				log.Printf("GetScrapeConfigs: No openAgent section found in features")
+				if IsDebugEnabled() {
+					logutil.Debugf("CONFIG", "GetScrapeConfigs: No openAgent section found in features")
+				}
 			}
 		} else {
-			log.Printf("GetScrapeConfigs: No features section found in configuration")
+			if IsDebugEnabled() {
+				logutil.Debugf("CONFIG", "GetScrapeConfigs: No features section found in configuration")
+			}
 		}
 	} else {
-		log.Printf("GetScrapeConfigs: Configuration is nil")
+		if IsDebugEnabled() {
+			logutil.Debugf("CONFIG", "GetScrapeConfigs: Configuration is nil")
+		}
 	}
 
-	log.Printf("GetScrapeConfigs: No valid scrape configs found, returning nil")
+	if IsDebugEnabled() {
+		logutil.Debugf("CONFIG", "GetScrapeConfigs: No valid scrape configs found, returning nil")
+	}
 	return nil
 }
 
@@ -256,16 +284,16 @@ func (cm *ConfigManager) watchConfigFile() {
 		case <-ticker.C:
 			if fileInfo, err := os.Stat(cm.configFile); err == nil {
 				if fileInfo.ModTime().After(cm.lastModTime) {
-					log.Printf("Configuration file changed, automatically synchronizing")
+					logutil.Infof("CONFIG", "Configuration file changed, automatically synchronizing")
 					cm.lastModTime = fileInfo.ModTime()
 
 					if err := cm.LoadConfig(); err != nil {
-						log.Printf("Error reloading configuration: %v", err)
+						logutil.Infof("CONFIG", "Error reloading configuration: %v", err)
 						continue
 					}
 
 					// Handler execution removed - simple configuration update only
-					log.Printf("Configuration synchronized successfully")
+					logutil.Infof("CONFIG", "Configuration synchronized successfully")
 				}
 			}
 		case <-cm.fileWatcherStop:

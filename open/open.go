@@ -91,6 +91,15 @@ func BootOpenAgent(version, commitHash string, logger *logfile.FileLogger) {
 		servers = append(servers, fmt.Sprintf("%s:%d", hostSliced, port))
 	}
 
+	// Set logger level based on debug configuration from whatap.conf
+	if config.IsDebugEnabled() {
+		logutil.SetLevel(0) // LOG_LEVEL_DEBUG = 0
+		logutil.Infof("CONFIG", "Debug logging enabled from whatap.conf")
+	} else {
+		logutil.SetLevel(1) // LOG_LEVEL_INFO = 1
+		logutil.Infof("CONFIG", "Debug logging disabled from whatap.conf")
+	}
+
 	// Initialize secure communication
 	secure.StartNet(secure.WithLogger(logger), secure.WithAccessKey(license), secure.WithServers(servers), secure.WithOname("test"))
 
