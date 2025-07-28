@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	configPkg "open-agent/pkg/config"
 	"open-agent/tools/util/logutil"
 )
 
@@ -137,10 +138,12 @@ func (c *HTTPClient) ExecuteGetWithTLSConfig(targetURL string, tlsConfig *TLSCon
 	formattedURL := FormatURL(targetURL)
 
 	// Log the request
-	if c.isMinikube {
-		logutil.Debugf("HTTP_CLIENT", "HTTP Request (Minikube client): GET %s", formattedURL)
-	} else {
-		logutil.Debugf("HTTP_CLIENT", "HTTP Request: GET %s", formattedURL)
+	if configPkg.IsDebugEnabled() {
+		if c.isMinikube {
+			logutil.Debugf("HTTP_CLIENT", "HTTP Request (Minikube client): GET %s", formattedURL)
+		} else {
+			logutil.Debugf("HTTP_CLIENT", "HTTP Request: GET %s", formattedURL)
+		}
 	}
 
 	req, err := http.NewRequest("GET", formattedURL, nil)
@@ -154,12 +157,18 @@ func (c *HTTPClient) ExecuteGetWithTLSConfig(targetURL string, tlsConfig *TLSCon
 		token, err := GetServiceAccountToken()
 		if err == nil {
 			req.Header.Set("Authorization", "Bearer "+token)
-			logutil.Debugf("HTTP_CLIENT", "Added Authorization header with Bearer token")
+			if configPkg.IsDebugEnabled() {
+				logutil.Debugf("HTTP_CLIENT", "Added Authorization header with Bearer token")
+			}
 		} else {
-			logutil.Debugf("HTTP_CLIENT", "No service account token available: %v", err)
+			if configPkg.IsDebugEnabled() {
+				logutil.Debugf("HTTP_CLIENT", "No service account token available: %v", err)
+			}
 		}
 	} else {
-		logutil.Debugf("HTTP_CLIENT", "Skipping token authentication for Minikube")
+		if configPkg.IsDebugEnabled() {
+			logutil.Debugf("HTTP_CLIENT", "Skipping token authentication for Minikube")
+		}
 	}
 
 	req.Header.Set("Accept", "application/json")
@@ -170,9 +179,13 @@ func (c *HTTPClient) ExecuteGetWithTLSConfig(targetURL string, tlsConfig *TLSCon
 	// For Minikube, we already have a client with the correct TLS config
 	// We don't need to create a new one unless a custom TLS config is provided
 	if c.isMinikube {
-		logutil.Debugf("HTTP_CLIENT", "Using existing Minikube client with client certificates")
+		if configPkg.IsDebugEnabled() {
+			logutil.Debugf("HTTP_CLIENT", "Using existing Minikube client with client certificates")
+		}
 	} else if tlsConfig != nil {
-		logutil.Debugf("HTTP_CLIENT", "Using custom TLS config with InsecureSkipVerify=%v", tlsConfig.InsecureSkipVerify)
+		if configPkg.IsDebugEnabled() {
+			logutil.Debugf("HTTP_CLIENT", "Using custom TLS config with InsecureSkipVerify=%v", tlsConfig.InsecureSkipVerify)
+		}
 
 		// Create a custom transport with the specified TLS config
 		transport := &http.Transport{
@@ -191,9 +204,13 @@ func (c *HTTPClient) ExecuteGetWithTLSConfig(targetURL string, tlsConfig *TLSCon
 				rootCAs.AddCert(cert)
 				transport.TLSClientConfig.RootCAs = rootCAs
 
-				logutil.Debugf("HTTP_CLIENT", "Added Kubernetes CA cert to root CA pool")
+				if configPkg.IsDebugEnabled() {
+					logutil.Debugf("HTTP_CLIENT", "Added Kubernetes CA cert to root CA pool")
+				}
 			} else {
-				logutil.Debugf("HTTP_CLIENT", "Failed to load Kubernetes CA cert: %v", err)
+				if configPkg.IsDebugEnabled() {
+					logutil.Debugf("HTTP_CLIENT", "Failed to load Kubernetes CA cert: %v", err)
+				}
 			}
 		}
 
@@ -206,40 +223,52 @@ func (c *HTTPClient) ExecuteGetWithTLSConfig(targetURL string, tlsConfig *TLSCon
 
 	// Log the request start time if debug is enabled
 	startTime := time.Now()
-	logutil.Debugf("HTTP_CLIENT", "Sending HTTP request to %s", formattedURL)
+	if configPkg.IsDebugEnabled() {
+		logutil.Debugf("HTTP_CLIENT", "Sending HTTP request to %s", formattedURL)
+	}
 
 	resp, err := client.Do(req)
 	if err != nil {
-		logutil.Debugf("HTTP_CLIENT", "HTTP request failed: %v", err)
+		if configPkg.IsDebugEnabled() {
+			logutil.Debugf("HTTP_CLIENT", "HTTP request failed: %v", err)
+		}
 		return "", fmt.Errorf("error executing request: %v", err)
 	}
 	defer resp.Body.Close()
 
 	// Log the response if debug is enabled
 	duration := time.Since(startTime)
-	logutil.Debugf("HTTP_CLIENT", "HTTP Response: %d %s (took %v)", resp.StatusCode, resp.Status, duration)
-	logutil.Debugf("HTTP_CLIENT", "Response Headers: %v", resp.Header)
+	if configPkg.IsDebugEnabled() {
+		logutil.Debugf("HTTP_CLIENT", "HTTP Response: %d %s (took %v)", resp.StatusCode, resp.Status, duration)
+		logutil.Debugf("HTTP_CLIENT", "Response Headers: %v", resp.Header)
+	}
 
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		logutil.Debugf("HTTP_CLIENT", "Error reading response body: %v", err)
+		if configPkg.IsDebugEnabled() {
+			logutil.Debugf("HTTP_CLIENT", "Error reading response body: %v", err)
+		}
 		return "", fmt.Errorf("error reading response body: %v", err)
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		logutil.Debugf("HTTP_CLIENT", "HTTP error: %d %s", resp.StatusCode, resp.Status)
-		logutil.Debugf("HTTP_CLIENT", "Response body: %s", string(body))
+		if configPkg.IsDebugEnabled() {
+			logutil.Debugf("HTTP_CLIENT", "HTTP error: %d %s", resp.StatusCode, resp.Status)
+			logutil.Debugf("HTTP_CLIENT", "Response body: %s", string(body))
+		}
 		return "", fmt.Errorf("HTTP error: %d %s", resp.StatusCode, resp.Status)
 	}
 
 	// Log the response body length if debug is enabled
-	logutil.Debugf("HTTP_CLIENT", "Response body length: %d bytes", len(body))
-	// Log a preview of the response body (first 500 characters)
-	preview := string(body)
-	if len(preview) > 500 {
-		preview = preview[:500] + "..."
+	if configPkg.IsDebugEnabled() {
+		logutil.Debugf("HTTP_CLIENT", "Response body length: %d bytes", len(body))
+		// Log a preview of the response body (first 500 characters)
+		preview := string(body)
+		if len(preview) > 500 {
+			preview = preview[:500] + "..."
+		}
+		logutil.Debugf("HTTP_CLIENT", "Response body preview: %s", preview)
 	}
-	logutil.Debugf("HTTP_CLIENT", "Response body preview: %s", preview)
 
 	return string(body), nil
 }

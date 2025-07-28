@@ -173,19 +173,27 @@ func (cm *ConfigManager) GetScrapeInterval() string {
 func (cm *ConfigManager) GetScrapeConfigs() []map[string]interface{} {
 	// Always reload configuration from Informer cache in Kubernetes environment
 	if cm.k8sClient != nil && cm.k8sClient.IsInitialized() {
-		logutil.Debugf("CONFIG", "GetScrapeConfigs: Reloading latest configuration from Informer cache")
+		if IsDebugEnabled() {
+			logutil.Debugf("CONFIG", "GetScrapeConfigs: Reloading latest configuration from Informer cache")
+		}
 		if err := cm.LoadConfig(); err != nil {
-			logutil.Debugf("CONFIG", "GetScrapeConfigs: Failed to reload config from Informer cache: %v", err)
+			if IsDebugEnabled() {
+				logutil.Debugf("CONFIG", "GetScrapeConfigs: Failed to reload config from Informer cache: %v", err)
+			}
 			// Continue with existing config as fallback
 		} else {
-			logutil.Debugf("CONFIG", "GetScrapeConfigs: Successfully reloaded configuration from Informer cache")
+			if IsDebugEnabled() {
+				logutil.Debugf("CONFIG", "GetScrapeConfigs: Successfully reloaded configuration from Informer cache")
+			}
 		}
 	}
 
 	cm.mu.RLock()
 	defer cm.mu.RUnlock()
 
-	logutil.Debugf("CONFIG", "GetScrapeConfigs: Processing current configuration")
+	if IsDebugEnabled() {
+		logutil.Debugf("CONFIG", "GetScrapeConfigs: Processing current configuration")
+	}
 
 	// First, try to get the openAgent section from the CR format
 	if cm.config != nil {
@@ -195,10 +203,14 @@ func (cm *ConfigManager) GetScrapeConfigs() []map[string]interface{} {
 			if openAgent, ok := features["openAgent"].(map[interface{}]interface{}); ok {
 				// Check if openAgent is enabled
 				if enabled, ok := openAgent["enabled"].(bool); ok && enabled {
-					logutil.Debugf("CONFIG", "GetScrapeConfigs: OpenAgent is enabled, checking for targets")
+					if IsDebugEnabled() {
+						logutil.Debugf("CONFIG", "GetScrapeConfigs: OpenAgent is enabled, checking for targets")
+					}
 					// First check if we have a targets section (new format)
 					if targets, ok := openAgent["targets"].([]interface{}); ok {
-						logutil.Debugf("CONFIG", "GetScrapeConfigs: Found %d targets in configuration", len(targets))
+						if IsDebugEnabled() {
+							logutil.Debugf("CONFIG", "GetScrapeConfigs: Found %d targets in configuration", len(targets))
+						}
 						result := make([]map[string]interface{}, 0, len(targets))
 						for i, target := range targets {
 							if targetMap, ok := target.(map[interface{}]interface{}); ok {
@@ -212,31 +224,47 @@ func (cm *ConfigManager) GetScrapeConfigs() []map[string]interface{} {
 
 								// Log target name for debugging
 								if targetName, ok := stringMap["targetName"].(string); ok {
-									logutil.Debugf("CONFIG", "GetScrapeConfigs: Processing target %d: %s", i+1, targetName)
+									if IsDebugEnabled() {
+										logutil.Debugf("CONFIG", "GetScrapeConfigs: Processing target %d: %s", i+1, targetName)
+									}
 								}
 
 								result = append(result, stringMap)
 							}
 						}
-						logutil.Debugf("CONFIG", "GetScrapeConfigs: Returning %d processed targets", len(result))
+						if IsDebugEnabled() {
+							logutil.Debugf("CONFIG", "GetScrapeConfigs: Returning %d processed targets", len(result))
+						}
 						return result
 					} else {
-						logutil.Debugf("CONFIG", "GetScrapeConfigs: No targets section found in openAgent configuration")
+						if IsDebugEnabled() {
+							logutil.Debugf("CONFIG", "GetScrapeConfigs: No targets section found in openAgent configuration")
+						}
 					}
 				} else {
-					logutil.Debugf("CONFIG", "GetScrapeConfigs: OpenAgent is disabled or enabled flag not found")
+					if IsDebugEnabled() {
+						logutil.Debugf("CONFIG", "GetScrapeConfigs: OpenAgent is disabled or enabled flag not found")
+					}
 				}
 			} else {
-				logutil.Debugf("CONFIG", "GetScrapeConfigs: No openAgent section found in features")
+				if IsDebugEnabled() {
+					logutil.Debugf("CONFIG", "GetScrapeConfigs: No openAgent section found in features")
+				}
 			}
 		} else {
-			logutil.Debugf("CONFIG", "GetScrapeConfigs: No features section found in configuration")
+			if IsDebugEnabled() {
+				logutil.Debugf("CONFIG", "GetScrapeConfigs: No features section found in configuration")
+			}
 		}
 	} else {
-		logutil.Debugf("CONFIG", "GetScrapeConfigs: Configuration is nil")
+		if IsDebugEnabled() {
+			logutil.Debugf("CONFIG", "GetScrapeConfigs: Configuration is nil")
+		}
 	}
 
-	logutil.Debugf("CONFIG", "GetScrapeConfigs: No valid scrape configs found, returning nil")
+	if IsDebugEnabled() {
+		logutil.Debugf("CONFIG", "GetScrapeConfigs: No valid scrape configs found, returning nil")
+	}
 	return nil
 }
 
