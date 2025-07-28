@@ -225,33 +225,39 @@ func sendKeepAliveMessage(logger *logfile.FileLogger, conn net.Conn) {
 	}
 }
 func keepAliveSender(logger *logfile.FileLogger) {
+	// 루프 밖에서 소켓 주소를 한 번만 계산합니다.
+	sockAddr := getAliveSockAddr()
+	logger.Infoln("keepAliveSender", "Socket address initially set to", sockAddr)
+
 	for {
-		logger.Infoln("keepAliveSender", "keepAliveSender Start")
-		sockAddr := getAliveSockAddr()
+		logger.Infoln("keepAliveSender", "keepAliveSender loop starts")
+
+		// 소켓 파일 존재 여부 확인
 		if _, err := os.Stat(sockAddr); os.IsNotExist(err) {
-			logger.Infoln("keepAliveSenderError-1", "keepAliveSocketNotExist", sockAddr)
+			logger.Infoln("keepAliveSenderError-1", "keepAliveSocketNotExist, re-evaluating socket address", sockAddr)
+			// 파일이 없으면 주소를 다시 계산하고 잠시 대기 후 루프를 다시 시작합니다.
+			sockAddr = getAliveSockAddr()
+			time.Sleep(10 * time.Second)
 			continue
 		}
+
+		// 연결 시도
 		socktype := "unix"
 		laddr := net.UnixAddr{sockAddr, socktype}
-		var serverconn net.Conn
-		for serverconn == nil || (reflect.ValueOf(serverconn).Kind() == reflect.Ptr && reflect.ValueOf(serverconn).IsNil()) {
-			conn, err := net.DialUnix(socktype, nil, &laddr)
-			if err != nil {
-				logger.Infoln("keepAliveSenderError-2", "Dial Error", err)
-				time.Sleep(3 * time.Second)
-				continue
-			}
-			serverconn = conn
+		conn, err := net.DialUnix(socktype, nil, &laddr)
+
+		// 연결 실패 처리
+		if err != nil {
+			logger.Infoln("keepAliveSenderError-2", "Dial Error", err)
+			time.Sleep(3 * time.Second)
+			continue // 루프의 처음으로 돌아가 다시 시도
 		}
 
-		sendKeepAliveMessage(logger, serverconn)
-		if serverconn != nil {
-			serverconn.Close()
-		}
+		// 연결 성공 시 메시지 전송
+		sendKeepAliveMessage(logger, conn)
+		conn.Close()
 
 		time.Sleep(10 * time.Second)
-
 	}
 }
 func keepAlive(conn net.Conn, childHealthChannel chan bool, logger *logfile.FileLogger) {
