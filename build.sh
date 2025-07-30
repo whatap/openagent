@@ -358,8 +358,8 @@ function setup_aws_auth() {
 
 function extract_and_upload_binary() {
     local arch=$1
-    local binary_path=$2
-    local s3_arch_name=$3
+    
+    local s3_arch_name=$2
     
     echo "📦 Extracting ${arch} binary from Docker image..."
     
@@ -449,15 +449,15 @@ function upload_to_s3() {
     # Upload based on architecture
     case $ARCH in
         amd64)
-            extract_and_upload_binary "amd64" "${temp_dir}/openagent-amd64" "amd"
+            extract_and_upload_binary "amd64" "amd"
             ;;
         arm64)
-            extract_and_upload_binary "arm64" "${temp_dir}/openagent-arm64" "arm"
+            extract_and_upload_binary "arm64" "arm"
             ;;
         all)
             echo "📦 Uploading both AMD64 and ARM64 binaries..."
-            if extract_and_upload_binary "amd64" "${temp_dir}/openagent-amd64" "amd"; then
-                extract_and_upload_binary "arm64" "${temp_dir}/openagent-arm64" "arm"
+            if extract_and_upload_binary "amd64" "amd"; then
+                extract_and_upload_binary "arm64" "arm"
             else
                 echo "❌ AMD64 upload failed, skipping ARM64"
                 return 1
