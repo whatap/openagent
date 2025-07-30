@@ -8,7 +8,10 @@
       "timestamp": "2025-01-30T10:16:00Z",
       "status": "success",
       "architecture": "all",
-      "platforms": ["linux/amd64", "linux/arm64"],
+      "platforms": [
+        "linux/amd64",
+        "linux/arm64"
+      ],
       "registry": "public.ecr.aws/whatap",
       "git": {
         "commit": "",
@@ -36,7 +39,10 @@
       "timestamp": "2025-07-29T00:00:00Z",
       "status": "success",
       "architecture": "all",
-      "platforms": ["linux/amd64", "linux/arm64"],
+      "platforms": [
+        "linux/amd64",
+        "linux/arm64"
+      ],
       "registry": "public.ecr.aws/whatap",
       "version_source": "manual",
       "git": {
@@ -58,17 +64,212 @@
         }
       },
       "notes": "Production build - Current version"
+    },
+    {
+      "id": 3,
+      "version": "1.3.29",
+      "timestamp": "2025-07-30T01:45:53Z",
+      "status": "success",
+      "architecture": "all",
+      "platforms": [
+        "linux/arm64",
+        "linux/amd64"
+      ],
+      "registry": "public.ecr.aws/whatap",
+      "version_source": "manual",
+      "git": {
+        "commit": "008cc49",
+        "branch": "master",
+        "tag": ""
+      },
+      "build": {
+        "user": "root",
+        "host": "k8s-agent-jenkins-node-x86",
+        "duration": 0,
+        "docker_images": [
+          "public.ecr.aws/whatap/open_agent:1.3.29",
+          "public.ecr.aws/whatap/open_agent:latest"
+        ],
+        "s3_uploads": {
+          "enabled": false,
+          "paths": []
+        }
+      },
+      "notes": "Build via manual"
+    },
+    {
+      "id": 4,
+      "version": "1.4.1",
+      "timestamp": "2025-07-30T01:56:46Z",
+      "status": "success",
+      "architecture": "all",
+      "platforms": [
+        "linux/arm64",
+        "linux/amd64"
+      ],
+      "registry": "public.ecr.aws/whatap",
+      "version_source": "file",
+      "git": {
+        "commit": "3153846",
+        "branch": "master",
+        "tag": "v1.4.1"
+      },
+      "build": {
+        "user": "root",
+        "host": "k8s-agent-jenkins-node-x86",
+        "duration": 0,
+        "docker_images": [
+          "public.ecr.aws/whatap/open_agent:1.4.1",
+          "public.ecr.aws/whatap/open_agent:latest"
+        ],
+        "s3_uploads": {
+          "enabled": false,
+          "paths": []
+        }
+      },
+      "notes": "Build via file"
+    },
+    {
+      "id": 5,
+      "version": "1.4.1",
+      "timestamp": "2025-07-30T01:59:31Z",
+      "status": "success",
+      "architecture": "all",
+      "platforms": [
+        "linux/arm64",
+        "linux/amd64"
+      ],
+      "registry": "public.ecr.aws/whatap",
+      "version_source": "file",
+      "git": {
+        "commit": "3153846",
+        "branch": "master",
+        "tag": "v1.4.1"
+      },
+      "build": {
+        "user": "root",
+        "host": "k8s-agent-jenkins-node-x86",
+        "duration": 0,
+        "docker_images": [
+          "public.ecr.aws/whatap/open_agent:1.4.1",
+          "public.ecr.aws/whatap/open_agent:latest"
+        ],
+        "s3_uploads": {
+          "enabled": false,
+          "paths": []
+        }
+      },
+      "notes": "Build via file"
+    },
+    {
+      "id": 6,
+      "version": "1.4.1",
+      "timestamp": "2025-07-30T02:50:51Z",
+      "status": "success",
+      "architecture": "all",
+      "platforms": [
+        "linux/arm64",
+        "linux/amd64"
+      ],
+      "registry": "public.ecr.aws/whatap",
+      "version_source": "file",
+      "git": {
+        "commit": "3153846",
+        "branch": "master",
+        "tag": "v1.4.1"
+      },
+      "build": {
+        "user": "root",
+        "host": "k8s-agent-jenkins-node-x86",
+        "duration": 0,
+        "docker_images": [
+          "public.ecr.aws/whatap/open_agent:1.4.1",
+          "public.ecr.aws/whatap/open_agent:latest"
+        ],
+        "s3_uploads": {
+          "enabled": false,
+          "paths": []
+        }
+      },
+      "notes": "Build via file"
+    },
+    {
+      "id": 7,
+      "version": "1.4.1",
+      "timestamp": "2025-07-30T02:56:10Z",
+      "status": "success",
+      "architecture": "all",
+      "platforms": [
+        "linux/arm64",
+        "linux/amd64"
+      ],
+      "registry": "public.ecr.aws/whatap",
+      "version_source": "file",
+      "git": {
+        "commit": "3153846",
+        "branch": "master",
+        "tag": "v1.4.1"
+      },
+      "build": {
+        "user": "root",
+        "host": "k8s-agent-jenkins-node-x86",
+        "duration": 0,
+        "docker_images": [
+          "public.ecr.aws/whatap/open_agent:1.4.1",
+          "public.ecr.aws/whatap/open_agent:latest"
+        ],
+        "s3_uploads": {
+          "enabled": false,
+          "paths": []
+        }
+      },
+      "notes": "Build via file"
+    },
+    {
+      "id": 8,
+      "version": "1.4.2",
+      "timestamp": "2025-07-30T03:18:13Z",
+      "status": "success",
+      "architecture": "all",
+      "platforms": [
+        "linux/arm64",
+        "linux/amd64"
+      ],
+      "registry": "public.ecr.aws/whatap",
+      "version_source": "file",
+      "git": {
+        "commit": "5ec7072",
+        "branch": "master",
+        "tag": ""
+      },
+      "build": {
+        "user": "root",
+        "host": "k8s-agent-jenkins-node-x86",
+        "duration": 0,
+        "docker_images": [
+          "public.ecr.aws/whatap/open_agent:1.4.2",
+          "public.ecr.aws/whatap/open_agent:latest"
+        ],
+        "s3_uploads": {
+          "enabled": false,
+          "paths": []
+        }
+      },
+      "notes": "Build via file"
     }
   ],
   "statistics": {
-    "total_builds": 2,
-    "successful_builds": 2,
+    "total_builds": 8,
+    "successful_builds": 8,
     "failed_builds": 0,
-    "last_successful_build": "2025-07-29T00:00:00Z",
+    "last_successful_build": "2025-07-30T03:18:13Z",
     "last_failed_build": null,
     "versions": {
       "1.0.0": 1,
-      "1.3.27": 1
+      "1.3.27": 1,
+      "1.3.29": 1,
+      "1.4.1": 4,
+      "1.4.2": 1
     }
   }
 }
