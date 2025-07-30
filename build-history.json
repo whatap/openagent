@@ -29,16 +29,46 @@
         }
       },
       "notes": "Initial version with version management system"
+    },
+    {
+      "id": 2,
+      "version": "1.3.27",
+      "timestamp": "2025-07-29T00:00:00Z",
+      "status": "success",
+      "architecture": "all",
+      "platforms": ["linux/amd64", "linux/arm64"],
+      "registry": "public.ecr.aws/whatap",
+      "version_source": "manual",
+      "git": {
+        "commit": "949ca4c",
+        "branch": "master",
+        "tag": ""
+      },
+      "build": {
+        "user": "jaeyoung",
+        "host": "gimjaeyeong-ui-MacBookPro.local",
+        "duration": 0,
+        "docker_images": [
+          "public.ecr.aws/whatap/open_agent:1.3.27",
+          "public.ecr.aws/whatap/open_agent:latest"
+        ],
+        "s3_uploads": {
+          "enabled": false,
+          "paths": []
+        }
+      },
+      "notes": "Production build - Current version"
     }
   ],
   "statistics": {
-    "total_builds": 1,
-    "successful_builds": 1,
+    "total_builds": 2,
+    "successful_builds": 2,
     "failed_builds": 0,
-    "last_successful_build": "2025-01-30T10:16:00Z",
+    "last_successful_build": "2025-07-29T00:00:00Z",
     "last_failed_build": null,
     "versions": {
-      "1.0.0": 1
+      "1.0.0": 1,
+      "1.3.27": 1
     }
   }
 }
