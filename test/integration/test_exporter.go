@@ -145,14 +145,16 @@ func main() {
 	license := os.Getenv("WHATAP_LICENSE")
 	host := os.Getenv("WHATAP_HOST")
 	port := os.Getenv("WHATAP_PORT")
-
-	if license == "" || host == "" || port == "" {
-		fmt.Println("Please set the following environment variables:")
-		fmt.Println("WHATAP_LICENSE - The license key for the WHATAP server")
-		fmt.Println("WHATAP_HOST - The hostname or IP address of the WHATAP server")
-		fmt.Println("WHATAP_PORT - The port number of the WHATAP server")
-		os.Exit(1)
-	}
+	license = "x41pl22ek7jhv-z43cebasdv4il7-z62p3l35fj5502"
+	host = "15.165.146.117"
+	port = "6600"
+	//if license == "" || host == "" || port == "" {
+	//	fmt.Println("Please set the following environment variables:")
+	//	fmt.Println("WHATAP_LICENSE - The license key for the WHATAP server")
+	//	fmt.Println("WHATAP_HOST - The hostname or IP address of the WHATAP server")
+	//	fmt.Println("WHATAP_PORT - The port number of the WHATAP server")
+	//	os.Exit(1)
+	//}
 
 	// Create a logger
 	logger := logfile.NewFileLogger()
@@ -174,13 +176,19 @@ func main() {
 
 	logMessage(logger, "GPUExporter", fmt.Sprintf("Loaded %d GPU process records from CSV", len(data)))
 
-	// Set up time range: 2025/06/22 20:10:00 to 20:40:00 (30 minutes) - Korean timezone (+9 hours)
-	startTime, err := time.Parse("2006/01/02 15:04:05", "2025/06/22 20:10:00")
+	// Set up time range: 2025/07/22 20:10:00 to 20:40:00 (30 minutes) - Korean timezone (+9 hours)
+	// Load Korean timezone (KST)
+	kst, err := time.LoadLocation("Asia/Seoul")
+	if err != nil {
+		log.Fatalf("Failed to load Korean timezone: %v", err)
+	}
+
+	startTime, err := time.ParseInLocation("2006/01/02 15:04:05", "2025/07/22 20:10:00", kst)
 	if err != nil {
 		log.Fatalf("Failed to parse start time: %v", err)
 	}
 
-	endTime, err := time.Parse("2006/01/02 15:04:05", "2025/06/22 20:40:00")
+	endTime, err := time.ParseInLocation("2006/01/02 15:04:05", "2025/07/22 20:40:00", kst)
 	if err != nil {
 		log.Fatalf("Failed to parse end time: %v", err)
 	}

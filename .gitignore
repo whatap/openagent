@@ -178,3 +178,5 @@ whatap_openagent.sock
 docs
 istio/
 openagent/
+test
+s3_upload.sh

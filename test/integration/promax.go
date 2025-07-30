@@ -29,9 +29,9 @@ func main() {
 	license := os.Getenv("WHATAP_LICENSE")
 	host := os.Getenv("WHATAP_HOST")
 	port := os.Getenv("WHATAP_PORT")
-	//license = "x208gorb3c4c1-zvduoi0m5ajsd-x6tto2th6n1haj"
-	//host = "59.13.101.109"
-	//port = "61574"
+	license = "x41pl22ek7jhv-z43cebasdv4il7-z62p3l35fj5502"
+	host = "15.165.146.117"
+	port = "6600"
 	if license == "" || host == "" || port == "" {
 		fmt.Println("Please set the following environment variables:")
 		fmt.Println("WHATAP_LICENSE - The license key for the WHATAP server")
@@ -145,10 +145,10 @@ func createMetrics() []*model.OpenMx {
 	promaxAddNoLabelMetrics(&metrics)
 
 	// Add metrics with one label
-	promaxAddOneLabelsMetrics(&metrics)
+	//promaxAddOneLabelsMetrics(&metrics)
 
 	// Add metrics with two labels
-	promaxAddTwoLabelsMetrics(&metrics)
+	//promaxAddTwoLabelsMetrics(&metrics)
 
 	// Add high cardinality metrics to reach 1000+ combinations
 	//promaxAddHighCardinalityMetrics(&metrics)
