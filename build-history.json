@@ -1,0 +1,44 @@
+{
+  "project": "openagent",
+  "created": "2025-01-30T10:16:00Z",
+  "builds": [
+    {
+      "id": 1,
+      "version": "1.0.0",
+      "timestamp": "2025-01-30T10:16:00Z",
+      "status": "success",
+      "architecture": "all",
+      "platforms": ["linux/amd64", "linux/arm64"],
+      "registry": "public.ecr.aws/whatap",
+      "git": {
+        "commit": "",
+        "branch": "",
+        "tag": ""
+      },
+      "build": {
+        "user": "",
+        "host": "",
+        "duration": 0,
+        "docker_images": [
+          "public.ecr.aws/whatap/open_agent:1.0.0",
+          "public.ecr.aws/whatap/open_agent:latest"
+        ],
+        "s3_uploads": {
+          "enabled": false,
+          "paths": []
+        }
+      },
+      "notes": "Initial version with version management system"
+    }
+  ],
+  "statistics": {
+    "total_builds": 1,
+    "successful_builds": 1,
+    "failed_builds": 0,
+    "last_successful_build": "2025-01-30T10:16:00Z",
+    "last_failed_build": null,
+    "versions": {
+      "1.0.0": 1
+    }
+  }
+}

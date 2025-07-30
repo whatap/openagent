@@ -3,13 +3,51 @@ set -euo pipefail
 
 # Display usage information
 function show_usage {
-  echo "❗ 사용법: ./build.sh <VERSION> [<ARCH>] [<REGISTRY>]"
-  echo "  <VERSION>: 빌드할 버전 (예: 1.0.0)"
+  echo "❗ 사용법: ./build.sh [OPTIONS] [<VERSION>] [<ARCH>] [<REGISTRY>]"
+  echo ""
+  echo "Version Management Options:"
+  echo "  --from-file              버전 파일(version.properties)에서 버전 읽기"
+  echo "  --increment-patch        패치 버전 증가 후 빌드 (1.0.0 -> 1.0.1)"
+  echo "  --increment-minor        마이너 버전 증가 후 빌드 (1.0.0 -> 1.1.0)"
+  echo "  --increment-major        메이저 버전 증가 후 빌드 (1.0.0 -> 2.0.0)"
+  echo ""
+  echo "Build Parameters:"
+  echo "  <VERSION>: 빌드할 버전 (예: 1.0.0) - 옵션과 함께 사용 시 생략 가능"
   echo "  <ARCH>: 빌드할 아키텍처 (옵션: amd64, arm64, all) [기본값: all]"
   echo "  <REGISTRY>: 사용할 레지스트리 (기본값: public.ecr.aws/whatap)"
-  echo "예: ./build.sh 1.0.0 arm64"
-  echo "    ./build.sh 1.0.0 all docker.io/myuser"
+  echo ""
+  echo "예시:"
+  echo "  ./build.sh 1.0.0 arm64                    # 수동 버전 지정"
+  echo "  ./build.sh --from-file                    # 버전 파일에서 읽기"
+  echo "  ./build.sh --increment-patch arm64        # 패치 버전 증가 후 빌드"
+  echo "  ./build.sh --increment-minor all docker.io/myuser  # 마이너 버전 증가"
 }
+
+# Version management functions
+get_version_from_file() {
+    if [[ -f "version.properties" ]]; then
+        grep "^VERSION=" version.properties | cut -d'=' -f2
+    else
+        echo "1.0.0"
+    fi
+}
+
+increment_and_get_version() {
+    local increment_type=$1
+    if [[ ! -f "version.sh" ]]; then
+        echo "❌ version.sh not found. Cannot increment version."
+        exit 1
+    fi
+    
+    echo "🔄 Incrementing $increment_type version..."
+    ./version.sh increment "$increment_type"
+}
+
+# Parse arguments and handle version management options
+VERSION=""
+VERSION_SOURCE="manual"
+ARCH="all"
+REGISTRY="public.ecr.aws/whatap"
 
 # Check for help option first
 if [ $# -eq 0 ] || [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
@@ -17,9 +55,56 @@ if [ $# -eq 0 ] || [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
   exit 0
 fi
 
-VERSION=$1
-ARCH=${2:-all}  # Default to 'all' if not specified
-REGISTRY=${3:-public.ecr.aws/whatap}  # Default registry
+# Parse version management options
+case "$1" in
+    --from-file)
+        VERSION=$(get_version_from_file)
+        VERSION_SOURCE="file"
+        shift
+        ;;
+    --increment-patch)
+        VERSION=$(increment_and_get_version "patch")
+        VERSION_SOURCE="increment-patch"
+        shift
+        ;;
+    --increment-minor)
+        VERSION=$(increment_and_get_version "minor")
+        VERSION_SOURCE="increment-minor"
+        shift
+        ;;
+    --increment-major)
+        VERSION=$(increment_and_get_version "major")
+        VERSION_SOURCE="increment-major"
+        shift
+        ;;
+    --*)
+        echo "❗ Unknown option: $1"
+        show_usage
+        exit 1
+        ;;
+    *)
+        # Traditional usage: VERSION as first argument
+        VERSION=$1
+        VERSION_SOURCE="manual"
+        shift
+        ;;
+esac
+
+# Parse remaining arguments
+ARCH=${1:-all}  # Default to 'all' if not specified
+REGISTRY=${2:-public.ecr.aws/whatap}  # Default registry
+
+# Validate version
+if [[ -z "$VERSION" ]]; then
+    echo "❌ No version specified or found"
+    show_usage
+    exit 1
+fi
+
+echo "📋 Build Configuration:"
+echo "   Version: $VERSION (source: $VERSION_SOURCE)"
+echo "   Architecture: $ARCH"
+echo "   Registry: $REGISTRY"
 
 # Set the platforms based on the architecture parameter
 case $ARCH in
@@ -120,7 +205,107 @@ docker buildx build --push \
 # Clean up
 rm Dockerfile.cross
 
+# Build history tracking functions
+update_build_history() {
+    local status=$1
+    local start_time=$2
+    local end_time=$3
+    local duration=$((end_time - start_time))
+    
+    # Check if jq is available for JSON manipulation
+    if ! command -v jq &> /dev/null; then
+        echo "⚠️  jq not found. Build history tracking disabled."
+        return 0
+    fi
+    
+    # Create build-history.json if it doesn't exist
+    if [[ ! -f "build-history.json" ]]; then
+        cat > build-history.json << 'EOF'
+{
+  "project": "openagent",
+  "created": "",
+  "builds": [],
+  "statistics": {
+    "total_builds": 0,
+    "successful_builds": 0,
+    "failed_builds": 0,
+    "last_successful_build": null,
+    "last_failed_build": null,
+    "versions": {}
+  }
+}
+EOF
+    fi
+    
+    # Get build metadata
+    local build_id=$(jq -r '.builds | length + 1' build-history.json)
+    local timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    local git_commit=$(git rev-parse --short HEAD 2>/dev/null || echo "")
+    local git_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+    local git_tag=$(git describe --tags --exact-match 2>/dev/null || echo "")
+    local build_user=$(whoami)
+    local build_host=$(hostname)
+    
+    # Create new build entry
+    local new_build=$(cat << EOF
+{
+  "id": $build_id,
+  "version": "$VERSION",
+  "timestamp": "$timestamp",
+  "status": "$status",
+  "architecture": "$ARCH",
+  "platforms": $(echo "$PLATFORMS" | jq -R 'split(",")'),
+  "registry": "$REGISTRY",
+  "version_source": "$VERSION_SOURCE",
+  "git": {
+    "commit": "$git_commit",
+    "branch": "$git_branch",
+    "tag": "$git_tag"
+  },
+  "build": {
+    "user": "$build_user",
+    "host": "$build_host",
+    "duration": $duration,
+    "docker_images": [
+      "$IMG",
+      "$IMG_LATEST"
+    ],
+    "s3_uploads": {
+      "enabled": false,
+      "paths": []
+    }
+  },
+  "notes": "Build via $VERSION_SOURCE"
+}
+EOF
+)
+    
+    # Update build history
+    local temp_file=$(mktemp)
+    jq --argjson new_build "$new_build" '
+        .builds += [$new_build] |
+        .statistics.total_builds += 1 |
+        if $new_build.status == "success" then
+            .statistics.successful_builds += 1 |
+            .statistics.last_successful_build = $new_build.timestamp
+        else
+            .statistics.failed_builds += 1 |
+            .statistics.last_failed_build = $new_build.timestamp
+        end |
+        .statistics.versions[$new_build.version] = (.statistics.versions[$new_build.version] // 0) + 1
+    ' build-history.json > "$temp_file" && mv "$temp_file" build-history.json
+    
+    echo "📊 Build history updated (Build #$build_id)"
+}
+
+# Record build start time
+BUILD_START_TIME=$(date +%s)
+
 echo "✅ 빌드 및 푸시 완료: $ARCH_MSG"
+
+# Record build completion
+BUILD_END_TIME=$(date +%s)
+update_build_history "success" "$BUILD_START_TIME" "$BUILD_END_TIME"
 
 # Enhanced S3 upload function with robust error handling
 function setup_aws_auth() {
