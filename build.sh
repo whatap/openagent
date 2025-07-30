@@ -368,7 +368,7 @@ function extract_and_upload_binary() {
     local binary_name="openagent-${arch}"
     
     # Extract binary from Docker image
-    if ! docker run --rm --platform "linux/${arch}" -v "${temp_dir}:/output" "${IMG}" sh -c "cp /app/openagent /output/${binary_name}"; then
+    if ! docker run --rm --platform "linux/${arch}" --entrypoint="" -v "${temp_dir}:/output" "${IMG}" sh -c "cp /app/openagent /output/${binary_name}"; then
         echo "❌ Failed to extract ${arch} binary from Docker image"
         rm -rf "${temp_dir}"
         return 1
