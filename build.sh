@@ -367,12 +367,27 @@ function extract_and_upload_binary() {
     local temp_dir=$(mktemp -d)
     local binary_name="openagent-${arch}"
     
-    # Extract binary from Docker image
-    if ! docker run --rm --platform "linux/${arch}" --entrypoint="" -v "${temp_dir}:/output" "${IMG}" sh -c "cp /app/openagent /output/${binary_name}"; then
-        echo "❌ Failed to extract ${arch} binary from Docker image"
+    # Extract binary from Docker image using docker create/cp approach
+    # This avoids the "exec format error" when extracting cross-architecture binaries
+    echo "🔧 Creating temporary container for ${arch} binary extraction..."
+    local container_id=$(docker create --platform "linux/${arch}" "${IMG}")
+    
+    if [[ -z "$container_id" ]]; then
+        echo "❌ Failed to create temporary container for ${arch}"
         rm -rf "${temp_dir}"
         return 1
     fi
+    
+    # Copy binary from container to host
+    if ! docker cp "${container_id}:/app/openagent" "${temp_dir}/${binary_name}"; then
+        echo "❌ Failed to extract ${arch} binary from Docker image"
+        docker rm "${container_id}" &>/dev/null
+        rm -rf "${temp_dir}"
+        return 1
+    fi
+    
+    # Clean up temporary container
+    docker rm "${container_id}" &>/dev/null
     
     # Verify binary was extracted
     if [[ ! -f "${temp_dir}/${binary_name}" ]]; then
