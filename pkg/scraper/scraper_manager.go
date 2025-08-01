@@ -823,6 +823,29 @@ func (sm *ScraperManager) createScraperTaskFromTarget(target *discovery.Target) 
 	scraperTask.NodeName = nodeName
 	scraperTask.AddNodeLabel = addNodeLabel
 
+	// Extract params if present
+	if endpoint, ok := target.Metadata["endpoint"].(discovery.EndpointConfig); ok {
+		if endpoint.Params != nil {
+			// Convert params from interface{} to map[string][]string
+			params := make(map[string][]string)
+			for key, value := range endpoint.Params {
+				if valueSlice, ok := value.([]interface{}); ok {
+					stringSlice := make([]string, len(valueSlice))
+					for i, v := range valueSlice {
+						if str, ok := v.(string); ok {
+							stringSlice[i] = str
+						}
+					}
+					params[key] = stringSlice
+				}
+			}
+			scraperTask.Params = params
+			if config.IsDebugEnabled() {
+				logutil.Printf("DEBUG", "[SCRAPER] Set params for target %s: %v", targetName, params)
+			}
+		}
+	}
+
 	// Debug log for created scraper task
 	if config.IsDebugEnabled() {
 		logutil.Printf("DEBUG", "[SCRAPER] Created scraper task: %s", scraperTask.TargetName)

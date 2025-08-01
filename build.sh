@@ -422,17 +422,7 @@ function extract_and_upload_binary() {
 
 function upload_to_s3() {
     echo ""
-    echo "🤔 S3에 바이너리를 업로드하시겠습니까?"
-    echo "   This will extract binaries from the Docker images and upload them to S3"
-    read -p "   Upload to S3? (y/N): " -n 1 -r
-    echo
-    
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        echo "⏭️  S3 업로드를 건너뜁니다."
-        return 0
-    fi
-    
-    echo "🚀 Starting S3 upload process..."
+    echo "🚀 Starting automatic S3 upload process..."
     
     # Setup AWS authentication
     if ! setup_aws_auth; then

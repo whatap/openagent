@@ -7,9 +7,9 @@ import (
 
 // Target represents a discovered scrape target
 type Target struct {
-	ID       string            // Unique identifier
-	URL      string            // Scraping URL
-	Labels   map[string]string // Metadata labels
+	ID       string                 // Unique identifier
+	URL      string                 // Scraping URL
+	Labels   map[string]string      // Metadata labels
 	Metadata map[string]interface{} // Additional metadata
 
 	// State information
@@ -21,10 +21,10 @@ type Target struct {
 type TargetState string
 
 const (
-	TargetStateReady    TargetState = "ready"
-	TargetStatePending  TargetState = "pending"
-	TargetStateError    TargetState = "error"
-	TargetStateRemoved  TargetState = "removed"
+	TargetStateReady   TargetState = "ready"
+	TargetStatePending TargetState = "pending"
+	TargetStateError   TargetState = "error"
+	TargetStateRemoved TargetState = "removed"
 )
 
 // ServiceDiscovery interface for target discovery
@@ -61,5 +61,6 @@ type EndpointConfig struct {
 	Interval             string
 	TLSConfig            map[string]interface{}
 	MetricRelabelConfigs []interface{}
+	Params               map[string]interface{} // HTTP URL parameters
 	AddNodeLabel         bool
 }

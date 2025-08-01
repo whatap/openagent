@@ -3,6 +3,7 @@ package scraper
 import (
 	"fmt"
 	corev1 "k8s.io/api/core/v1"
+	"net/url"
 	"strings"
 	"time"
 
@@ -42,8 +43,9 @@ type ScraperTask struct {
 	Scheme               string            // Used for all types
 	MetricRelabelConfigs model.RelabelConfigs
 	TLSConfig            *client.TLSConfig
-	NodeName             string // Used to store the node name for PodMonitor targets
-	AddNodeLabel         bool   // Controls whether to add node label to metrics
+	Params               map[string][]string // HTTP URL parameters for the endpoint
+	NodeName             string              // Used to store the node name for PodMonitor targets
+	AddNodeLabel         bool                // Controls whether to add node label to metrics
 }
 
 // NewStaticEndpointsScraperTask creates a new ScraperTask instance for a StaticEndpoints target
@@ -59,17 +61,38 @@ func NewStaticEndpointsScraperTask(targetName string, targetURL string, path str
 	}
 }
 
-// ResolveEndpoint resolves the endpoint URL based on the target information
-func (st *ScraperTask) ResolveEndpoint() (string, error) {
-	// If it's a direct URL, just return it
-	if st.TargetType == DirectURLType {
-		return st.TargetURL, nil
+// appendParams appends query parameters to a URL if params are present
+func (st *ScraperTask) appendParams(baseURL string) (string, error) {
+	if len(st.Params) == 0 {
+		return baseURL, nil
 	}
 
-	// If it's a static endpoint, just return the target URL as-is
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse URL: %v", err)
+	}
+
+	query := u.Query()
+	for key, values := range st.Params {
+		for _, value := range values {
+			query.Add(key, value)
+		}
+	}
+	u.RawQuery = query.Encode()
+	return u.String(), nil
+}
+
+// ResolveEndpoint resolves the endpoint URL based on the target information
+func (st *ScraperTask) ResolveEndpoint() (string, error) {
+	// If it's a direct URL, append params and return it
+	if st.TargetType == DirectURLType {
+		return st.appendParams(st.TargetURL)
+	}
+
+	// If it's a static endpoint, append params and return the target URL
 	// ServiceDiscovery already provides a complete URL (e.g., http://10.21.130.48:9400/metrics)
 	if st.TargetType == StaticEndpointsType {
-		return st.TargetURL, nil
+		return st.appendParams(st.TargetURL)
 	}
 
 	// For PodMonitor and ServiceMonitor, we need to resolve the endpoint dynamically
@@ -124,10 +147,13 @@ func (st *ScraperTask) ResolveEndpoint() (string, error) {
 			scheme = "http"
 		}
 
+		var baseURL string
 		if st.Path != "" && !strings.HasPrefix(st.Path, "/") {
-			return fmt.Sprintf("%s://%s:%d/%s", scheme, podIP, port, st.Path), nil
+			baseURL = fmt.Sprintf("%s://%s:%d/%s", scheme, podIP, port, st.Path)
+		} else {
+			baseURL = fmt.Sprintf("%s://%s:%d%s", scheme, podIP, port, st.Path)
 		}
-		return fmt.Sprintf("%s://%s:%d%s", scheme, podIP, port, st.Path), nil
+		return st.appendParams(baseURL)
 	}
 
 	// For ServiceMonitor, get the service endpoints
@@ -174,10 +200,13 @@ func (st *ScraperTask) ResolveEndpoint() (string, error) {
 			scheme = "http"
 		}
 
+		var baseURL string
 		if st.Path != "" && !strings.HasPrefix(st.Path, "/") {
-			return fmt.Sprintf("%s://%s:%d/%s", scheme, endpointAddress, port, st.Path), nil
+			baseURL = fmt.Sprintf("%s://%s:%d/%s", scheme, endpointAddress, port, st.Path)
+		} else {
+			baseURL = fmt.Sprintf("%s://%s:%d%s", scheme, endpointAddress, port, st.Path)
 		}
-		return fmt.Sprintf("%s://%s:%d%s", scheme, endpointAddress, port, st.Path), nil
+		return st.appendParams(baseURL)
 	}
 
 	return "", fmt.Errorf("unsupported target type: %s", st.TargetType)
