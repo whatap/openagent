@@ -3,6 +3,7 @@ package discovery
 import (
 	"context"
 	"fmt"
+	"net/url"
 	configPkg "open-agent/pkg/config"
 	"open-agent/pkg/k8s"
 	"open-agent/tools/util/logutil"
@@ -31,6 +32,50 @@ func NewServiceDiscovery(configManager *configPkg.ConfigManager) *ServiceDiscove
 		targets:       make(map[string]*Target),
 		stopCh:        make(chan struct{}),
 	}
+}
+
+// buildURLWithParams constructs a URL with query parameters
+func buildURLWithParams(baseURL string, params map[string]interface{}) string {
+	if len(params) == 0 {
+		return baseURL
+	}
+
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		logutil.Printf("WARN", "Failed to parse URL %s: %v", baseURL, err)
+		return baseURL
+	}
+
+	query := u.Query()
+	for key, value := range params {
+		switch v := value.(type) {
+		case string:
+			query.Set(key, v)
+		case []interface{}:
+			// Handle array values like in Prometheus config
+			var strValues []string
+			for _, item := range v {
+				if strItem, ok := item.(string); ok {
+					strValues = append(strValues, strItem)
+				}
+			}
+			if len(strValues) > 0 {
+				// For multiple values, join them with comma (Azure exporter style)
+				query.Set(key, strings.Join(strValues, ","))
+			}
+		case []string:
+			// Handle string array directly
+			if len(v) > 0 {
+				query.Set(key, strings.Join(v, ","))
+			}
+		default:
+			// Convert other types to string
+			query.Set(key, fmt.Sprintf("%v", v))
+		}
+	}
+
+	u.RawQuery = query.Encode()
+	return u.String()
 }
 
 func (sd *ServiceDiscoveryImpl) LoadTargets(targets []map[string]interface{}) error {
@@ -217,7 +262,6 @@ func (sd *ServiceDiscoveryImpl) discoverPodTargets(config DiscoveryConfig) {
 	}
 }
 
-// processPodTarget processes a single pod target
 func (sd *ServiceDiscoveryImpl) processPodTarget(pod *corev1.Pod, config DiscoveryConfig) {
 	// Check if pod is ready
 	isReady := sd.isPodReady(pod)
@@ -241,7 +285,8 @@ func (sd *ServiceDiscoveryImpl) processPodTarget(pod *corev1.Pod, config Discove
 
 		// Build target URL
 		path := endpoint.Path
-		url := fmt.Sprintf("%s://%s:%s%s", scheme, podIP, endpoint.Port, path)
+		baseURL := fmt.Sprintf("%s://%s:%s%s", scheme, podIP, endpoint.Port, path)
+		url := buildURLWithParams(baseURL, endpoint.Params)
 
 		// Create or update target
 		target := &Target{
@@ -505,7 +550,8 @@ func (sd *ServiceDiscoveryImpl) processServiceTarget(service *corev1.Service, co
 
 					// Build target URL
 					path := endpointConfig.Path
-					url := fmt.Sprintf("%s://%s:%d%s", scheme, address.IP, endpointPort, path)
+					baseURL := fmt.Sprintf("%s://%s:%d%s", scheme, address.IP, endpointPort, path)
+					url := buildURLWithParams(baseURL, endpointConfig.Params)
 
 					// Create target
 					target := &Target{
@@ -544,7 +590,8 @@ func (sd *ServiceDiscoveryImpl) processServiceTarget(service *corev1.Service, co
 
 					// Build target URL
 					path := endpointConfig.Path
-					url := fmt.Sprintf("%s://%s:%d%s", scheme, address.IP, endpointPort, path)
+					baseURL := fmt.Sprintf("%s://%s:%d%s", scheme, address.IP, endpointPort, path)
+					url := buildURLWithParams(baseURL, endpointConfig.Params)
 
 					// Create target
 					target := &Target{
@@ -617,7 +664,8 @@ func (sd *ServiceDiscoveryImpl) discoverStaticTargets(config DiscoveryConfig) {
 		targetID := fmt.Sprintf("%s-static-%d-%s", config.TargetName, i, pathSafe)
 
 		// Build target URL
-		url := fmt.Sprintf("%s://%s%s", scheme, endpoint.Address, path)
+		baseURL := fmt.Sprintf("%s://%s%s", scheme, endpoint.Address, path)
+		url := buildURLWithParams(baseURL, endpoint.Params)
 
 		// Create target
 		target := &Target{
@@ -721,6 +769,11 @@ func (sd *ServiceDiscoveryImpl) parseEndpointConfig(endpointMap map[string]inter
 
 	if addNodeLabel, ok := endpointMap["addNodeLabel"].(bool); ok {
 		endpointConfig.AddNodeLabel = addNodeLabel
+	}
+
+	// Parse params for HTTP URL parameters
+	if params, ok := endpointMap["params"].(map[string]interface{}); ok {
+		endpointConfig.Params = params
 	}
 
 	return endpointConfig

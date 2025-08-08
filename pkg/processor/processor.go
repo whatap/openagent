@@ -37,6 +37,7 @@ func (p *Processor) processLoop() {
 }
 
 func (p *Processor) processRawData(rawData *model.ScrapeRawData) {
+	logutil.Infof("INFO", "[PROCESSOR] Processing raw data from target: %s", rawData.RawData)
 	logutil.Printf("INFO", "[PROCESSOR] Processing raw data from target: %s", rawData.TargetURL)
 
 	// Log metric relabel configs (simplified)
