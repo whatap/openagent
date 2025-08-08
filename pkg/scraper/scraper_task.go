@@ -96,6 +96,7 @@ func (st *ScraperTask) ResolveEndpoint() (string, error) {
 	}
 
 	// For PodMonitor and ServiceMonitor, we need to resolve the endpoint dynamically
+
 	k8sClient := k8s.GetInstance()
 	if !k8sClient.IsInitialized() {
 		return "", fmt.Errorf("kubernetes client not initialized")

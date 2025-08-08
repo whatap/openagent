@@ -426,7 +426,6 @@ func (sm *ScraperManager) StartScraping() {
 	logutil.Println("INFO", "Individual target scraping started")
 }
 
-// targetManagementLoop manages individual target schedulers
 func (sm *ScraperManager) targetManagementLoop() {
 	// Get minimum interval for target management checks
 	minimumIntervalStr := sm.configManager.GetMinimumInterval()

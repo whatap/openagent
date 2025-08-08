@@ -25,11 +25,13 @@ type K8sClient struct {
 	serviceInformer   cache.SharedIndexInformer
 	namespaceInformer cache.SharedIndexInformer
 	configMapInformer cache.SharedIndexInformer
+	secretInformer    cache.SharedIndexInformer
 	podStore          cache.Store
 	endpointStore     cache.Store
 	serviceStore      cache.Store
 	namespaceStore    cache.Store
 	configMapStore    cache.Store
+	secretStore       cache.Store
 	stopCh            chan struct{}
 	initialized       bool
 	mu                sync.RWMutex
@@ -125,6 +127,10 @@ func (c *K8sClient) initialize() {
 	c.configMapInformer = factory.Core().V1().ConfigMaps().Informer()
 	c.configMapStore = c.configMapInformer.GetStore()
 
+	// Create secret informer
+	c.secretInformer = factory.Core().V1().Secrets().Informer()
+	c.secretStore = c.secretInformer.GetStore()
+
 	// Add event handler for ConfigMap changes
 	c.configMapInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		UpdateFunc: func(oldObj, newObj interface{}) {
@@ -144,6 +150,7 @@ func (c *K8sClient) initialize() {
 	go c.serviceInformer.Run(c.stopCh)
 	go c.namespaceInformer.Run(c.stopCh)
 	go c.configMapInformer.Run(c.stopCh)
+	go c.secretInformer.Run(c.stopCh)
 
 	// Wait for the caches to sync
 	if !cache.WaitForCacheSync(c.stopCh,
@@ -151,7 +158,8 @@ func (c *K8sClient) initialize() {
 		c.endpointInformer.HasSynced,
 		c.serviceInformer.HasSynced,
 		c.namespaceInformer.HasSynced,
-		c.configMapInformer.HasSynced) {
+		c.configMapInformer.HasSynced,
+		c.secretInformer.HasSynced) {
 		logutil.Infof("K8S", "Timed out waiting for caches to sync")
 		return
 	}
@@ -222,6 +230,22 @@ func (c *K8sClient) GetConfigMap(namespace, name string) (*corev1.ConfigMap, err
 	}
 
 	return nil, fmt.Errorf("configmap %s/%s not found", namespace, name)
+}
+
+// GetSecret returns a Secret by name and namespace
+func (c *K8sClient) GetSecret(namespace, name string) (*corev1.Secret, error) {
+	if !c.IsInitialized() {
+		return nil, fmt.Errorf("kubernetes client not initialized")
+	}
+
+	for _, obj := range c.secretStore.List() {
+		secret := obj.(*corev1.Secret)
+		if secret.Namespace == namespace && secret.Name == name {
+			return secret, nil
+		}
+	}
+
+	return nil, fmt.Errorf("secret %s/%s not found", namespace, name)
 }
 
 // GetPodsInNamespace returns all pods in the specified namespace

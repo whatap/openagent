@@ -6,12 +6,11 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
 	configPkg "open-agent/pkg/config"
+	"open-agent/pkg/k8s"
 	"open-agent/tools/util/logutil"
 )
 
@@ -23,9 +22,110 @@ const (
 	kubernetesServicePort    = "KUBERNETES_SERVICE_PORT"
 )
 
+// SecretKeySelector defines a reference to a secret key
+type SecretKeySelector struct {
+	Name      string `json:"name" yaml:"name"`
+	Key       string `json:"key" yaml:"key"`
+	Namespace string `json:"namespace,omitempty" yaml:"namespace,omitempty"`
+}
+
 // TLSConfig represents TLS configuration options
 type TLSConfig struct {
-	InsecureSkipVerify bool
+	// InsecureSkipVerify disables target certificate validation
+	InsecureSkipVerify bool `json:"insecureSkipVerify,omitempty" yaml:"insecureSkipVerify,omitempty"`
+
+	// CA certificate configuration via Kubernetes Secret
+	CASecret *SecretKeySelector `json:"caSecret,omitempty" yaml:"caSecret,omitempty"`
+
+	// Client certificate configuration via Kubernetes Secret
+	CertSecret *SecretKeySelector `json:"certSecret,omitempty" yaml:"certSecret,omitempty"`
+
+	// Client private key configuration via Kubernetes Secret
+	KeySecret *SecretKeySelector `json:"keySecret,omitempty" yaml:"keySecret,omitempty"`
+
+	// CA certificate file path (alternative to CASecret)
+	CAFile string `json:"caFile,omitempty" yaml:"caFile,omitempty"`
+
+	// Client certificate file path (alternative to CertSecret)
+	CertFile string `json:"certFile,omitempty" yaml:"certFile,omitempty"`
+
+	// Client private key file path (alternative to KeySecret)
+	KeyFile string `json:"keyFile,omitempty" yaml:"keyFile,omitempty"`
+
+	// ServerName extension to indicate the name of the server
+	ServerName string `json:"serverName,omitempty" yaml:"serverName,omitempty"`
+}
+
+// Validate validates the TLS configuration to ensure consistency
+func (c *TLSConfig) Validate() error {
+	if c == nil {
+		return nil
+	}
+
+	// Check for mutually exclusive CA configurations
+	caConfigCount := 0
+	if c.CAFile != "" {
+		caConfigCount++
+	}
+	if c.CASecret != nil {
+		caConfigCount++
+	}
+	if caConfigCount > 1 {
+		return fmt.Errorf("at most one of caFile and caSecret must be configured")
+	}
+
+	// Check for mutually exclusive client certificate configurations
+	certConfigCount := 0
+	if c.CertFile != "" {
+		certConfigCount++
+	}
+	if c.CertSecret != nil {
+		certConfigCount++
+	}
+	if certConfigCount > 1 {
+		return fmt.Errorf("at most one of certFile and certSecret must be configured")
+	}
+
+	// Check for mutually exclusive client key configurations
+	keyConfigCount := 0
+	if c.KeyFile != "" {
+		keyConfigCount++
+	}
+	if c.KeySecret != nil {
+		keyConfigCount++
+	}
+	if keyConfigCount > 1 {
+		return fmt.Errorf("at most one of keyFile and keySecret must be configured")
+	}
+
+	// Validate client certificate and key pairing
+	hasClientCert := c.CertFile != "" || c.CertSecret != nil
+	hasClientKey := c.KeyFile != "" || c.KeySecret != nil
+
+	if hasClientCert && !hasClientKey {
+		return fmt.Errorf("client key must be configured when client certificate is specified")
+	}
+	if hasClientKey && !hasClientCert {
+		return fmt.Errorf("client certificate must be configured when client key is specified")
+	}
+
+	// Validate that file and secret configurations are not mixed for client auth
+	if (c.CertFile != "" && c.KeySecret != nil) || (c.CertSecret != nil && c.KeyFile != "") {
+		return fmt.Errorf("client certificate and key must use the same configuration method (both file or both secret)")
+	}
+
+	// Validate SecretKeySelector fields
+	if c.CASecret != nil && (c.CASecret.Name == "" || c.CASecret.Key == "") {
+		return fmt.Errorf("caSecret must have both name and key specified")
+	}
+	if c.CertSecret != nil && (c.CertSecret.Name == "" || c.CertSecret.Key == "") {
+		return fmt.Errorf("certSecret must have both name and key specified")
+	}
+	if c.KeySecret != nil && (c.KeySecret.Name == "" || c.KeySecret.Key == "") {
+		return fmt.Errorf("keySecret must have both name and key specified")
+	}
+
+	return nil
 }
 
 // Use the package-level functions provided by the config package
@@ -33,32 +133,44 @@ type TLSConfig struct {
 
 // HTTPClient is responsible for making HTTP requests to scrape metrics from targets
 type HTTPClient struct {
-	client     *http.Client
-	isMinikube bool
+	client *http.Client
 }
 
 var instance *HTTPClient
 
-// GetInstance returns the singleton instance of HTTPClient
 func GetInstance() *HTTPClient {
 	if instance == nil {
 		instance = &HTTPClient{
 			client: &http.Client{
 				Timeout: 10 * time.Second,
 			},
-			isMinikube: false,
 		}
-		// Try to configure TLS with Kubernetes CA cert
-		if cert, err := loadKubernetesCACert(); err == nil {
-			rootCAs, _ := x509.SystemCertPool()
-			if rootCAs == nil {
-				rootCAs = x509.NewCertPool()
+
+		// Only try to configure TLS with Kubernetes CA cert in K8s environment
+		k8sClient := k8s.GetInstance()
+		if k8sClient.IsInitialized() {
+			if cert, err := loadKubernetesCACert(); err == nil {
+				rootCAs, _ := x509.SystemCertPool()
+				if rootCAs == nil {
+					rootCAs = x509.NewCertPool()
+				}
+				rootCAs.AddCert(cert)
+				instance.client.Transport = &http.Transport{
+					TLSClientConfig: &tls.Config{
+						RootCAs: rootCAs,
+					},
+				}
+				if configPkg.IsDebugEnabled() {
+					logutil.Debugf("HTTP_CLIENT", "Configured TLS with Kubernetes CA certificate")
+				}
+			} else {
+				if configPkg.IsDebugEnabled() {
+					logutil.Debugf("HTTP_CLIENT", "Failed to load Kubernetes CA certificate: %v", err)
+				}
 			}
-			rootCAs.AddCert(cert)
-			instance.client.Transport = &http.Transport{
-				TLSClientConfig: &tls.Config{
-					RootCAs: rootCAs,
-				},
+		} else {
+			if configPkg.IsDebugEnabled() {
+				logutil.Debugf("HTTP_CLIENT", "Not in Kubernetes environment, skipping CA certificate loading")
 			}
 		}
 	}
@@ -79,25 +191,6 @@ func FormatURL(target string) string {
 	}
 
 	return target
-}
-
-// GetKubeServiceEndpoint constructs the Kubernetes service endpoint URL
-func GetKubeServiceEndpoint(customHost, customPort string) string {
-	host := os.Getenv(kubernetesServiceHost)
-	if customHost != "" {
-		host = customHost
-	}
-
-	port := os.Getenv(kubernetesServicePort)
-	if customPort != "" {
-		port = customPort
-	}
-
-	if host == "" || port == "" {
-		return ""
-	}
-
-	return fmt.Sprintf("https://%s:%s", host, port)
 }
 
 // GetServiceAccountToken reads the service account token from the file
@@ -128,22 +221,67 @@ func loadKubernetesCACert() (*x509.Certificate, error) {
 	return certs[0], nil
 }
 
-// ExecuteGet performs an HTTP GET request to the specified URL
+// loadCertificateFromFile loads a certificate from a file path
+func loadCertificateFromFile(filePath string) ([]byte, error) {
+	if filePath == "" {
+		return nil, fmt.Errorf("certificate file path is empty")
+	}
+
+	data, err := ioutil.ReadFile(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("error reading certificate file %s: %v", filePath, err)
+	}
+
+	if len(data) == 0 {
+		return nil, fmt.Errorf("certificate file %s is empty", filePath)
+	}
+
+	return data, nil
+}
+
+// loadCertificateFromSecret loads a certificate from a Kubernetes Secret
+func loadCertificateFromSecret(secretSelector *SecretKeySelector) ([]byte, error) {
+	if secretSelector == nil {
+		return nil, fmt.Errorf("secret selector is nil")
+	}
+
+	// Import k8s package when this function is actually used
+	k8sClient := k8s.GetInstance()
+	if !k8sClient.IsInitialized() {
+		return nil, fmt.Errorf("kubernetes client not initialized")
+	}
+
+	namespace := secretSelector.Namespace
+	if namespace == "" {
+		namespace = "default"
+	}
+
+	secret, err := k8sClient.GetSecret(namespace, secretSelector.Name)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get secret %s/%s: %v", namespace, secretSelector.Name, err)
+	}
+
+	data, ok := secret.Data[secretSelector.Key]
+	if !ok {
+		return nil, fmt.Errorf("key %s not found in secret %s/%s", secretSelector.Key, namespace, secretSelector.Name)
+	}
+
+	if len(data) == 0 {
+		return nil, fmt.Errorf("secret %s/%s key %s is empty", namespace, secretSelector.Name, secretSelector.Key)
+	}
+
+	return data, nil
+}
+
 func (c *HTTPClient) ExecuteGet(targetURL string) (string, error) {
 	return c.ExecuteGetWithTLSConfig(targetURL, nil)
 }
 
-// ExecuteGetWithTLSConfig performs an HTTP GET request to the specified URL with custom TLS configuration
 func (c *HTTPClient) ExecuteGetWithTLSConfig(targetURL string, tlsConfig *TLSConfig) (string, error) {
 	formattedURL := FormatURL(targetURL)
-
 	// Log the request
 	if configPkg.IsDebugEnabled() {
-		if c.isMinikube {
-			logutil.Debugf("HTTP_CLIENT", "HTTP Request (Minikube client): GET %s", formattedURL)
-		} else {
-			logutil.Debugf("HTTP_CLIENT", "HTTP Request: GET %s", formattedURL)
-		}
+		logutil.Debugf("HTTP_CLIENT", "HTTP Request: GET %s", formattedURL)
 	}
 
 	req, err := http.NewRequest("GET", formattedURL, nil)
@@ -151,9 +289,9 @@ func (c *HTTPClient) ExecuteGetWithTLSConfig(targetURL string, tlsConfig *TLSCon
 		return "", fmt.Errorf("error creating request: %v", err)
 	}
 
-	// Skip token authentication for Minikube as it uses client certificates
-	if !c.isMinikube {
-		// Try to add service account token for authentication
+	// Try to add service account token for authentication in K8s environment only
+	k8sClient := k8s.GetInstance()
+	if k8sClient.IsInitialized() {
 		token, err := GetServiceAccountToken()
 		if err == nil {
 			req.Header.Set("Authorization", "Bearer "+token)
@@ -167,7 +305,7 @@ func (c *HTTPClient) ExecuteGetWithTLSConfig(targetURL string, tlsConfig *TLSCon
 		}
 	} else {
 		if configPkg.IsDebugEnabled() {
-			logutil.Debugf("HTTP_CLIENT", "Skipping token authentication for Minikube")
+			logutil.Debugf("HTTP_CLIENT", "Not in Kubernetes environment, skipping service account token")
 		}
 	}
 
@@ -175,43 +313,143 @@ func (c *HTTPClient) ExecuteGetWithTLSConfig(targetURL string, tlsConfig *TLSCon
 
 	// Use the default client or create a new one with custom TLS config
 	client := c.client
-
-	// For Minikube, we already have a client with the correct TLS config
-	// We don't need to create a new one unless a custom TLS config is provided
-	if c.isMinikube {
-		if configPkg.IsDebugEnabled() {
-			logutil.Debugf("HTTP_CLIENT", "Using existing Minikube client with client certificates")
+	if tlsConfig != nil {
+		// Validate TLS configuration
+		if err := tlsConfig.Validate(); err != nil {
+			return "", fmt.Errorf("invalid TLS configuration: %v", err)
 		}
-	} else if tlsConfig != nil {
+
 		if configPkg.IsDebugEnabled() {
 			logutil.Debugf("HTTP_CLIENT", "Using custom TLS config with InsecureSkipVerify=%v", tlsConfig.InsecureSkipVerify)
 		}
 
 		// Create a custom transport with the specified TLS config
-		transport := &http.Transport{
-			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: tlsConfig.InsecureSkipVerify,
-			},
+		customTLSConfig := &tls.Config{
+			InsecureSkipVerify: tlsConfig.InsecureSkipVerify,
 		}
 
-		// If we have a Kubernetes CA cert and InsecureSkipVerify is false, add it to the cert pool
-		if !tlsConfig.InsecureSkipVerify {
-			if cert, err := loadKubernetesCACert(); err == nil {
-				rootCAs, _ := x509.SystemCertPool()
-				if rootCAs == nil {
-					rootCAs = x509.NewCertPool()
-				}
-				rootCAs.AddCert(cert)
-				transport.TLSClientConfig.RootCAs = rootCAs
+		// Set server name if specified
+		if tlsConfig.ServerName != "" {
+			customTLSConfig.ServerName = tlsConfig.ServerName
+			if configPkg.IsDebugEnabled() {
+				logutil.Debugf("HTTP_CLIENT", "Set server name: %s", tlsConfig.ServerName)
+			}
+		}
 
-				if configPkg.IsDebugEnabled() {
-					logutil.Debugf("HTTP_CLIENT", "Added Kubernetes CA cert to root CA pool")
+		// Configure certificate validation if InsecureSkipVerify is false
+		if !tlsConfig.InsecureSkipVerify {
+			// Load system root CAs as base
+			rootCAs, _ := x509.SystemCertPool()
+			if rootCAs == nil {
+				rootCAs = x509.NewCertPool()
+			}
+
+			// Add CA certificate (prefer file over secret over default K8s CA)
+			var caData []byte
+			var caErr error
+
+			if tlsConfig.CAFile != "" {
+				// Load CA from file
+				caData, caErr = loadCertificateFromFile(tlsConfig.CAFile)
+				if caErr == nil {
+					if rootCAs.AppendCertsFromPEM(caData) {
+						if configPkg.IsDebugEnabled() {
+							logutil.Debugf("HTTP_CLIENT", "Added CA certificate from file: %s", tlsConfig.CAFile)
+						}
+					} else {
+						if configPkg.IsDebugEnabled() {
+							logutil.Debugf("HTTP_CLIENT", "Failed to parse CA certificate from file: %s", tlsConfig.CAFile)
+						}
+					}
+				} else {
+					if configPkg.IsDebugEnabled() {
+						logutil.Debugf("HTTP_CLIENT", "Failed to load CA certificate from file %s: %v", tlsConfig.CAFile, caErr)
+					}
+				}
+			} else if tlsConfig.CASecret != nil {
+				// Load CA from secret
+				caData, caErr = loadCertificateFromSecret(tlsConfig.CASecret)
+				if caErr == nil {
+					if rootCAs.AppendCertsFromPEM(caData) {
+						if configPkg.IsDebugEnabled() {
+							logutil.Debugf("HTTP_CLIENT", "Added CA certificate from secret: %s/%s", tlsConfig.CASecret.Name, tlsConfig.CASecret.Key)
+						}
+					} else {
+						if configPkg.IsDebugEnabled() {
+							logutil.Debugf("HTTP_CLIENT", "Failed to parse CA certificate from secret: %s/%s", tlsConfig.CASecret.Name, tlsConfig.CASecret.Key)
+						}
+					}
+				} else {
+					if configPkg.IsDebugEnabled() {
+						logutil.Debugf("HTTP_CLIENT", "Failed to load CA certificate from secret %s/%s: %v", tlsConfig.CASecret.Name, tlsConfig.CASecret.Key, caErr)
+					}
 				}
 			} else {
-				if configPkg.IsDebugEnabled() {
-					logutil.Debugf("HTTP_CLIENT", "Failed to load Kubernetes CA cert: %v", err)
+				// Fall back to default Kubernetes CA only in K8s environment
+				k8sClient := k8s.GetInstance()
+				if k8sClient.IsInitialized() {
+					if cert, err := loadKubernetesCACert(); err == nil {
+						rootCAs.AddCert(cert)
+						if configPkg.IsDebugEnabled() {
+							logutil.Debugf("HTTP_CLIENT", "Added default Kubernetes CA cert to root CA pool")
+						}
+					} else {
+						if configPkg.IsDebugEnabled() {
+							logutil.Debugf("HTTP_CLIENT", "Failed to load default Kubernetes CA cert: %v", err)
+						}
+					}
+				} else {
+					if configPkg.IsDebugEnabled() {
+						logutil.Debugf("HTTP_CLIENT", "Not in Kubernetes environment, using system CA pool only")
+					}
 				}
 			}
+
+			customTLSConfig.RootCAs = rootCAs
+
+			// Configure client certificate authentication
+			if (tlsConfig.CertFile != "" && tlsConfig.KeyFile != "") || (tlsConfig.CertSecret != nil && tlsConfig.KeySecret != nil) {
+				var certData, keyData []byte
+				var certErr, keyErr error
+
+				if tlsConfig.CertFile != "" && tlsConfig.KeyFile != "" {
+					// Load client cert and key from files
+					certData, certErr = loadCertificateFromFile(tlsConfig.CertFile)
+					keyData, keyErr = loadCertificateFromFile(tlsConfig.KeyFile)
+					if configPkg.IsDebugEnabled() {
+						logutil.Debugf("HTTP_CLIENT", "Loading client certificate from files: cert=%s, key=%s", tlsConfig.CertFile, tlsConfig.KeyFile)
+					}
+				} else if tlsConfig.CertSecret != nil && tlsConfig.KeySecret != nil {
+					// Load client cert and key from secrets
+					certData, certErr = loadCertificateFromSecret(tlsConfig.CertSecret)
+					keyData, keyErr = loadCertificateFromSecret(tlsConfig.KeySecret)
+					if configPkg.IsDebugEnabled() {
+						logutil.Debugf("HTTP_CLIENT", "Loading client certificate from secrets: cert=%s/%s, key=%s/%s",
+							tlsConfig.CertSecret.Name, tlsConfig.CertSecret.Key, tlsConfig.KeySecret.Name, tlsConfig.KeySecret.Key)
+					}
+				}
+
+				if certErr == nil && keyErr == nil && len(certData) > 0 && len(keyData) > 0 {
+					if clientCert, err := tls.X509KeyPair(certData, keyData); err == nil {
+						customTLSConfig.Certificates = []tls.Certificate{clientCert}
+						if configPkg.IsDebugEnabled() {
+							logutil.Debugf("HTTP_CLIENT", "Successfully configured client certificate authentication")
+						}
+					} else {
+						if configPkg.IsDebugEnabled() {
+							logutil.Debugf("HTTP_CLIENT", "Failed to create client certificate pair: %v", err)
+						}
+					}
+				} else {
+					if configPkg.IsDebugEnabled() {
+						logutil.Debugf("HTTP_CLIENT", "Failed to load client certificate or key: certErr=%v, keyErr=%v", certErr, keyErr)
+					}
+				}
+			}
+		}
+
+		transport := &http.Transport{
+			TLSClientConfig: customTLSConfig,
 		}
 
 		// Create a new client with the custom transport
@@ -271,91 +509,4 @@ func (c *HTTPClient) ExecuteGetWithTLSConfig(targetURL string, tlsConfig *TLSCon
 	}
 
 	return string(body), nil
-}
-
-// createMinikubeTLSConfig creates a TLS configuration with Minikube certificates
-func createMinikubeTLSConfig(home string) (*tls.Config, error) {
-	// Paths to certificate files
-	caCertPath := filepath.Join(home, ".minikube", "ca.crt")
-	clientCertPath := filepath.Join(home, ".minikube", "profiles", "minikube", "client.crt")
-	clientKeyPath := filepath.Join(home, ".minikube", "profiles", "minikube", "client.key")
-
-	logutil.Infof("HTTP_CLIENT", "Loading Minikube certificates from: CA=%s, Cert=%s, Key=%s", caCertPath, clientCertPath, clientKeyPath)
-
-	// Check if files exist
-	if _, err := os.Stat(caCertPath); os.IsNotExist(err) {
-		return nil, fmt.Errorf("CA certificate file does not exist: %s", caCertPath)
-	}
-	if _, err := os.Stat(clientCertPath); os.IsNotExist(err) {
-		return nil, fmt.Errorf("Client certificate file does not exist: %s", clientCertPath)
-	}
-	if _, err := os.Stat(clientKeyPath); os.IsNotExist(err) {
-		return nil, fmt.Errorf("Client key file does not exist: %s", clientKeyPath)
-	}
-
-	// Load CA cert
-	caCert, err := ioutil.ReadFile(caCertPath)
-	if err != nil {
-		return nil, fmt.Errorf("error loading CA certificate: %v", err)
-	}
-	logutil.Infof("HTTP_CLIENT", "Successfully loaded CA certificate (%d bytes)", len(caCert))
-
-	// Create CA cert pool and add the CA cert
-	caCertPool := x509.NewCertPool()
-	if ok := caCertPool.AppendCertsFromPEM(caCert); !ok {
-		return nil, fmt.Errorf("failed to append CA certificate to cert pool")
-	}
-	logutil.Infof("HTTP_CLIENT", "Successfully added CA certificate to cert pool")
-
-	// Load client cert and key
-	clientCert, err := tls.LoadX509KeyPair(clientCertPath, clientKeyPath)
-	if err != nil {
-		return nil, fmt.Errorf("error loading client certificate and key: %v", err)
-	}
-	logutil.Infof("HTTP_CLIENT", "Successfully loaded client certificate and key")
-
-	// Create TLS config
-	tlsConfig := &tls.Config{
-		RootCAs:            caCertPool,
-		Certificates:       []tls.Certificate{clientCert},
-		ServerName:         "kubernetes", // Set ServerName to match the expected hostname in the server's certificate
-		InsecureSkipVerify: true,         // Skip verification of the server's certificate
-	}
-
-	return tlsConfig, nil
-}
-
-// SetupMinikubeClient sets up the HTTP client with Minikube certificates
-func SetupMinikubeClient(home string) error {
-	logutil.Infof("HTTP_CLIENT", "Setting up Minikube client with certificates from %s", home)
-	tlsConfig, err := createMinikubeTLSConfig(home)
-	if err != nil {
-		logutil.Infof("HTTP_CLIENT", "Error creating Minikube TLS config: %v", err)
-		return err
-	}
-	logutil.Infof("HTTP_CLIENT", "Successfully created Minikube TLS config with %d certificates", len(tlsConfig.Certificates))
-
-	// Create a transport with the TLS config
-	transport := &http.Transport{
-		TLSClientConfig: tlsConfig,
-	}
-
-	// Create a client with the transport, preserving any existing configuration
-	timeout := 10 * time.Second
-	if instance != nil && instance.client != nil {
-		timeout = instance.client.Timeout
-	}
-
-	client := &http.Client{
-		Transport: transport,
-		Timeout:   timeout,
-	}
-
-	// Set the client as the instance
-	instance = &HTTPClient{
-		client:     client,
-		isMinikube: true,
-	}
-
-	return nil
 }

@@ -3,17 +3,18 @@ package discovery
 import (
 	"context"
 	"fmt"
-	corev1 "k8s.io/api/core/v1"
 	configPkg "open-agent/pkg/config"
 	"open-agent/pkg/k8s"
 	"open-agent/tools/util/logutil"
 	"strings"
 	"sync"
 	"time"
+
+	corev1 "k8s.io/api/core/v1"
 )
 
-// KubernetesDiscovery implements ServiceDiscovery for Kubernetes environments
-type KubernetesDiscovery struct {
+// ServiceDiscoveryImpl implements service discovery for various target types including Kubernetes and static endpoints
+type ServiceDiscoveryImpl struct {
 	configManager *configPkg.ConfigManager
 	k8sClient     *k8s.K8sClient
 	configs       []DiscoveryConfig
@@ -22,9 +23,9 @@ type KubernetesDiscovery struct {
 	stopCh        chan struct{}
 }
 
-// NewKubernetesDiscovery creates a new KubernetesDiscovery instance
-func NewKubernetesDiscovery(configManager *configPkg.ConfigManager) *KubernetesDiscovery {
-	return &KubernetesDiscovery{
+// NewServiceDiscovery creates a new ServiceDiscoveryImpl instance
+func NewServiceDiscovery(configManager *configPkg.ConfigManager) *ServiceDiscoveryImpl {
+	return &ServiceDiscoveryImpl{
 		configManager: configManager,
 		k8sClient:     k8s.GetInstance(),
 		targets:       make(map[string]*Target),
@@ -32,46 +33,45 @@ func NewKubernetesDiscovery(configManager *configPkg.ConfigManager) *KubernetesD
 	}
 }
 
-// LoadTargets loads target configurations
-func (kd *KubernetesDiscovery) LoadTargets(targets []map[string]interface{}) error {
-	kd.configs = make([]DiscoveryConfig, 0, len(targets))
+func (sd *ServiceDiscoveryImpl) LoadTargets(targets []map[string]interface{}) error {
+	sd.configs = make([]DiscoveryConfig, 0, len(targets))
 
 	for _, targetConfig := range targets {
-		parseDiscoveryConfig, err := kd.parseDiscoveryConfig(targetConfig)
+		parseDiscoveryConfig, err := sd.parseDiscoveryConfig(targetConfig)
 		if err != nil {
-			logutil.Printf("ERROR", "Failed to parse target parseDiscoveryConfig: %v", err)
+			logutil.Infof("ERROR", "Failed to parse target parseDiscoveryConfig: %v", err)
 			continue
 		}
 
 		// Skip disabled targets
 		if !parseDiscoveryConfig.Enabled {
-			logutil.Printf("INFO", "Target %s is disabled, skipping", parseDiscoveryConfig.TargetName)
+			logutil.Infof("INFO", "Target %s is disabled, skipping", parseDiscoveryConfig.TargetName)
 			continue
 		}
 
-		kd.configs = append(kd.configs, parseDiscoveryConfig)
+		sd.configs = append(sd.configs, parseDiscoveryConfig)
 	}
 
-	logutil.Printf("INFO", "Loaded %d discovery configurations", len(kd.configs))
+	logutil.Infof("INFO", "Loaded %d discovery configurations", len(sd.configs))
 	return nil
 }
 
 // Start begins target discovery
-func (kd *KubernetesDiscovery) Start(ctx context.Context) error {
+func (sd *ServiceDiscoveryImpl) Start(ctx context.Context) error {
 	// Start periodic discovery
-	go kd.discoveryLoop()
+	go sd.discoveryLoop()
 
-	logutil.Printf("INFO", "[DISCOVERY] Kubernetes service discovery started")
+	logutil.Infof("INFO", "[DISCOVERY] Kubernetes service discovery started")
 	return nil
 }
 
 // GetReadyTargets returns all targets in ready state
-func (kd *KubernetesDiscovery) GetReadyTargets() []*Target {
-	kd.targetsMutex.RLock()
-	defer kd.targetsMutex.RUnlock()
+func (sd *ServiceDiscoveryImpl) GetReadyTargets() []*Target {
+	sd.targetsMutex.RLock()
+	defer sd.targetsMutex.RUnlock()
 
 	var readyTargets []*Target
-	for _, target := range kd.targets {
+	for _, target := range sd.targets {
 		if target.State == TargetStateReady {
 			readyTargets = append(readyTargets, target)
 		}
@@ -80,23 +80,23 @@ func (kd *KubernetesDiscovery) GetReadyTargets() []*Target {
 	// Debug logging for returned targets
 	if configPkg.IsDebugEnabled() {
 		logutil.Debugf("DISCOVERY", "Found %d ready targets out of %d total",
-			len(readyTargets), len(kd.targets))
+			len(readyTargets), len(sd.targets))
 	}
 
 	return readyTargets
 }
 
 // Stop stops the discovery process
-func (kd *KubernetesDiscovery) Stop() error {
-	close(kd.stopCh)
+func (sd *ServiceDiscoveryImpl) Stop() error {
+	close(sd.stopCh)
 	logutil.Printf("INFO", "[DISCOVERY] Kubernetes service discovery stopped")
 	return nil
 }
 
 // discoveryLoop runs the periodic target discovery
-func (kd *KubernetesDiscovery) discoveryLoop() {
+func (sd *ServiceDiscoveryImpl) discoveryLoop() {
 	// Initial discovery
-	kd.discoverTargets()
+	sd.discoverTargets()
 
 	// Periodic discovery every 30 seconds (like Prometheus)
 	ticker := time.NewTicker(15 * time.Second)
@@ -105,17 +105,17 @@ func (kd *KubernetesDiscovery) discoveryLoop() {
 	for {
 		select {
 		case <-ticker.C:
-			kd.discoverTargets()
-		case <-kd.stopCh:
+			sd.discoverTargets()
+		case <-sd.stopCh:
 			return
 		}
 	}
 }
 
 // discoverTargets discovers all configured targets
-func (kd *KubernetesDiscovery) discoverTargets() {
+func (sd *ServiceDiscoveryImpl) discoverTargets() {
 	// Get latest configuration from ConfigManager (uses Informer cache automatically)
-	scrapeConfigs := kd.configManager.GetScrapeConfigs()
+	scrapeConfigs := sd.configManager.GetScrapeConfigs()
 	if configPkg.IsDebugEnabled() {
 		logutil.Printf("discoverTargets", "scrapeConfigs: %+v", scrapeConfigs)
 	}
@@ -127,7 +127,7 @@ func (kd *KubernetesDiscovery) discoverTargets() {
 	// Parse latest configurations into discovery configs
 	currentConfigs := make([]DiscoveryConfig, 0)
 	for _, targetConfig := range scrapeConfigs {
-		parseDiscoveryConfig, err := kd.parseDiscoveryConfig(targetConfig)
+		parseDiscoveryConfig, err := sd.parseDiscoveryConfig(targetConfig)
 		if err != nil {
 			logutil.Printf("ERROR", "Failed to parse target config: %v", err)
 			continue
@@ -152,24 +152,24 @@ func (kd *KubernetesDiscovery) discoverTargets() {
 	for _, discoveryConfig := range currentConfigs {
 		switch discoveryConfig.Type {
 		case "PodMonitor":
-			kd.discoverPodTargets(discoveryConfig)
+			sd.discoverPodTargets(discoveryConfig)
 		case "ServiceMonitor":
-			kd.discoverServiceTargets(discoveryConfig)
+			sd.discoverServiceTargets(discoveryConfig)
 		case "StaticEndpoints":
-			kd.discoverStaticTargets(discoveryConfig)
+			sd.discoverStaticTargets(discoveryConfig)
 		default:
-			logutil.Printf("WARN", "Unknown target type: %s", discoveryConfig.Type)
+			logutil.Infof("WARN", "Unknown target type: %s", discoveryConfig.Type)
 		}
 	}
 }
 
 // discoverPodTargets discovers Pod-based targets
-func (kd *KubernetesDiscovery) discoverPodTargets(config DiscoveryConfig) {
+func (sd *ServiceDiscoveryImpl) discoverPodTargets(config DiscoveryConfig) {
 	if configPkg.IsDebugEnabled() {
 		logutil.Debugf("DISCOVERY", "Discovering PodMonitor targets for %s", config.TargetName)
 	}
 
-	if !kd.k8sClient.IsInitialized() {
+	if !sd.k8sClient.IsInitialized() {
 		logutil.Printf("WARN", "Kubernetes client not initialized for PodMonitor: %s", config.TargetName)
 		return
 	}
@@ -181,7 +181,7 @@ func (kd *KubernetesDiscovery) discoverPodTargets(config DiscoveryConfig) {
 	}
 
 	// Get matching namespaces
-	namespaces, err := kd.getMatchingNamespaces(config.NamespaceSelector)
+	namespaces, err := sd.getMatchingNamespaces(config.NamespaceSelector)
 	if err != nil {
 		logutil.Printf("ERROR", "Failed to get namespaces for %s: %v", config.TargetName, err)
 		return
@@ -194,7 +194,7 @@ func (kd *KubernetesDiscovery) discoverPodTargets(config DiscoveryConfig) {
 	totalPodsFound := 0
 	for _, namespace := range namespaces {
 		// Get matching pods
-		pods, err := kd.getMatchingPods(namespace, config.Selector)
+		pods, err := sd.getMatchingPods(namespace, config.Selector)
 		if err != nil {
 			logutil.Printf("ERROR", "Failed to get pods for %s in namespace %s: %v", config.TargetName, namespace, err)
 			continue
@@ -209,7 +209,7 @@ func (kd *KubernetesDiscovery) discoverPodTargets(config DiscoveryConfig) {
 			if configPkg.IsDebugEnabled() {
 				logutil.Debugf("DISCOVERY", "PodMonitor %s - Processing pod %s/%s with labels: %+v", config.TargetName, pod.Namespace, pod.Name, pod.Labels)
 			}
-			kd.processPodTarget(pod, config)
+			sd.processPodTarget(pod, config)
 		}
 	}
 	if configPkg.IsDebugEnabled() {
@@ -218,9 +218,9 @@ func (kd *KubernetesDiscovery) discoverPodTargets(config DiscoveryConfig) {
 }
 
 // processPodTarget processes a single pod target
-func (kd *KubernetesDiscovery) processPodTarget(pod *corev1.Pod, config DiscoveryConfig) {
+func (sd *ServiceDiscoveryImpl) processPodTarget(pod *corev1.Pod, config DiscoveryConfig) {
 	// Check if pod is ready
-	isReady := kd.isPodReady(pod)
+	isReady := sd.isPodReady(pod)
 
 	for _, endpoint := range config.Endpoints {
 		// Include path in targetID to ensure uniqueness when multiple endpoints use the same port
@@ -237,7 +237,7 @@ func (kd *KubernetesDiscovery) processPodTarget(pod *corev1.Pod, config Discover
 		}
 
 		// Determine scheme
-		scheme := kd.determineScheme(endpoint.Scheme, endpoint.Port, endpoint.TLSConfig)
+		scheme := sd.determineScheme(endpoint.Scheme, endpoint.Port, endpoint.TLSConfig)
 
 		// Build target URL
 		path := endpoint.Path
@@ -279,12 +279,12 @@ func (kd *KubernetesDiscovery) processPodTarget(pod *corev1.Pod, config Discover
 			}
 		}
 
-		kd.updateTarget(target)
+		sd.updateTarget(target)
 	}
 }
 
 // isPodReady checks if a pod is ready (same logic as in ScraperManager)
-func (kd *KubernetesDiscovery) isPodReady(pod *corev1.Pod) bool {
+func (sd *ServiceDiscoveryImpl) isPodReady(pod *corev1.Pod) bool {
 	// Check if the pod is in Running phase
 	if pod.Status.Phase != corev1.PodRunning {
 		return false
@@ -300,22 +300,22 @@ func (kd *KubernetesDiscovery) isPodReady(pod *corev1.Pod) bool {
 }
 
 // updateTarget updates or creates a target
-func (kd *KubernetesDiscovery) updateTarget(newTarget *Target) {
-	kd.targetsMutex.Lock()
-	defer kd.targetsMutex.Unlock()
+func (sd *ServiceDiscoveryImpl) updateTarget(newTarget *Target) {
+	sd.targetsMutex.Lock()
+	defer sd.targetsMutex.Unlock()
 
-	_, exists := kd.targets[newTarget.ID]
+	_, exists := sd.targets[newTarget.ID]
 
 	if !exists {
 		// New target
-		kd.targets[newTarget.ID] = newTarget
+		sd.targets[newTarget.ID] = newTarget
 		if configPkg.IsDebugEnabled() {
 			logutil.Debugf("DISCOVERY", "Added new target: %s (state: %s)", newTarget.ID, newTarget.State)
 		}
 	} else {
 		// Always update target to ensure metadata changes are reflected
 		// This includes metricRelabelConfigs changes from ConfigMap updates
-		kd.targets[newTarget.ID] = newTarget
+		sd.targets[newTarget.ID] = newTarget
 		if configPkg.IsDebugEnabled() {
 			logutil.Debugf("DISCOVERY", "Updated target: %s (forced update to ensure metadata sync)", newTarget.ID)
 		}
@@ -324,7 +324,7 @@ func (kd *KubernetesDiscovery) updateTarget(newTarget *Target) {
 
 // Helper methods (simplified versions of existing ScraperManager methods)
 
-func (kd *KubernetesDiscovery) getMatchingNamespaces(namespaceSelector map[string]interface{}) ([]string, error) {
+func (sd *ServiceDiscoveryImpl) getMatchingNamespaces(namespaceSelector map[string]interface{}) ([]string, error) {
 	if namespaceSelector == nil {
 		return []string{"default"}, nil
 	}
@@ -349,7 +349,7 @@ func (kd *KubernetesDiscovery) getMatchingNamespaces(namespaceSelector map[strin
 	return []string{"default"}, nil
 }
 
-func (kd *KubernetesDiscovery) getMatchingPods(namespace string, selector map[string]interface{}) ([]*corev1.Pod, error) {
+func (sd *ServiceDiscoveryImpl) getMatchingPods(namespace string, selector map[string]interface{}) ([]*corev1.Pod, error) {
 	if selector == nil {
 		logutil.Printf("ERROR", "[DISCOVERY] No selector provided for pod matching")
 		return nil, fmt.Errorf("no selector provided")
@@ -368,14 +368,14 @@ func (kd *KubernetesDiscovery) getMatchingPods(namespace string, selector map[st
 		if configPkg.IsDebugEnabled() {
 			logutil.Debugf("DISCOVERY", "Matching pods in namespace %s with %d labels", namespace, len(labelSelector))
 		}
-		return kd.k8sClient.GetPodsByLabels(namespace, labelSelector)
+		return sd.k8sClient.GetPodsByLabels(namespace, labelSelector)
 	}
 
 	logutil.Printf("ERROR", "[DISCOVERY] Unsupported selector type, expected matchLabels")
 	return nil, fmt.Errorf("unsupported selector type")
 }
 
-func (kd *KubernetesDiscovery) determineScheme(endpointScheme, port string, tlsConfig map[string]interface{}) string {
+func (sd *ServiceDiscoveryImpl) determineScheme(endpointScheme, port string, tlsConfig map[string]interface{}) string {
 	// Explicit scheme takes precedence
 	if endpointScheme != "" {
 		return endpointScheme
@@ -395,18 +395,18 @@ func (kd *KubernetesDiscovery) determineScheme(endpointScheme, port string, tlsC
 }
 
 // ServiceMonitor and StaticEndpoints discovery implementations
-func (kd *KubernetesDiscovery) discoverServiceTargets(config DiscoveryConfig) {
+func (sd *ServiceDiscoveryImpl) discoverServiceTargets(config DiscoveryConfig) {
 	if configPkg.IsDebugEnabled() {
 		logutil.Debugf("DISCOVERY", "Discovering ServiceMonitor targets for %s", config.TargetName)
 	}
 
-	if !kd.k8sClient.IsInitialized() {
+	if !sd.k8sClient.IsInitialized() {
 		logutil.Printf("WARN", "Kubernetes client not initialized for ServiceMonitor: %s", config.TargetName)
 		return
 	}
 
 	// Get matching namespaces
-	namespaces, err := kd.getMatchingNamespaces(config.NamespaceSelector)
+	namespaces, err := sd.getMatchingNamespaces(config.NamespaceSelector)
 	if err != nil {
 		logutil.Printf("ERROR", "Failed to get namespaces for %s: %v", config.TargetName, err)
 		return
@@ -414,20 +414,20 @@ func (kd *KubernetesDiscovery) discoverServiceTargets(config DiscoveryConfig) {
 
 	for _, namespace := range namespaces {
 		// Get matching services
-		services, err := kd.getMatchingServices(namespace, config.Selector)
+		services, err := sd.getMatchingServices(namespace, config.Selector)
 		if err != nil {
 			logutil.Printf("ERROR", "Failed to get services for %s in namespace %s: %v", config.TargetName, namespace, err)
 			continue
 		}
 
 		for _, service := range services {
-			kd.processServiceTarget(service, config)
+			sd.processServiceTarget(service, config)
 		}
 	}
 }
 
 // getMatchingServices gets services matching the selector in the given namespace
-func (kd *KubernetesDiscovery) getMatchingServices(namespace string, selector map[string]interface{}) ([]*corev1.Service, error) {
+func (sd *ServiceDiscoveryImpl) getMatchingServices(namespace string, selector map[string]interface{}) ([]*corev1.Service, error) {
 	if selector == nil {
 		return nil, fmt.Errorf("no selector provided")
 	}
@@ -440,16 +440,16 @@ func (kd *KubernetesDiscovery) getMatchingServices(namespace string, selector ma
 				labelSelector[k] = vStr
 			}
 		}
-		return kd.k8sClient.GetServicesByLabels(namespace, labelSelector)
+		return sd.k8sClient.GetServicesByLabels(namespace, labelSelector)
 	}
 
 	return nil, fmt.Errorf("unsupported selector type")
 }
 
 // processServiceTarget processes a single service target
-func (kd *KubernetesDiscovery) processServiceTarget(service *corev1.Service, config DiscoveryConfig) {
+func (sd *ServiceDiscoveryImpl) processServiceTarget(service *corev1.Service, config DiscoveryConfig) {
 	// Get endpoints for this service
-	endpoints, err := kd.k8sClient.GetEndpointsForService(service.Namespace, service.Name)
+	endpoints, err := sd.k8sClient.GetEndpointsForService(service.Namespace, service.Name)
 	if err != nil {
 		logutil.Printf("ERROR", "Failed to get endpoints for service %s/%s: %v", service.Namespace, service.Name, err)
 		return
@@ -501,7 +501,7 @@ func (kd *KubernetesDiscovery) processServiceTarget(service *corev1.Service, con
 					targetID := fmt.Sprintf("%s-%s-%s-%s-%d-%d-%s", config.TargetName, service.Namespace, service.Name, endpointConfig.Port, subsetIdx, addrIdx, pathSafe)
 
 					// Determine scheme
-					scheme := kd.determineScheme(endpointConfig.Scheme, endpointConfig.Port, endpointConfig.TLSConfig)
+					scheme := sd.determineScheme(endpointConfig.Scheme, endpointConfig.Port, endpointConfig.TLSConfig)
 
 					// Build target URL
 					path := endpointConfig.Path
@@ -527,7 +527,7 @@ func (kd *KubernetesDiscovery) processServiceTarget(service *corev1.Service, con
 						LastSeen: time.Now(),
 					}
 
-					kd.updateTarget(target)
+					sd.updateTarget(target)
 					if configPkg.IsDebugEnabled() {
 						logutil.Debugf("DISCOVERY", "Added ServiceMonitor target: %s", targetID)
 					}
@@ -540,7 +540,7 @@ func (kd *KubernetesDiscovery) processServiceTarget(service *corev1.Service, con
 					targetID := fmt.Sprintf("%s-%s-%s-%s-%d-nr-%d-%s", config.TargetName, service.Namespace, service.Name, endpointConfig.Port, subsetIdx, addrIdx, pathSafe)
 
 					// Determine scheme
-					scheme := kd.determineScheme(endpointConfig.Scheme, endpointConfig.Port, endpointConfig.TLSConfig)
+					scheme := sd.determineScheme(endpointConfig.Scheme, endpointConfig.Port, endpointConfig.TLSConfig)
 
 					// Build target URL
 					path := endpointConfig.Path
@@ -563,7 +563,7 @@ func (kd *KubernetesDiscovery) processServiceTarget(service *corev1.Service, con
 						LastSeen: time.Now(),
 					}
 
-					kd.updateTarget(target)
+					sd.updateTarget(target)
 					if configPkg.IsDebugEnabled() {
 						logutil.Debugf("DISCOVERY", "Added pending ServiceMonitor target: %s", targetID)
 					}
@@ -577,7 +577,7 @@ func (kd *KubernetesDiscovery) processServiceTarget(service *corev1.Service, con
 	}
 }
 
-func (kd *KubernetesDiscovery) discoverStaticTargets(config DiscoveryConfig) {
+func (sd *ServiceDiscoveryImpl) discoverStaticTargets(config DiscoveryConfig) {
 	if configPkg.IsDebugEnabled() {
 		logutil.Debugf("DISCOVERY", "Discovering StaticEndpoints targets for %s", config.TargetName)
 	}
@@ -638,7 +638,7 @@ func (kd *KubernetesDiscovery) discoverStaticTargets(config DiscoveryConfig) {
 			LastSeen: time.Now(),
 		}
 
-		kd.updateTarget(target)
+		sd.updateTarget(target)
 		if configPkg.IsDebugEnabled() {
 			logutil.Debugf("DISCOVERY", "Added StaticEndpoints target: %s (URL: %s)", targetID, url)
 		}
@@ -646,7 +646,7 @@ func (kd *KubernetesDiscovery) discoverStaticTargets(config DiscoveryConfig) {
 }
 
 // parseDiscoveryConfig parses target configuration into DiscoveryConfig
-func (kd *KubernetesDiscovery) parseDiscoveryConfig(targetConfig map[string]interface{}) (DiscoveryConfig, error) {
+func (sd *ServiceDiscoveryImpl) parseDiscoveryConfig(targetConfig map[string]interface{}) (DiscoveryConfig, error) {
 	discoveryConfig := DiscoveryConfig{
 		Enabled: true, // Default to enabled
 	}
@@ -679,7 +679,7 @@ func (kd *KubernetesDiscovery) parseDiscoveryConfig(targetConfig map[string]inte
 		discoveryConfig.Endpoints = make([]EndpointConfig, 0, len(endpoints))
 		for _, ep := range endpoints {
 			if epMap, ok := ep.(map[string]interface{}); ok {
-				endpointConfig := kd.parseEndpointConfig(epMap)
+				endpointConfig := sd.parseEndpointConfig(epMap)
 				discoveryConfig.Endpoints = append(discoveryConfig.Endpoints, endpointConfig)
 			}
 		}
@@ -688,7 +688,7 @@ func (kd *KubernetesDiscovery) parseDiscoveryConfig(targetConfig map[string]inte
 	return discoveryConfig, nil
 }
 
-func (kd *KubernetesDiscovery) parseEndpointConfig(endpointMap map[string]interface{}) EndpointConfig {
+func (sd *ServiceDiscoveryImpl) parseEndpointConfig(endpointMap map[string]interface{}) EndpointConfig {
 	endpointConfig := EndpointConfig{}
 
 	if port, ok := endpointMap["port"].(string); ok {

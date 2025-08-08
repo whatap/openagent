@@ -3,36 +3,36 @@ features:
   openAgent:
     enabled: true
     targets:
-      - targetName: minikube-apiserver
-        type: ServiceMonitor
-        namespaceSelector:
-          matchNames:
-            - "default"
-        selector:
-          matchLabels:
-            component: apiserver
-            provider: kubernetes
-        endpoints:
-          - port: "https"  # 포트 이름이 "https"이므로 기본적으로 HTTPS 사용
-            path: "/metrics"
-            interval: "30s"
-            scheme: "https"  # 명시적으로 HTTPS 지정 (선택사항)
-            tlsConfig:
-              insecureSkipVerify: false  # 인증서 검증 건너뛰기
-#      - targetName: kube-proxy
-#        type: StaticEndpoints
-#        # Target is enabled by default (enabled: true), this can be omitted
-#        enabled: true
+#      - targetName: minikube-apiserver
+#        type: ServiceMonitor
+#        namespaceSelector:
+#          matchNames:
+#            - "default"
+#        selector:
+#          matchLabels:
+#            component: apiserver
+#            provider: kubernetes
 #        endpoints:
-#          - address: "127.0.0.1:8001"
+#          - port: "https"  # 포트 이름이 "https"이므로 기본적으로 HTTPS 사용
 #            path: "/metrics"
-#            scheme: "http"
 #            interval: "30s"
-#            metricRelabelConfigs:
-#              - source_labels: [ __name__ ]
-#                regex: "apiserver.*"
-#                action: keep
-#              - source_labels: [ verb ]
-#                target_label: http_verb
-#                replacement: "${1}"
-#                action: replace
+#            scheme: "https"  # 명시적으로 HTTPS 지정 (선택사항)
+#            tlsConfig:
+#              insecureSkipVerify: false  # 인증서 검증 건너뛰기
+      - targetName: kube-proxy
+        type: StaticEndpoints
+        # Target is enabled by default (enabled: true), this can be omitted
+        enabled: true
+        endpoints:
+          - address: "127.0.0.1:8001"
+            path: "/metrics"
+            scheme: "http"
+            interval: "30s"
+            metricRelabelConfigs:
+              - source_labels: [ __name__ ]
+                regex: "apiserver.*"
+                action: keep
+              - source_labels: [ verb ]
+                target_label: http_verb
+                replacement: "${1}"
+                action: replace

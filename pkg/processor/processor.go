@@ -26,19 +26,16 @@ func NewProcessor(rawQueue chan *model.ScrapeRawData, processedQueue chan *model
 	}
 }
 
-// Start starts the processor
 func (p *Processor) Start() {
 	go p.processLoop()
 }
 
-// processLoop continuously processes raw data from the queue
 func (p *Processor) processLoop() {
 	for rawData := range p.rawQueue {
 		p.processRawData(rawData)
 	}
 }
 
-// processRawData processes a single raw data item
 func (p *Processor) processRawData(rawData *model.ScrapeRawData) {
 	logutil.Printf("INFO", "[PROCESSOR] Processing raw data from target: %s", rawData.TargetURL)
 

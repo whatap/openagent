@@ -2,7 +2,6 @@ package config
 
 import (
 	"fmt"
-	"gopkg.in/yaml.v2"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -10,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"gopkg.in/yaml.v2"
 
 	"open-agent/pkg/k8s"
 	"open-agent/tools/util/logutil"
@@ -169,10 +170,11 @@ func (cm *ConfigManager) GetScrapeInterval() string {
 	return "15s"
 }
 
-// GetScrapeConfigs returns the scrape_configs section or the openAgent.scrapConfigs/targets section if available
 func (cm *ConfigManager) GetScrapeConfigs() []map[string]interface{} {
 	// Always reload configuration from Informer cache in Kubernetes environment
+	logutil.Infof("GetScrapeConfigs", "START")
 	if cm.k8sClient != nil && cm.k8sClient.IsInitialized() {
+		logutil.Infof("GetScrapeConfigs", "Kubernetes environment detected, using ConfigMap informer cache")
 		if IsDebugEnabled() {
 			logutil.Debugf("CONFIG", "GetScrapeConfigs: Reloading latest configuration from Informer cache")
 		}
@@ -187,7 +189,6 @@ func (cm *ConfigManager) GetScrapeConfigs() []map[string]interface{} {
 			}
 		}
 	}
-
 	cm.mu.RLock()
 	defer cm.mu.RUnlock()
 

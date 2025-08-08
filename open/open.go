@@ -103,10 +103,10 @@ func BootOpenAgent(version, commitHash string, logger *logfile.FileLogger) {
 	// Initialize secure communication
 	secure.StartNet(secure.WithLogger(logger), secure.WithAccessKey(license), secure.WithServers(servers), secure.WithOname("test"))
 
-	// Check if debug mode is enabled
-	debugMode := os.Getenv("debug")
-	if debugMode == "true" {
-		logutil.Infoln("BootOpenAgent", "Debug mode enabled, running process method")
+	// Check if test mode is enabled
+	testMode := os.Getenv("test")
+	if testMode == "true" {
+		logutil.Infoln("BootOpenAgent", "test mode enabled, running process method")
 		// Initialize random number generator
 		rand.Seed(time.Now().UnixNano())
 		// Run the process method in a loop
@@ -114,10 +114,10 @@ func BootOpenAgent(version, commitHash string, logger *logfile.FileLogger) {
 			process(logger)
 			time.Sleep(10 * time.Second)
 		}
-		// The code below will not be executed in debug mode
+		// The code below will not be executed in test mode
 	}
 
-	logger.Infoln("BootOpenAgent-Debug mode disabled, starting agent")
+	logger.Infoln("BootOpenAgent-Test mode disabled, starting agent")
 	// Create channels for communication between components
 	rawQueue := make(chan *model.ScrapeRawData, RawQueueSize)
 	processedQueue := make(chan *model.ConversionResult, ProcessedQueueSize)
@@ -131,8 +131,7 @@ func BootOpenAgent(version, commitHash string, logger *logfile.FileLogger) {
 	}
 
 	// Create service discovery
-	serviceDiscovery := discovery.NewKubernetesDiscovery(configManager)
-
+	serviceDiscovery := discovery.NewServiceDiscovery(configManager)
 	// Start service discovery as an independent component
 	go func() {
 		defer func() {
@@ -151,7 +150,7 @@ func BootOpenAgent(version, commitHash string, logger *logfile.FileLogger) {
 
 			// Start service discovery
 			if err := serviceDiscovery.Start(context.Background()); err != nil {
-				logutil.Println("ServiceDiscovery", fmt.Sprintf("Failed to start service discovery: %v", err))
+				logutil.Infoln("ServiceDiscovery", fmt.Sprintf("Failed to start service discovery: %v", err))
 				return
 			}
 

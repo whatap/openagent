@@ -70,7 +70,7 @@ func process(logger *logfile.FileLogger) {
 	now := time.Now().UnixMilli()
 
 	// Send help information only once per minute
-	if now-lastHelpSendTime > 5*dateutil.MILLIS_PER_SECOND {
+	if now-lastHelpSendTime > 60*dateutil.MILLIS_PER_SECOND {
 		for _, mx := range metrics {
 			helpText := model.GetMetricHelp(mx.Metric)
 			metricType := model.GetMetricType(mx.Metric)
