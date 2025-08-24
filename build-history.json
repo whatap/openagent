@@ -256,20 +256,86 @@
         }
       },
       "notes": "Build via file"
+    },
+    {
+      "id": 9,
+      "version": "1.4.3",
+      "timestamp": "2025-08-08T08:38:49Z",
+      "status": "success",
+      "architecture": "all",
+      "platforms": [
+        "linux/arm64",
+        "linux/amd64"
+      ],
+      "registry": "public.ecr.aws/whatap",
+      "version_source": "file",
+      "git": {
+        "commit": "c2bb476",
+        "branch": "master",
+        "tag": ""
+      },
+      "build": {
+        "user": "root",
+        "host": "k8s-agent-jenkins-node-x86",
+        "duration": 0,
+        "docker_images": [
+          "public.ecr.aws/whatap/open_agent:1.4.3",
+          "public.ecr.aws/whatap/open_agent:latest"
+        ],
+        "s3_uploads": {
+          "enabled": false,
+          "paths": []
+        }
+      },
+      "notes": "Build via file"
+    },
+    {
+      "id": 10,
+      "version": "1.4.5",
+      "timestamp": "2025-08-08T08:50:29Z",
+      "status": "success",
+      "architecture": "all",
+      "platforms": [
+        "linux/arm64",
+        "linux/amd64"
+      ],
+      "registry": "public.ecr.aws/whatap",
+      "version_source": "file",
+      "git": {
+        "commit": "dfb4507",
+        "branch": "master",
+        "tag": ""
+      },
+      "build": {
+        "user": "root",
+        "host": "k8s-agent-jenkins-node-x86",
+        "duration": 0,
+        "docker_images": [
+          "public.ecr.aws/whatap/open_agent:1.4.5",
+          "public.ecr.aws/whatap/open_agent:latest"
+        ],
+        "s3_uploads": {
+          "enabled": false,
+          "paths": []
+        }
+      },
+      "notes": "Build via file"
     }
   ],
   "statistics": {
-    "total_builds": 8,
-    "successful_builds": 8,
+    "total_builds": 10,
+    "successful_builds": 10,
     "failed_builds": 0,
-    "last_successful_build": "2025-07-30T03:18:13Z",
+    "last_successful_build": "2025-08-08T08:50:29Z",
     "last_failed_build": null,
     "versions": {
       "1.0.0": 1,
       "1.3.27": 1,
       "1.3.29": 1,
       "1.4.1": 4,
-      "1.4.2": 1
+      "1.4.2": 1,
+      "1.4.3": 1,
+      "1.4.5": 1
     }
   }
 }
