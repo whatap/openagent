@@ -3,6 +3,7 @@ package processor
 import (
 	"math"
 	"open-agent/tools/util/logutil"
+	"strings"
 
 	"open-agent/pkg/config"
 	"open-agent/pkg/converter"
@@ -37,18 +38,34 @@ func (p *Processor) processLoop() {
 }
 
 func (p *Processor) processRawData(rawData *model.ScrapeRawData) {
-	logutil.Infof("INFO", "[PROCESSOR] Processing raw data from target: %s", rawData.RawData)
-	logutil.Printf("INFO", "[PROCESSOR] Processing raw data from target: %s", rawData.TargetURL)
+	if config.IsDebugEnabled() {
+		// Log only a preview of the raw metrics to avoid flooding logs
+		const maxLines = 20
+		raw := rawData.RawData
+		lines := strings.Split(raw, "\n")
+		previewLines := lines
+		truncated := false
+		if len(lines) > maxLines {
+			previewLines = append([]string{}, lines[:maxLines]...)
+			truncated = true
+		}
+		preview := strings.Join(previewLines, "\n")
+		if truncated {
+			preview += "\n... (truncated)"
+		}
+		logutil.Debugf("PROCESSOR", "Raw metrics preview (first %d lines of %d, target=%s):\n%s", maxLines, len(lines), rawData.TargetURL, preview)
+	}
+	logutil.Infof("PROCESSOR", "Processing raw data from target: %s", rawData.TargetURL)
 
 	// Log metric relabel configs (simplified)
 	if config.IsDebugEnabled() {
-		logutil.Printf("DEBUG", "[PROCESSOR] Processing target %s with %d relabel configs",
+		logutil.Debugf("PROCESSOR", "Processing target %s with %d relabel configs",
 			rawData.TargetURL, len(rawData.MetricRelabelConfigs))
 
 		if len(rawData.MetricRelabelConfigs) > 0 {
 			// Log only first config for debugging
 			firstConfig := rawData.MetricRelabelConfigs[0]
-			logutil.Printf("DEBUG", "[PROCESSOR] First relabel config: Action=%s, Regex=%s",
+			logutil.Debugf("PROCESSOR", "First relabel config: Action=%s, Regex=%s",
 				firstConfig.Action, firstConfig.Regex)
 		}
 	}
@@ -56,22 +73,22 @@ func (p *Processor) processRawData(rawData *model.ScrapeRawData) {
 	// Debug logging for node label functionality
 	if config.IsDebugEnabled() && rawData.AddNodeLabel {
 		if rawData.NodeName != "" {
-			logutil.Printf("DEBUG", "[PROCESSOR] Node label will be added: node=%s", rawData.NodeName)
+			logutil.Debugf("PROCESSOR", "Node label will be added: node=%s", rawData.NodeName)
 		} else {
-			logutil.Printf("DEBUG", "[PROCESSOR] AddNodeLabel enabled but NodeName is empty")
+			logutil.Debugf("PROCESSOR", "AddNodeLabel enabled but NodeName is empty")
 		}
 	}
 
 	// Convert the raw data to OpenMx format using the collection timestamp
 	conversionResult, err := converter.ConvertWithTimestamp(rawData.RawData, rawData.CollectionTime)
 	if err != nil {
-		logutil.Printf("ERROR", "[PROCESSOR] Error converting raw data: %v", err)
+		logutil.Errorf("PROCESSOR", "Error converting raw data: %v", err)
 		return
 	}
 
 	// Apply metric relabeling if configured
 	if len(rawData.MetricRelabelConfigs) > 0 {
-		logutil.Printf("INFO", "[PROCESSOR] Applying %d metric relabel configs", len(rawData.MetricRelabelConfigs))
+		logutil.Infof("PROCESSOR", "Applying %d metric relabel configs", len(rawData.MetricRelabelConfigs))
 		converter.ApplyRelabelConfigs(conversionResult.GetOpenMxList(), rawData.MetricRelabelConfigs)
 	}
 
@@ -99,7 +116,7 @@ func (p *Processor) processRawData(rawData *model.ScrapeRawData) {
 
 	// Summary logging for node label addition
 	if config.IsDebugEnabled() && nodeLabelsAdded > 0 {
-		logutil.Printf("DEBUG", "[PROCESSOR] Added node labels to %d metrics", nodeLabelsAdded)
+		logutil.Debugf("PROCESSOR", "Added node labels to %d metrics", nodeLabelsAdded)
 	}
 	// Replace the original list with the filtered list
 	conversionResult.OpenMxList = filteredOpenMxList
@@ -119,7 +136,7 @@ func (p *Processor) processRawData(rawData *model.ScrapeRawData) {
 
 	// Summary logging for node property addition
 	if config.IsDebugEnabled() && nodePropertiesAdded > 0 {
-		logutil.Printf("DEBUG", "[PROCESSOR] Added node properties to %d help items", nodePropertiesAdded)
+		logutil.Debugf("PROCESSOR", "Added node properties to %d help items", nodePropertiesAdded)
 	}
 
 	// Summary logging for processed data
@@ -130,7 +147,7 @@ func (p *Processor) processRawData(rawData *model.ScrapeRawData) {
 				validMetrics++
 			}
 		}
-		logutil.Printf("DEBUG", "[PROCESSOR] Processing complete: %d valid metrics, %d help items",
+		logutil.Debugf("PROCESSOR", "Processing complete: %d valid metrics, %d help items",
 			validMetrics, len(conversionResult.GetOpenMxHelpList()))
 	}
 

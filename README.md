@@ -37,11 +37,19 @@ openagent/
 │   ├── scraper/          # 메트릭 스크래퍼
 │   └── sender/           # 처리된 메트릭 전송기
 ├── scrape_config.yaml    # 스크래핑 설정 파일
+├── examples/
+│   ├── metric-exporter-go/  # 교육용 OpenMetrics Exporter 예제 (/metrics, :9529)
+│   └── scrape_config_metric_exporter.yaml  # 예제 타겟 설정 샘플
 ├── test/
 │   └── integration/      # 통합 테스트 및 샘플 코드
 ├── go.mod                # Go 모듈 정의
 └── README.md             # 현재 파일
 ```
+
+### 교육용 예제 빠른 시작
+- 예제 실행: `cd examples/metric-exporter-go && go mod tidy && go run .`
+- 확인: `curl -s -H "Accept: application/openmetrics-text" http://localhost:9529/metrics | head`
+- 스크랩 설정 샘플: `examples/scrape_config_metric_exporter.yaml` 참고 (path: /metrics, address: localhost:9529)
 
 ## 설치 및 실행
 

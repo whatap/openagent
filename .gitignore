@@ -181,3 +181,6 @@ openagent/
 test
 s3_upload.sh
 prd
+sample_app
+examples
+repo.whatap.io
