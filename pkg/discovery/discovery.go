@@ -63,4 +63,5 @@ type EndpointConfig struct {
 	MetricRelabelConfigs []interface{}
 	Params               map[string]interface{} // HTTP URL parameters
 	AddNodeLabel         bool
+	AddWeightedLabel     bool
 }

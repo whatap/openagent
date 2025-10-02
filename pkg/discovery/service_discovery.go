@@ -771,6 +771,10 @@ func (sd *ServiceDiscoveryImpl) parseEndpointConfig(endpointMap map[string]inter
 		endpointConfig.AddNodeLabel = addNodeLabel
 	}
 
+	if addWeightedLabel, ok := endpointMap["addWeightedLabel"].(bool); ok {
+		endpointConfig.AddWeightedLabel = addWeightedLabel
+	}
+
 	// Parse params for HTTP URL parameters
 	if params, ok := endpointMap["params"].(map[string]interface{}); ok {
 		endpointConfig.Params = params

@@ -46,6 +46,7 @@ type ScraperTask struct {
 	Params               map[string][]string // HTTP URL parameters for the endpoint
 	NodeName             string              // Used to store the node name for PodMonitor targets
 	AddNodeLabel         bool                // Controls whether to add node label to metrics
+	AddWeightedLabel     bool                // Controls whether to compute and add weighted GPU util
 }
 
 // NewStaticEndpointsScraperTask creates a new ScraperTask instance for a StaticEndpoints target
@@ -279,6 +280,8 @@ func (st *ScraperTask) Run() (*model.ScrapeRawData, error) {
 	} else {
 		rawData = model.NewScrapeRawData(targetURL, response, st.MetricRelabelConfigs, collectionTime)
 	}
+	// Propagate addWeightedLabel flag
+	rawData.AddWeightedLabel = st.AddWeightedLabel
 
 	// Log detailed information
 	duration := time.Since(startTime)

@@ -121,6 +121,37 @@ func (p *Processor) processRawData(rawData *model.ScrapeRawData) {
 	// Replace the original list with the filtered list
 	conversionResult.OpenMxList = filteredOpenMxList
 
+	// Optionally compute DCGM_FI_DEV_WEIGHTED_GPU_UTIL if enabled and GR_ENGINE_ACTIVE exists
+	if rawData.AddWeightedLabel {
+		foundGR := false
+		for _, mx := range filteredOpenMxList {
+			if mx.Metric == "DCGM_FI_PROF_GR_ENGINE_ACTIVE" {
+				foundGR = true
+				break
+			}
+		}
+		if foundGR {
+			weighted := aggregateWeightedGPUUtil(filteredOpenMxList)
+			if len(weighted) > 0 {
+				conversionResult.OpenMxList = append(conversionResult.OpenMxList, weighted...)
+				// Ensure help exists for the weighted metric
+				foundHelp := false
+				for _, h := range conversionResult.GetOpenMxHelpList() {
+					if h.Metric == "DCGM_FI_DEV_WEIGHTED_GPU_UTIL" {
+						foundHelp = true
+						break
+					}
+				}
+				if !foundHelp {
+					h := model.NewOpenMxHelp("DCGM_FI_DEV_WEIGHTED_GPU_UTIL")
+					h.Put("help", "Weighted GPU utilization (0..1). MIG: sum(GR_ENGINE_ACTIVE × slices/maxSlices), non-MIG: GPU_UTIL/100")
+					h.Put("type", "gauge")
+					conversionResult.OpenMxHelpList = append(conversionResult.OpenMxHelpList, h)
+				}
+			}
+		}
+	}
+
 	// Add instance property to each OpenMxHelp
 	nodePropertiesAdded := 0
 

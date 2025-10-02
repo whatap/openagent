@@ -822,6 +822,11 @@ func (sm *ScraperManager) createScraperTaskFromTarget(target *discovery.Target) 
 	scraperTask.NodeName = nodeName
 	scraperTask.AddNodeLabel = addNodeLabel
 
+	// Set addWeightedLabel from endpoint configuration if present
+	if endpoint, ok := target.Metadata["endpoint"].(discovery.EndpointConfig); ok {
+		scraperTask.AddWeightedLabel = endpoint.AddWeightedLabel
+	}
+
 	// Extract params if present
 	if endpoint, ok := target.Metadata["endpoint"].(discovery.EndpointConfig); ok {
 		if endpoint.Params != nil {

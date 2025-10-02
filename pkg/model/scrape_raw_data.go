@@ -7,6 +7,7 @@ type ScrapeRawData struct {
 	MetricRelabelConfigs RelabelConfigs
 	NodeName             string
 	AddNodeLabel         bool
+	AddWeightedLabel     bool
 	CollectionTime       int64 // Unix timestamp in milliseconds when data was collected
 }
 
@@ -18,6 +19,7 @@ func NewScrapeRawData(targetURL, rawData string, metricRelabelConfigs RelabelCon
 		MetricRelabelConfigs: metricRelabelConfigs,
 		NodeName:             "",
 		AddNodeLabel:         false,
+		AddWeightedLabel:     false,
 		CollectionTime:       collectionTime,
 	}
 }
@@ -30,6 +32,7 @@ func NewScrapeRawDataWithNodeName(targetURL, rawData string, metricRelabelConfig
 		MetricRelabelConfigs: metricRelabelConfigs,
 		NodeName:             nodeName,
 		AddNodeLabel:         addNodeLabel,
+		AddWeightedLabel:     false,
 		CollectionTime:       collectionTime,
 	}
 }
