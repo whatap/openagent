@@ -2,7 +2,15 @@ package k8s
 
 import (
 	"fmt"
+	"open-agent/tools/util/logutil"
+	"os"
+	"path/filepath"
+	"sync"
+	"time"
+
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/informers"
@@ -10,32 +18,27 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
-	"open-agent/tools/util/logutil"
-	"os"
-	"path/filepath"
-	"sync"
-	"time"
 )
 
 // K8sClient is a wrapper around the Kubernetes client
 type K8sClient struct {
-	clientset         *kubernetes.Clientset
-	podInformer       cache.SharedIndexInformer
-	endpointInformer  cache.SharedIndexInformer
-	serviceInformer   cache.SharedIndexInformer
-	namespaceInformer cache.SharedIndexInformer
-	configMapInformer cache.SharedIndexInformer
-	secretInformer    cache.SharedIndexInformer
-	podStore          cache.Store
-	endpointStore     cache.Store
-	serviceStore      cache.Store
-	namespaceStore    cache.Store
-	configMapStore    cache.Store
-	secretStore       cache.Store
-	stopCh            chan struct{}
-	initialized       bool
-	mu                sync.RWMutex
-	configMapHandlers []func(*corev1.ConfigMap)
+	clientset             *kubernetes.Clientset
+	podInformer           cache.SharedIndexInformer
+	endpointSliceInformer cache.SharedIndexInformer
+	serviceInformer       cache.SharedIndexInformer
+	namespaceInformer     cache.SharedIndexInformer
+	configMapInformer     cache.SharedIndexInformer
+	secretInformer        cache.SharedIndexInformer
+	podStore              cache.Store
+	endpointSliceStore    cache.Store
+	serviceStore          cache.Store
+	namespaceStore        cache.Store
+	configMapStore        cache.Store
+	secretStore           cache.Store
+	stopCh                chan struct{}
+	initialized           bool
+	mu                    sync.RWMutex
+	configMapHandlers     []func(*corev1.ConfigMap)
 }
 
 var (
@@ -77,9 +80,12 @@ func (c *K8sClient) initialize() {
 	var config *rest.Config
 	var err error
 
+	logutil.Infof("K8S", "Initializing Kubernetes client...")
+
 	// Try to use in-cluster config
 	config, err = rest.InClusterConfig()
 	if err != nil {
+		logutil.Infof("K8S", "InClusterConfig failed: %v", err)
 		// Fall back to kubeconfig
 		kubeconfig := kubeconfigPath
 		if kubeconfig == "" {
@@ -95,7 +101,14 @@ func (c *K8sClient) initialize() {
 			logutil.Infof("K8S", "Error building kubeconfig: %v", err)
 			return
 		}
+		logutil.Infof("K8S", "Built kubeconfig successfully (host=%s)", config.Host)
+	} else {
+		logutil.Infof("K8S", "Using in-cluster configuration (host=%s)", config.Host)
 	}
+
+	// Suppress API server deprecation warnings (e.g., Endpoints deprecation) from client-go
+	config.WarningHandler = rest.NoWarnings{}
+	logutil.Infof("K8S", "Configured client-go to suppress API warning headers")
 
 	// Create the clientset
 	c.clientset, err = kubernetes.NewForConfig(config)
@@ -103,17 +116,19 @@ func (c *K8sClient) initialize() {
 		logutil.Infof("K8S", "Error creating Kubernetes client: %v", err)
 		return
 	}
+	logutil.Infof("K8S", "Kubernetes clientset created")
 
 	// Create a factory for informers
 	factory := informers.NewSharedInformerFactory(c.clientset, 10*time.Minute)
+	logutil.Infof("K8S", "Creating informers (resync=10m)...")
 
 	// Create pod informer
 	c.podInformer = factory.Core().V1().Pods().Informer()
 	c.podStore = c.podInformer.GetStore()
 
-	// Create endpoint informer
-	c.endpointInformer = factory.Core().V1().Endpoints().Informer()
-	c.endpointStore = c.endpointInformer.GetStore()
+	// Create EndpointSlice informer (replace deprecated Endpoints)
+	c.endpointSliceInformer = factory.Discovery().V1().EndpointSlices().Informer()
+	c.endpointSliceStore = c.endpointSliceInformer.GetStore()
 
 	// Create service informer
 	c.serviceInformer = factory.Core().V1().Services().Informer()
@@ -145,17 +160,19 @@ func (c *K8sClient) initialize() {
 	})
 
 	// Start the informers
+	logutil.Infof("K8S", "Starting informers...")
 	go c.podInformer.Run(c.stopCh)
-	go c.endpointInformer.Run(c.stopCh)
+	go c.endpointSliceInformer.Run(c.stopCh)
 	go c.serviceInformer.Run(c.stopCh)
 	go c.namespaceInformer.Run(c.stopCh)
 	go c.configMapInformer.Run(c.stopCh)
 	go c.secretInformer.Run(c.stopCh)
 
 	// Wait for the caches to sync
+	logutil.Infof("K8S", "Waiting for informer caches to sync...")
 	if !cache.WaitForCacheSync(c.stopCh,
 		c.podInformer.HasSynced,
-		c.endpointInformer.HasSynced,
+		c.endpointSliceInformer.HasSynced,
 		c.serviceInformer.HasSynced,
 		c.namespaceInformer.HasSynced,
 		c.configMapInformer.HasSynced,
@@ -163,6 +180,7 @@ func (c *K8sClient) initialize() {
 		logutil.Infof("K8S", "Timed out waiting for caches to sync")
 		return
 	}
+	logutil.Infof("K8S", "Informer caches synced")
 
 	c.mu.Lock()
 	c.initialized = true
@@ -318,18 +336,89 @@ func (c *K8sClient) GetServicesByLabels(namespace string, labelSelector map[stri
 	return services, nil
 }
 
-// GetEndpointsForService returns endpoints for the specified service
+// GetEndpointsForService returns a synthesized core/v1 Endpoints object by aggregating EndpointSlices for the service
 func (c *K8sClient) GetEndpointsForService(namespace, serviceName string) (*corev1.Endpoints, error) {
 	if !c.IsInitialized() {
 		return nil, nil
 	}
 
-	key := namespace + "/" + serviceName
-	obj, exists, err := c.endpointStore.GetByKey(key)
-	if err != nil || !exists {
-		return nil, err
+	// Aggregate EndpointSlices labeled for this Service
+	var addresses []corev1.EndpointAddress
+	var notReady []corev1.EndpointAddress
+	portSet := map[string]corev1.EndpointPort{}
+
+	for _, obj := range c.endpointSliceStore.List() {
+		es := obj.(*discoveryv1.EndpointSlice)
+		if es.Namespace != namespace {
+			continue
+		}
+		if es.Labels[discoveryv1.LabelServiceName] != serviceName {
+			continue
+		}
+
+		// Collect ports from the slice (deduplicate by name/protocol/port key)
+		for _, p := range es.Ports {
+			if p.Port == nil {
+				continue
+			}
+			name := ""
+			if p.Name != nil {
+				name = *p.Name
+			}
+			protocol := corev1.ProtocolTCP
+			if p.Protocol != nil {
+				protocol = *p.Protocol
+			}
+			key := fmt.Sprintf("%s/%s/%d", protocol, name, *p.Port)
+			portSet[key] = corev1.EndpointPort{
+				Name:     name,
+				Port:     int32(*p.Port),
+				Protocol: protocol,
+			}
+		}
+
+		// Collect ready and not-ready addresses
+		for _, ep := range es.Endpoints {
+			ready := true
+			if ep.Conditions.Ready != nil {
+				ready = *ep.Conditions.Ready
+			}
+			for _, addr := range ep.Addresses {
+				endpointAddr := corev1.EndpointAddress{IP: addr}
+				if ep.TargetRef != nil {
+					endpointAddr.TargetRef = ep.TargetRef.DeepCopy()
+				}
+				if ready {
+					addresses = append(addresses, endpointAddr)
+				} else {
+					notReady = append(notReady, endpointAddr)
+				}
+			}
+		}
 	}
-	return obj.(*corev1.Endpoints), nil
+
+	// If nothing found, return nil without error
+	if len(addresses) == 0 {
+		return nil, nil
+	}
+
+	// Build unique ports slice
+	var ports []corev1.EndpointPort
+	for _, v := range portSet {
+		ports = append(ports, v)
+	}
+
+	eps := &corev1.Endpoints{
+		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Endpoints"},
+		ObjectMeta: metav1.ObjectMeta{Name: serviceName, Namespace: namespace},
+		Subsets: []corev1.EndpointSubset{
+			{
+				Addresses: addresses,
+				Ports:     ports,
+			},
+		},
+	}
+	return eps, nil
 }
 
 // GetNamespacesByLabels returns namespaces matching the specified labels
