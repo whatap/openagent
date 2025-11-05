@@ -42,10 +42,35 @@ type ConfigManager struct {
 	lastModTime        time.Time
 }
 
+// getPodNamespace returns the namespace of the current pod from the ServiceAccount mount
+func getPodNamespace() string {
+	// Try environment variable first (Downward API)
+	if namespace := os.Getenv("POD_NAMESPACE"); namespace != "" {
+		return namespace
+	}
+
+	// Try reading from ServiceAccount mount (available in Pod)
+	data, err := ioutil.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
 // NewConfigManager creates a new ConfigManager instance
 func NewConfigManager() *ConfigManager {
+	// Auto-detect namespace from Pod environment
+	namespace := getPodNamespace()
+	if namespace == "" {
+		// Fallback to default namespace
+		namespace = "whatap-monitoring"
+		logutil.Infof("CONFIG", "Could not detect pod namespace, using default: %s", namespace)
+	} else {
+		logutil.Infof("CONFIG", "Detected pod namespace: %s", namespace)
+	}
+
 	cm := &ConfigManager{
-		configMapNamespace: "whatap-monitoring",
+		configMapNamespace: namespace,
 		configMapName:      "whatap-open-agent-config",
 	}
 
