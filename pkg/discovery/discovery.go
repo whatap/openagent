@@ -59,6 +59,7 @@ type EndpointConfig struct {
 	Path                 string
 	Scheme               string
 	Interval             string
+	Timeout              string // HTTP request timeout (e.g., "10s", "1m")
 	TLSConfig            map[string]interface{}
 	MetricRelabelConfigs []interface{}
 	Params               map[string]interface{} // HTTP URL parameters

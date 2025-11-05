@@ -274,10 +274,18 @@ func loadCertificateFromSecret(secretSelector *SecretKeySelector) ([]byte, error
 }
 
 func (c *HTTPClient) ExecuteGet(targetURL string) (string, error) {
-	return c.ExecuteGetWithTLSConfig(targetURL, nil)
+	return c.ExecuteGetWithTLSConfigAndTimeout(targetURL, nil, 0)
+}
+
+func (c *HTTPClient) ExecuteGetWithTimeout(targetURL string, timeout time.Duration) (string, error) {
+	return c.ExecuteGetWithTLSConfigAndTimeout(targetURL, nil, timeout)
 }
 
 func (c *HTTPClient) ExecuteGetWithTLSConfig(targetURL string, tlsConfig *TLSConfig) (string, error) {
+	return c.ExecuteGetWithTLSConfigAndTimeout(targetURL, tlsConfig, 0)
+}
+
+func (c *HTTPClient) ExecuteGetWithTLSConfigAndTimeout(targetURL string, tlsConfig *TLSConfig, timeout time.Duration) (string, error) {
 	formattedURL := FormatURL(targetURL)
 	// Log the request
 	if configPkg.IsDebugEnabled() {
@@ -311,7 +319,17 @@ func (c *HTTPClient) ExecuteGetWithTLSConfig(targetURL string, tlsConfig *TLSCon
 
 	req.Header.Set("Accept", "application/json")
 
-	// Use the default client or create a new one with custom TLS config
+	// Determine the effective timeout
+	effectiveTimeout := timeout
+	if effectiveTimeout == 0 {
+		effectiveTimeout = 10 * time.Second // Default timeout
+	}
+
+	if configPkg.IsDebugEnabled() {
+		logutil.Debugf("HTTP_CLIENT", "Using timeout: %v", effectiveTimeout)
+	}
+
+	// Use the default client or create a new one with custom TLS config/timeout
 	client := c.client
 	if tlsConfig != nil {
 		// Validate TLS configuration
@@ -452,10 +470,15 @@ func (c *HTTPClient) ExecuteGetWithTLSConfig(targetURL string, tlsConfig *TLSCon
 			TLSClientConfig: customTLSConfig,
 		}
 
-		// Create a new client with the custom transport
+		// Create a new client with the custom transport and timeout
 		client = &http.Client{
-			Timeout:   c.client.Timeout,
+			Timeout:   effectiveTimeout,
 			Transport: transport,
+		}
+	} else if timeout != 0 {
+		// Create a new client with custom timeout but default transport
+		client = &http.Client{
+			Timeout: effectiveTimeout,
 		}
 	}
 

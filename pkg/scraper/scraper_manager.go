@@ -822,8 +822,16 @@ func (sm *ScraperManager) createScraperTaskFromTarget(target *discovery.Target) 
 	scraperTask.NodeName = nodeName
 	scraperTask.AddNodeLabel = addNodeLabel
 
-	// Extract params if present
+	// Extract params and timeout if present
 	if endpoint, ok := target.Metadata["endpoint"].(discovery.EndpointConfig); ok {
+		// Set timeout if provided
+		if endpoint.Timeout != "" {
+			scraperTask.Timeout = endpoint.Timeout
+			if config.IsDebugEnabled() {
+				logutil.Printf("DEBUG", "[SCRAPER] Set timeout for target %s: %s", targetName, endpoint.Timeout)
+			}
+		}
+
 		if endpoint.Params != nil {
 			// Convert params from interface{} to map[string][]string
 			params := make(map[string][]string)

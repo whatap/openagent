@@ -41,6 +41,7 @@ type ScraperTask struct {
 	Port                 string            // Used for PodMonitorType and ServiceMonitorType
 	Path                 string            // Used for all types
 	Scheme               string            // Used for all types
+	Timeout              string            // HTTP timeout for the scrape request (e.g., "10s", "1m")
 	MetricRelabelConfigs model.RelabelConfigs
 	TLSConfig            *client.TLSConfig
 	Params               map[string][]string // HTTP URL parameters for the endpoint
@@ -253,16 +254,27 @@ func (st *ScraperTask) Run() (*model.ScrapeRawData, error) {
 	// Capture collection time right before making the HTTP request
 	collectionTime := time.Now().UnixMilli()
 
+	// Parse timeout if provided
+	var timeout time.Duration
+	if st.Timeout != "" {
+		parsedTimeout, err := time.ParseDuration(st.Timeout)
+		if err != nil {
+			logutil.Infof("SCRAPER", "Invalid timeout format '%s' for target [%s], using default: %v", st.Timeout, st.TargetName, err)
+			timeout = 0 // Will use default in HTTP client
+		} else {
+			timeout = parsedTimeout
+			if config.IsDebugEnabled() {
+				logutil.Debugf("SCRAPER", "Using timeout %v for target [%s]", timeout, st.TargetName)
+			}
+		}
+	}
+
 	// Execute the HTTP request
 	httpClient := client.GetInstance()
 	var response string
 	var httpErr error
 
-	if st.TLSConfig != nil {
-		response, httpErr = httpClient.ExecuteGetWithTLSConfig(formattedURL, st.TLSConfig)
-	} else {
-		response, httpErr = httpClient.ExecuteGet(formattedURL)
-	}
+	response, httpErr = httpClient.ExecuteGetWithTLSConfigAndTimeout(formattedURL, st.TLSConfig, timeout)
 
 	if httpErr != nil {
 		logutil.Infof("SCRAPER", "Failed to collect from target [%s]: %v", st.TargetName, httpErr)

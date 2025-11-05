@@ -11,6 +11,7 @@ features:
           path: "/metrics"
           scheme: "http"
           interval: "30s"
+          timeout: "10s"  # HTTP request timeout (default: 10s, can be increased for slow endpoints)
           metricRelabelConfigs:
             - source_labels: [ __name__ ]
               regex: ".*"

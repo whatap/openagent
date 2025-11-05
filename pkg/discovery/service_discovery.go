@@ -759,6 +759,10 @@ func (sd *ServiceDiscoveryImpl) parseEndpointConfig(endpointMap map[string]inter
 		endpointConfig.Interval = interval
 	}
 
+	if timeout, ok := endpointMap["timeout"].(string); ok {
+		endpointConfig.Timeout = timeout
+	}
+
 	if tlsConfig, ok := endpointMap["tlsConfig"].(map[string]interface{}); ok {
 		endpointConfig.TLSConfig = tlsConfig
 	}
