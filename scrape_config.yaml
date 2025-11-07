@@ -12,6 +12,10 @@ features:
           scheme: "http"
           interval: "30s"
           timeout: "10s"  # HTTP request timeout (default: 10s, can be increased for slow endpoints)
+          # adaptiveTimeout:  # Optional: configure adaptive timeout behavior (defaults shown below)
+          #   enabled: true          # Enable adaptive timeout (default: true)
+          #   failureThreshold: 2    # Increase timeout after N consecutive failures (default: 2)
+          #   multiplier: 2.0        # Timeout multiplier on failure (default: 2.0)
           metricRelabelConfigs:
             - source_labels: [ __name__ ]
               regex: ".*"

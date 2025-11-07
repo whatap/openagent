@@ -52,6 +52,13 @@ type DiscoveryConfig struct {
 	Endpoints         []EndpointConfig
 }
 
+// AdaptiveTimeoutConfig represents adaptive timeout configuration
+type AdaptiveTimeoutConfig struct {
+	Enabled          bool    // Enable adaptive timeout (default: true)
+	FailureThreshold int     // Number of consecutive failures before increasing timeout (default: 2)
+	Multiplier       float64 // Timeout multiplier on failure (default: 2.0)
+}
+
 // EndpointConfig represents endpoint configuration
 type EndpointConfig struct {
 	Port                 string // For PodMonitor/ServiceMonitor
@@ -59,7 +66,8 @@ type EndpointConfig struct {
 	Path                 string
 	Scheme               string
 	Interval             string
-	Timeout              string // HTTP request timeout (e.g., "10s", "1m")
+	Timeout              string                 // HTTP request timeout (e.g., "10s", "1m")
+	AdaptiveTimeout      *AdaptiveTimeoutConfig // Adaptive timeout configuration
 	TLSConfig            map[string]interface{}
 	MetricRelabelConfigs []interface{}
 	Params               map[string]interface{} // HTTP URL parameters

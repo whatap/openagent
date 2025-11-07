@@ -19,12 +19,24 @@ import (
 
 // TargetScheduler manages individual target scraping with its own goroutine and ticker
 type TargetScheduler struct {
-	target   *discovery.Target
-	interval time.Duration
-	ticker   *time.Ticker
-	stopCh   chan struct{}
-	sm       *ScraperManager
-	mutex    sync.RWMutex // target 접근 보호
+	target     *discovery.Target
+	interval   time.Duration
+	ticker     *time.Ticker
+	stopCh     chan struct{}
+	sm         *ScraperManager
+	mutex      sync.RWMutex // target 접근 보호
+	inProgress bool         // 스크래핑 진행 중 플래그
+	progressMu sync.Mutex   // inProgress 플래그 보호
+
+	// 적응형 타임아웃을 위한 필드
+	adaptiveTimeoutEnabled bool          // 적응형 타임아웃 활성화 여부
+	failureThreshold       int           // 타임아웃 증가를 위한 연속 실패 임계값
+	timeoutMultiplier      float64       // 타임아웃 증가 배수
+	consecutiveTimeouts    int           // 연속 타임아웃 횟수
+	currentTimeout         time.Duration // 현재 적용 중인 타임아웃
+	baseTimeout            time.Duration // 기본(초기) 타임아웃
+	maxTimeout             time.Duration // 최대 타임아웃 제한
+	timeoutMu              sync.Mutex    // 타임아웃 관련 필드 보호
 }
 
 // updateTarget safely updates the target reference
@@ -39,6 +51,84 @@ func (ts *TargetScheduler) getTarget() *discovery.Target {
 	ts.mutex.RLock()
 	defer ts.mutex.RUnlock()
 	return ts.target
+}
+
+// tryStartScraping attempts to mark scraping as in progress
+// Returns true if scraping can start, false if already in progress
+func (ts *TargetScheduler) tryStartScraping() bool {
+	ts.progressMu.Lock()
+	defer ts.progressMu.Unlock()
+	if ts.inProgress {
+		return false
+	}
+	ts.inProgress = true
+	return true
+}
+
+// finishScraping marks scraping as completed
+func (ts *TargetScheduler) finishScraping() {
+	ts.progressMu.Lock()
+	defer ts.progressMu.Unlock()
+	ts.inProgress = false
+}
+
+// increaseTimeout increases the timeout after consecutive failures
+func (ts *TargetScheduler) increaseTimeout() time.Duration {
+	ts.timeoutMu.Lock()
+	defer ts.timeoutMu.Unlock()
+
+	// Check if adaptive timeout is enabled
+	if !ts.adaptiveTimeoutEnabled {
+		return ts.currentTimeout
+	}
+
+	// 연속 타임아웃 횟수 증가
+	ts.consecutiveTimeouts++
+
+	// failureThreshold 이상 연속 타임아웃 발생 시 타임아웃 증가
+	if ts.consecutiveTimeouts >= ts.failureThreshold {
+		// 설정된 multiplier로 증가
+		newTimeout := time.Duration(float64(ts.currentTimeout) * ts.timeoutMultiplier)
+
+		// 최대 타임아웃 제한 확인
+		if newTimeout > ts.maxTimeout {
+			newTimeout = ts.maxTimeout
+		}
+
+		if newTimeout != ts.currentTimeout {
+			logutil.Printf("WARN", "[SCRAPER] Target %s: Increasing timeout from %v to %v after %d consecutive timeouts",
+				ts.target.ID, ts.currentTimeout, newTimeout, ts.consecutiveTimeouts)
+			ts.currentTimeout = newTimeout
+		}
+
+		// 카운터 리셋 (다음 증가를 위해)
+		ts.consecutiveTimeouts = 0
+	}
+
+	return ts.currentTimeout
+}
+
+// resetTimeout resets the timeout to base value after successful scrape
+func (ts *TargetScheduler) resetTimeout() {
+	ts.timeoutMu.Lock()
+	defer ts.timeoutMu.Unlock()
+
+	// 타임아웃이 증가된 상태였다면
+	if ts.currentTimeout != ts.baseTimeout {
+		logutil.Printf("INFO", "[SCRAPER] Target %s: Resetting timeout to base value %v (was %v) after successful scrape",
+			ts.target.ID, ts.baseTimeout, ts.currentTimeout)
+		ts.currentTimeout = ts.baseTimeout
+	}
+
+	// 연속 타임아웃 카운터 리셋
+	ts.consecutiveTimeouts = 0
+}
+
+// getCurrentTimeout safely gets the current timeout value
+func (ts *TargetScheduler) getCurrentTimeout() time.Duration {
+	ts.timeoutMu.Lock()
+	defer ts.timeoutMu.Unlock()
+	return ts.currentTimeout
 }
 
 // ScraperManager is responsible for managing scraper tasks
@@ -564,12 +654,56 @@ func (sm *ScraperManager) startTargetScheduler(target *discovery.Target) {
 		interval = minimumInterval
 	}
 
+	// Parse base timeout from endpoint config
+	var baseTimeout time.Duration = 60 * time.Second // Default
+	var adaptiveTimeoutEnabled bool = true
+	var failureThreshold int = 2
+	var timeoutMultiplier float64 = 2.0
+
+	if endpoint, ok := target.Metadata["endpoint"].(discovery.EndpointConfig); ok {
+		if endpoint.Timeout != "" {
+			if parsedTimeout, err := time.ParseDuration(endpoint.Timeout); err == nil {
+				baseTimeout = parsedTimeout
+			} else {
+				logutil.Printf("WARN", "Failed to parse timeout '%s' for target %s, using default 10s: %v",
+					endpoint.Timeout, target.ID, err)
+			}
+		}
+
+		// Read adaptive timeout configuration
+		if endpoint.AdaptiveTimeout != nil {
+			adaptiveTimeoutEnabled = endpoint.AdaptiveTimeout.Enabled
+			failureThreshold = endpoint.AdaptiveTimeout.FailureThreshold
+			timeoutMultiplier = endpoint.AdaptiveTimeout.Multiplier
+		}
+	}
+
+	// Calculate max timeout (5x base or interval-5s, whichever is smaller)
+	// But ensure maxTimeout is never smaller than baseTimeout
+	maxTimeout := baseTimeout * 5
+	intervalBuffer := interval - 5*time.Second
+	if intervalBuffer > 0 && intervalBuffer < maxTimeout {
+		maxTimeout = intervalBuffer
+	}
+
+	// Ensure maxTimeout is at least baseTimeout
+	if maxTimeout < baseTimeout {
+		maxTimeout = baseTimeout
+	}
+
 	scheduler := &TargetScheduler{
-		target:   target,
-		interval: interval,
-		ticker:   time.NewTicker(interval),
-		stopCh:   make(chan struct{}),
-		sm:       sm,
+		target:                 target,
+		interval:               interval,
+		ticker:                 time.NewTicker(interval),
+		stopCh:                 make(chan struct{}),
+		sm:                     sm,
+		adaptiveTimeoutEnabled: adaptiveTimeoutEnabled,
+		failureThreshold:       failureThreshold,
+		timeoutMultiplier:      timeoutMultiplier,
+		baseTimeout:            baseTimeout,
+		currentTimeout:         baseTimeout,
+		maxTimeout:             maxTimeout,
+		consecutiveTimeouts:    0,
 	}
 
 	sm.schedulerMutex.Lock()
@@ -580,14 +714,31 @@ func (sm *ScraperManager) startTargetScheduler(target *discovery.Target) {
 	go func() {
 		defer scheduler.ticker.Stop()
 
-		logutil.Printf("INFO", "[SCRAPER] Started scheduler for target %s with interval %v", target.ID, interval)
+		if adaptiveTimeoutEnabled {
+			logutil.Printf("INFO", "[SCRAPER] Started scheduler for target %s (interval: %v, base timeout: %v, max timeout: %v, adaptive: enabled, threshold: %d, multiplier: %.1fx)",
+				target.ID, interval, baseTimeout, maxTimeout, failureThreshold, timeoutMultiplier)
+		} else {
+			logutil.Printf("INFO", "[SCRAPER] Started scheduler for target %s (interval: %v, timeout: %v, adaptive: disabled)",
+				target.ID, interval, baseTimeout)
+		}
 
 		for {
 			select {
 			case <-scheduler.ticker.C:
+				// Check if previous scrape is still in progress
+				if !scheduler.tryStartScraping() {
+					logutil.Printf("WARN", "[SCRAPER] Skipping scrape for target %s - previous request still in progress (possible slow endpoint or timeout too high)", target.ID)
+					continue
+				}
+
 				// Use getTarget() to get the latest target information
 				currentTarget := scheduler.getTarget()
-				sm.scrapeTarget(currentTarget)
+
+				// Scrape in a goroutine to avoid blocking the scheduler
+				go func() {
+					defer scheduler.finishScraping()
+					sm.scrapeTarget(currentTarget)
+				}()
 			case <-scheduler.stopCh:
 				logutil.Printf("INFO", "[SCRAPER] Stopped scheduler for target %s", target.ID)
 				return
@@ -640,10 +791,23 @@ func (sm *ScraperManager) scrapeTarget(target *discovery.Target) {
 		}
 	}()
 
+	// Get the scheduler for this target
+	sm.schedulerMutex.RLock()
+	scheduler := sm.targetSchedulers[target.ID]
+	sm.schedulerMutex.RUnlock()
+
+	if scheduler == nil {
+		logutil.Errorf("ERROR", "No scheduler found for target: %s\n", target.ID)
+		return
+	}
+
 	// Log scraping interval information (debug only)
 	if config.IsDebugEnabled() {
 		sm.logScrapingInterval(target)
 	}
+
+	// Get current adaptive timeout value
+	currentTimeout := scheduler.getCurrentTimeout()
 
 	// Create scraper task from target
 	scraperTask := sm.createScraperTaskFromTarget(target)
@@ -652,13 +816,34 @@ func (sm *ScraperManager) scrapeTarget(target *discovery.Target) {
 		return
 	}
 
-	// Run the scraper task with error handling
-	if err := sm.runScraperTaskWithError(scraperTask); err != nil {
-		logutil.Errorf("ERROR", "Failed to scrape target %s: %v\n", target.ID, err)
+	// Override timeout with adaptive value
+	scraperTask.Timeout = currentTimeout.String()
+
+	// Run the scraper task
+	rawData, err := scraperTask.Run()
+	if err != nil {
+		// Check if it's a timeout error
+		if strings.Contains(err.Error(), "context deadline exceeded") ||
+			strings.Contains(err.Error(), "Client.Timeout exceeded") {
+			// Timeout occurred - increase timeout
+			newTimeout := scheduler.increaseTimeout()
+			logutil.Errorf("ERROR", "Timeout scraping target %s (timeout: %v, next timeout: %v): %v\n",
+				target.ID, currentTimeout, newTimeout, err)
+		} else {
+			// Other error - don't adjust timeout
+			logutil.Errorf("ERROR", "Error scraping target %s: %v\n", target.ID, err)
+		}
+
 		// Still update last scrape time for tracking
 		sm.updateLastScrapingTime(target)
 		return
 	}
+
+	// Success - reset timeout to base value
+	scheduler.resetTimeout()
+
+	// Add the raw data to the queue
+	sm.rawQueue <- rawData
 
 	// Update last scrape time on success
 	sm.updateLastScrapingTime(target)

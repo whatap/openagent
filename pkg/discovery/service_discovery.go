@@ -780,5 +780,34 @@ func (sd *ServiceDiscoveryImpl) parseEndpointConfig(endpointMap map[string]inter
 		endpointConfig.Params = params
 	}
 
+	// Parse adaptiveTimeout configuration with defaults
+	if adaptiveTimeoutMap, ok := endpointMap["adaptiveTimeout"].(map[string]interface{}); ok {
+		adaptiveTimeout := &AdaptiveTimeoutConfig{
+			Enabled:          true, // Default: enabled
+			FailureThreshold: 2,    // Default: 2 consecutive failures
+			Multiplier:       2.0,  // Default: 2x multiplier
+		}
+
+		// Override defaults if provided
+		if enabled, ok := adaptiveTimeoutMap["enabled"].(bool); ok {
+			adaptiveTimeout.Enabled = enabled
+		}
+		if failureThreshold, ok := adaptiveTimeoutMap["failureThreshold"].(int); ok {
+			adaptiveTimeout.FailureThreshold = failureThreshold
+		}
+		if multiplier, ok := adaptiveTimeoutMap["multiplier"].(float64); ok {
+			adaptiveTimeout.Multiplier = multiplier
+		}
+
+		endpointConfig.AdaptiveTimeout = adaptiveTimeout
+	} else {
+		// If adaptiveTimeout is not specified, use defaults
+		endpointConfig.AdaptiveTimeout = &AdaptiveTimeoutConfig{
+			Enabled:          true, // Default: enabled
+			FailureThreshold: 2,    // Default: 2 consecutive failures
+			Multiplier:       2.0,  // Default: 2x multiplier
+		}
+	}
+
 	return endpointConfig
 }
