@@ -1,0 +1,19 @@
+# Test configuration to verify overlap prevention
+# This config sets up a scenario where timeout > interval to test the overlap prevention
+features:
+  openAgent:
+    enabled: true
+    targets:
+    - targetName: slow-endpoint-test
+      type: StaticEndpoints
+      enabled: true
+      endpoints:
+        - address: "localhost:9529"
+          path: "/metrics"
+          scheme: "http"
+          interval: "5s"   # Short interval
+          timeout: "15s"   # Longer timeout than interval - would cause overlap without protection
+          metricRelabelConfigs:
+            - source_labels: [ __name__ ]
+              regex: ".*"
+              action: keep

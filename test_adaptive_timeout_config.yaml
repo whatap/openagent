@@ -1,0 +1,97 @@
+# Test configuration for adaptive timeout feature
+# This demonstrates the new adaptiveTimeout configuration
+features:
+  openAgent:
+    enabled: true
+    targets:
+    # Example 1: Using custom adaptiveTimeout settings
+    - targetName: dcgm-exporter-custom
+      type: StaticEndpoints
+      enabled: true
+      endpoints:
+        - address: "172.31.82.99:9400"
+          path: "/metrics"
+          scheme: "http"
+          interval: "60s"
+          timeout: "10s"
+          adaptiveTimeout:
+            enabled: true
+            failureThreshold: 2      # Increase timeout after 2 consecutive failures (default: 2)
+            multiplier: 2.0          # Double the timeout on each increase (default: 2.0)
+          metricRelabelConfigs:
+            - source_labels: [ __name__ ]
+              regex: ".*"
+              action: keep
+
+    # Example 2: Using default adaptiveTimeout settings (will use defaults: enabled=true, failureThreshold=2, multiplier=2.0)
+    - targetName: metric-exporter-default
+      type: StaticEndpoints
+      enabled: true
+      endpoints:
+        - address: "localhost:9529"
+          path: "/metrics"
+          scheme: "http"
+          interval: "30s"
+          timeout: "10s"
+          # adaptiveTimeout not specified, will use defaults:
+          # enabled: true, failureThreshold: 2, multiplier: 2.0
+          metricRelabelConfigs:
+            - source_labels: [ __name__ ]
+              regex: ".*"
+              action: keep
+
+    # Example 3: Disabling adaptive timeout
+    - targetName: fast-endpoint
+      type: StaticEndpoints
+      enabled: true
+      endpoints:
+        - address: "localhost:8080"
+          path: "/metrics"
+          scheme: "http"
+          interval: "15s"
+          timeout: "5s"
+          adaptiveTimeout:
+            enabled: false           # Disable adaptive timeout for fast endpoints
+          metricRelabelConfigs:
+            - source_labels: [ __name__ ]
+              regex: ".*"
+              action: keep
+
+    # Example 4: Aggressive timeout increase strategy
+    - targetName: very-slow-endpoint
+      type: StaticEndpoints
+      enabled: true
+      endpoints:
+        - address: "slow.example.com:9100"
+          path: "/metrics"
+          scheme: "http"
+          interval: "120s"
+          timeout: "20s"
+          adaptiveTimeout:
+            enabled: true
+            failureThreshold: 1      # Increase after just 1 failure (more aggressive)
+            multiplier: 3.0          # Triple the timeout (faster increase)
+          metricRelabelConfigs:
+            - source_labels: [ __name__ ]
+              regex: ".*"
+              action: keep
+
+# Expected behavior:
+#
+# Example 1 (custom settings):
+# - Initial timeout: 10s
+# - After 2 consecutive timeouts: 20s (10s * 2.0)
+# - After 2 more consecutive timeouts: 40s (20s * 2.0)
+# - On success: resets to 10s
+#
+# Example 2 (defaults):
+# - Same as Example 1 (uses default failureThreshold=2, multiplier=2.0)
+#
+# Example 3 (disabled):
+# - Timeout always stays at 5s, no adaptive behavior
+#
+# Example 4 (aggressive):
+# - Initial timeout: 20s
+# - After 1 timeout: 60s (20s * 3.0)
+# - After 1 more timeout: 180s (60s * 3.0)
+# - On success: resets to 20s
