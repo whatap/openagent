@@ -10,6 +10,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
+	discoveryv1beta1 "k8s.io/api/discovery/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -39,6 +40,7 @@ type K8sClient struct {
 	initialized           bool
 	mu                    sync.RWMutex
 	configMapHandlers     []func(*corev1.ConfigMap)
+	useV1EndpointSlice    bool // true for v1 (k8s 1.21+), false for v1beta1 (k8s 1.17-1.20)
 }
 
 var (
@@ -118,6 +120,14 @@ func (c *K8sClient) initialize() {
 	}
 	logutil.Infof("K8S", "Kubernetes clientset created")
 
+	// Detect Kubernetes version to determine EndpointSlice API version
+	c.useV1EndpointSlice = c.detectEndpointSliceVersion()
+	if c.useV1EndpointSlice {
+		logutil.Infof("K8S", "Using EndpointSlice API version: discovery.k8s.io/v1 (Kubernetes 1.21+)")
+	} else {
+		logutil.Infof("K8S", "Using EndpointSlice API version: discovery.k8s.io/v1beta1 (Kubernetes 1.17-1.20)")
+	}
+
 	// Create a factory for informers
 	factory := informers.NewSharedInformerFactory(c.clientset, 10*time.Minute)
 	logutil.Infof("K8S", "Creating informers (resync=10m)...")
@@ -126,8 +136,12 @@ func (c *K8sClient) initialize() {
 	c.podInformer = factory.Core().V1().Pods().Informer()
 	c.podStore = c.podInformer.GetStore()
 
-	// Create EndpointSlice informer (replace deprecated Endpoints)
-	c.endpointSliceInformer = factory.Discovery().V1().EndpointSlices().Informer()
+	// Create EndpointSlice informer based on detected API version
+	if c.useV1EndpointSlice {
+		c.endpointSliceInformer = factory.Discovery().V1().EndpointSlices().Informer()
+	} else {
+		c.endpointSliceInformer = factory.Discovery().V1beta1().EndpointSlices().Informer()
+	}
 	c.endpointSliceStore = c.endpointSliceInformer.GetStore()
 
 	// Create service informer
@@ -187,6 +201,35 @@ func (c *K8sClient) initialize() {
 	c.mu.Unlock()
 
 	logutil.Infof("K8S", "Kubernetes client initialized successfully")
+}
+
+// detectEndpointSliceVersion detects which EndpointSlice API version to use
+// Returns true for v1 (Kubernetes 1.21+), false for v1beta1 (Kubernetes 1.17-1.20)
+func (c *K8sClient) detectEndpointSliceVersion() bool {
+	if c.clientset == nil {
+		logutil.Infof("K8S", "Clientset is nil, defaulting to v1beta1 EndpointSlice API")
+		return false
+	}
+
+	// Get server version
+	versionInfo, err := c.clientset.Discovery().ServerVersion()
+	if err != nil {
+		logutil.Infof("K8S", "Failed to get server version: %v, defaulting to v1beta1 EndpointSlice API", err)
+		return false
+	}
+
+	logutil.Infof("K8S", "Detected Kubernetes version: %s.%s", versionInfo.Major, versionInfo.Minor)
+
+	// Parse minor version (handle versions like "21", "21+", "21-gke.100")
+	var minorVersion int
+	_, err = fmt.Sscanf(versionInfo.Minor, "%d", &minorVersion)
+	if err != nil {
+		logutil.Infof("K8S", "Failed to parse minor version '%s': %v, defaulting to v1beta1 EndpointSlice API", versionInfo.Minor, err)
+		return false
+	}
+
+	// Use v1 for Kubernetes 1.21+, v1beta1 for 1.17-1.20
+	return minorVersion >= 21
 }
 
 // IsInitialized returns true if the client is initialized
@@ -342,7 +385,14 @@ func (c *K8sClient) GetEndpointsForService(namespace, serviceName string) (*core
 		return nil, nil
 	}
 
-	// Aggregate EndpointSlices labeled for this Service
+	if c.useV1EndpointSlice {
+		return c.getEndpointsFromV1(namespace, serviceName)
+	}
+	return c.getEndpointsFromV1Beta1(namespace, serviceName)
+}
+
+// getEndpointsFromV1 aggregates EndpointSlices from discovery.k8s.io/v1
+func (c *K8sClient) getEndpointsFromV1(namespace, serviceName string) (*corev1.Endpoints, error) {
 	var addresses []corev1.EndpointAddress
 	var notReady []corev1.EndpointAddress
 	portSet := map[string]corev1.EndpointPort{}
@@ -353,6 +403,86 @@ func (c *K8sClient) GetEndpointsForService(namespace, serviceName string) (*core
 			continue
 		}
 		if es.Labels[discoveryv1.LabelServiceName] != serviceName {
+			continue
+		}
+
+		// Collect ports from the slice (deduplicate by name/protocol/port key)
+		for _, p := range es.Ports {
+			if p.Port == nil {
+				continue
+			}
+			name := ""
+			if p.Name != nil {
+				name = *p.Name
+			}
+			protocol := corev1.ProtocolTCP
+			if p.Protocol != nil {
+				protocol = *p.Protocol
+			}
+			key := fmt.Sprintf("%s/%s/%d", protocol, name, *p.Port)
+			portSet[key] = corev1.EndpointPort{
+				Name:     name,
+				Port:     int32(*p.Port),
+				Protocol: protocol,
+			}
+		}
+
+		// Collect ready and not-ready addresses
+		for _, ep := range es.Endpoints {
+			ready := true
+			if ep.Conditions.Ready != nil {
+				ready = *ep.Conditions.Ready
+			}
+			for _, addr := range ep.Addresses {
+				endpointAddr := corev1.EndpointAddress{IP: addr}
+				if ep.TargetRef != nil {
+					endpointAddr.TargetRef = ep.TargetRef.DeepCopy()
+				}
+				if ready {
+					addresses = append(addresses, endpointAddr)
+				} else {
+					notReady = append(notReady, endpointAddr)
+				}
+			}
+		}
+	}
+
+	// If nothing found, return nil without error
+	if len(addresses) == 0 {
+		return nil, nil
+	}
+
+	// Build unique ports slice
+	var ports []corev1.EndpointPort
+	for _, v := range portSet {
+		ports = append(ports, v)
+	}
+
+	eps := &corev1.Endpoints{
+		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Endpoints"},
+		ObjectMeta: metav1.ObjectMeta{Name: serviceName, Namespace: namespace},
+		Subsets: []corev1.EndpointSubset{
+			{
+				Addresses: addresses,
+				Ports:     ports,
+			},
+		},
+	}
+	return eps, nil
+}
+
+// getEndpointsFromV1Beta1 aggregates EndpointSlices from discovery.k8s.io/v1beta1
+func (c *K8sClient) getEndpointsFromV1Beta1(namespace, serviceName string) (*corev1.Endpoints, error) {
+	var addresses []corev1.EndpointAddress
+	var notReady []corev1.EndpointAddress
+	portSet := map[string]corev1.EndpointPort{}
+
+	for _, obj := range c.endpointSliceStore.List() {
+		es := obj.(*discoveryv1beta1.EndpointSlice)
+		if es.Namespace != namespace {
+			continue
+		}
+		if es.Labels[discoveryv1beta1.LabelServiceName] != serviceName {
 			continue
 		}
 
