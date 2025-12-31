@@ -44,8 +44,14 @@ type K8sClient struct {
 }
 
 var (
-	instance *K8sClient
-	once     sync.Once
+	instance  *K8sClient
+	once      sync.Once
+	initMutex sync.Mutex
+	// lastInitAttempt tracks the last time initialization was attempted
+	lastInitAttempt time.Time
+	// initRetryInterval is the minimum interval between initialization attempts
+	initRetryInterval = 30 * time.Second
+
 	// kubeconfigPath is the path to the kubeconfig file
 	kubeconfigPath string
 	// standaloneMode indicates if the client should skip initialization
@@ -69,16 +75,35 @@ func GetInstance() *K8sClient {
 			stopCh:      make(chan struct{}),
 			initialized: false,
 		}
-		// Don't initialize if in standalone mode
-		if !standaloneMode {
+	})
+
+	// If not initialized and not in standalone mode, try to initialize
+	// This allows retrying if the previous attempt failed
+	if !standaloneMode && !instance.IsInitialized() {
+		initMutex.Lock()
+		defer initMutex.Unlock()
+
+		if !instance.IsInitialized() {
+			// Check if enough time has passed since the last attempt to avoid tight loops
+			if time.Since(lastInitAttempt) < initRetryInterval {
+				return instance
+			}
+
+			lastInitAttempt = time.Now()
 			instance.initialize()
 		}
-	})
+	}
+
 	return instance
 }
 
 // initialize initializes the Kubernetes client and informers
 func (c *K8sClient) initialize() {
+	startTime := time.Now()
+	defer func() {
+		logutil.Infof("K8S", "Initialization process finished in %v", time.Since(startTime))
+	}()
+
 	var config *rest.Config
 	var err error
 
@@ -111,6 +136,9 @@ func (c *K8sClient) initialize() {
 	// Suppress API server deprecation warnings (e.g., Endpoints deprecation) from client-go
 	config.WarningHandler = rest.NoWarnings{}
 	logutil.Infof("K8S", "Configured client-go to suppress API warning headers")
+
+	logutil.Infof("K8S", "K8s Config: Host=%s, APIPath=%s, Username=%s, QPS=%v, Burst=%v, Timeout=%v",
+		config.Host, config.APIPath, config.Username, config.QPS, config.Burst, config.Timeout)
 
 	// Create the clientset
 	c.clientset, err = kubernetes.NewForConfig(config)
@@ -191,7 +219,7 @@ func (c *K8sClient) initialize() {
 		c.namespaceInformer.HasSynced,
 		c.configMapInformer.HasSynced,
 		c.secretInformer.HasSynced) {
-		logutil.Infof("K8S", "Timed out waiting for caches to sync")
+		logutil.Infof("K8S", "Timed out waiting for caches to sync. Check network connectivity to K8s API server.")
 		return
 	}
 	logutil.Infof("K8S", "Informer caches synced")
