@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"open-agent/pkg/config"
+	"open-agent/pkg/model"
 )
 
 // Target represents a discovered scrape target
@@ -52,6 +53,7 @@ type DiscoveryConfig struct {
 	NamespaceSelector map[string]interface{}
 	Selector          map[string]interface{}
 	Endpoints         []EndpointConfig
+	RelabelConfigs    model.RelabelConfigs
 }
 
 // AdaptiveTimeoutConfig represents adaptive timeout configuration

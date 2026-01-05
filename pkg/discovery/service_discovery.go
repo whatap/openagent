@@ -6,7 +6,9 @@ import (
 	"net/url"
 	configPkg "open-agent/pkg/config"
 	"open-agent/pkg/k8s"
+	"open-agent/pkg/model"
 	"open-agent/tools/util/logutil"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -288,13 +290,49 @@ func (sd *ServiceDiscoveryImpl) processPodTarget(pod *corev1.Pod, config Discove
 		baseURL := fmt.Sprintf("%s://%s:%s%s", scheme, podIP, endpoint.Port, path)
 		url := buildURLWithParams(baseURL, endpoint.Params)
 
+		// 1. Create initial meta labels
+		metaLabels := make(map[string]string)
+		metaLabels["job"] = config.TargetName
+		metaLabels["__address__"] = fmt.Sprintf("%s:%s", podIP, endpoint.Port)
+		metaLabels["__scheme__"] = scheme
+		metaLabels["__metrics_path__"] = path
+
+		// Kubernetes Meta Labels
+		metaLabels["__meta_kubernetes_namespace"] = pod.Namespace
+		metaLabels["__meta_kubernetes_pod_name"] = pod.Name
+		metaLabels["__meta_kubernetes_pod_ip"] = podIP
+		metaLabels["__meta_kubernetes_pod_ready"] = fmt.Sprintf("%v", isReady)
+		metaLabels["__meta_kubernetes_pod_phase"] = string(pod.Status.Phase)
+		metaLabels["__meta_kubernetes_pod_node_name"] = pod.Spec.NodeName
+		metaLabels["__meta_kubernetes_pod_host_ip"] = pod.Status.HostIP
+		metaLabels["__meta_kubernetes_pod_uid"] = string(pod.UID)
+
+		// Pod Labels
+		for k, v := range pod.Labels {
+			labelName := "__meta_kubernetes_pod_label_" + sanitizeLabelName(k)
+			metaLabels[labelName] = v
+		}
+
+		// Pod Annotations
+		for k, v := range pod.Annotations {
+			labelName := "__meta_kubernetes_pod_annotation_" + sanitizeLabelName(k)
+			metaLabels[labelName] = v
+		}
+
+		// 2. Apply Relabeling
+		finalLabels, keep := ProcessRelabelConfigs(metaLabels, config.RelabelConfigs)
+		if !keep {
+			if configPkg.IsDebugEnabled() {
+				logutil.Debugf("DISCOVERY", "Target dropped by relabel configuration: %s", targetID)
+			}
+			continue
+		}
+
 		// Create or update target
 		target := &Target{
-			ID:  targetID,
-			URL: url,
-			Labels: map[string]string{
-				"job": config.TargetName,
-			},
+			ID:     targetID,
+			URL:    url,
+			Labels: finalLabels,
 			Metadata: map[string]interface{}{
 				"targetName":           config.TargetName,
 				"type":                 config.Type,
@@ -553,16 +591,47 @@ func (sd *ServiceDiscoveryImpl) processServiceTarget(service *corev1.Service, co
 					baseURL := fmt.Sprintf("%s://%s:%d%s", scheme, address.IP, endpointPort, path)
 					url := buildURLWithParams(baseURL, endpointConfig.Params)
 
+					// 1. Create initial meta labels
+					metaLabels := make(map[string]string)
+					metaLabels["job"] = config.TargetName
+					metaLabels["__address__"] = fmt.Sprintf("%s:%d", address.IP, endpointPort)
+					metaLabels["__scheme__"] = scheme
+					metaLabels["__metrics_path__"] = path
+
+					metaLabels["__meta_kubernetes_namespace"] = service.Namespace
+					metaLabels["__meta_kubernetes_service_name"] = service.Name
+					metaLabels["__meta_kubernetes_service_cluster_ip"] = service.Spec.ClusterIP
+					metaLabels["__meta_kubernetes_service_type"] = string(service.Spec.Type)
+
+					// Service Labels
+					for k, v := range service.Labels {
+						metaLabels["__meta_kubernetes_service_label_"+sanitizeLabelName(k)] = v
+					}
+					// Service Annotations
+					for k, v := range service.Annotations {
+						metaLabels["__meta_kubernetes_service_annotation_"+sanitizeLabelName(k)] = v
+					}
+
+					// Pod info from TargetRef
+					if address.TargetRef != nil {
+						metaLabels["__meta_kubernetes_pod_name"] = address.TargetRef.Name
+						metaLabels["__meta_kubernetes_pod_kind"] = address.TargetRef.Kind
+					}
+
+					// 2. Apply Relabeling
+					finalLabels, keep := ProcessRelabelConfigs(metaLabels, config.RelabelConfigs)
+					if !keep {
+						if configPkg.IsDebugEnabled() {
+							logutil.Debugf("DISCOVERY", "Service target dropped by relabel configuration: %s", targetID)
+						}
+						continue
+					}
+
 					// Create target
 					target := &Target{
-						ID:  targetID,
-						URL: url,
-						Labels: map[string]string{
-							"job":       config.TargetName,
-							"namespace": service.Namespace,
-							"service":   service.Name,
-							"instance":  fmt.Sprintf("%s:%d", address.IP, endpointPort),
-						},
+						ID:     targetID,
+						URL:    url,
+						Labels: finalLabels,
 						Metadata: map[string]interface{}{
 							"targetName":           config.TargetName,
 							"type":                 config.Type,
@@ -593,13 +662,47 @@ func (sd *ServiceDiscoveryImpl) processServiceTarget(service *corev1.Service, co
 					baseURL := fmt.Sprintf("%s://%s:%d%s", scheme, address.IP, endpointPort, path)
 					url := buildURLWithParams(baseURL, endpointConfig.Params)
 
+					// 1. Create initial meta labels
+					metaLabels := make(map[string]string)
+					metaLabels["job"] = config.TargetName
+					metaLabels["__address__"] = fmt.Sprintf("%s:%d", address.IP, endpointPort)
+					metaLabels["__scheme__"] = scheme
+					metaLabels["__metrics_path__"] = path
+
+					metaLabels["__meta_kubernetes_namespace"] = service.Namespace
+					metaLabels["__meta_kubernetes_service_name"] = service.Name
+					metaLabels["__meta_kubernetes_service_cluster_ip"] = service.Spec.ClusterIP
+					metaLabels["__meta_kubernetes_service_type"] = string(service.Spec.Type)
+
+					// Service Labels
+					for k, v := range service.Labels {
+						metaLabels["__meta_kubernetes_service_label_"+sanitizeLabelName(k)] = v
+					}
+					// Service Annotations
+					for k, v := range service.Annotations {
+						metaLabels["__meta_kubernetes_service_annotation_"+sanitizeLabelName(k)] = v
+					}
+
+					// Pod info from TargetRef
+					if address.TargetRef != nil {
+						metaLabels["__meta_kubernetes_pod_name"] = address.TargetRef.Name
+						metaLabels["__meta_kubernetes_pod_kind"] = address.TargetRef.Kind
+					}
+
+					// 2. Apply Relabeling
+					finalLabels, keep := ProcessRelabelConfigs(metaLabels, config.RelabelConfigs)
+					if !keep {
+						if configPkg.IsDebugEnabled() {
+							logutil.Debugf("DISCOVERY", "Service target dropped by relabel configuration: %s", targetID)
+						}
+						continue
+					}
+
 					// Create target
 					target := &Target{
-						ID:  targetID,
-						URL: url,
-						Labels: map[string]string{
-							"job": config.TargetName,
-						},
+						ID:     targetID,
+						URL:    url,
+						Labels: finalLabels,
 						Metadata: map[string]interface{}{
 							"targetName":           config.TargetName,
 							"type":                 config.Type,
@@ -722,6 +825,11 @@ func (sd *ServiceDiscoveryImpl) parseDiscoveryConfig(targetConfig map[string]int
 		discoveryConfig.Selector = selector
 	}
 
+	// Parse relabelConfigs
+	if relabelConfigs, ok := targetConfig["relabelConfigs"].([]interface{}); ok {
+		discoveryConfig.RelabelConfigs = model.ParseRelabelConfigs(relabelConfigs)
+	}
+
 	// Parse endpoints
 	if endpoints, ok := targetConfig["endpoints"].([]interface{}); ok {
 		discoveryConfig.Endpoints = make([]EndpointConfig, 0, len(endpoints))
@@ -835,4 +943,10 @@ func parseSecretKeySelector(m map[string]interface{}) *configPkg.SecretKeySelect
 		s.Namespace = ns
 	}
 	return s
+}
+
+// sanitizeLabelName replaces invalid characters in label names with underscores
+func sanitizeLabelName(name string) string {
+	reg := regexp.MustCompile("[^a-zA-Z0-9_]")
+	return reg.ReplaceAllString(name, "_")
 }

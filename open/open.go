@@ -3,9 +3,6 @@ package open
 import (
 	"context"
 	"fmt"
-	"github.com/whatap/gointernal/net/secure"
-	"github.com/whatap/golib/logger/logfile"
-	"github.com/whatap/golib/util/dateutil"
 	"math/rand"
 	"open-agent/pkg/config"
 	"open-agent/pkg/discovery"
@@ -18,6 +15,10 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/whatap/gointernal/net/secure"
+	"github.com/whatap/golib/logger/logfile"
+	"github.com/whatap/golib/util/dateutil"
 )
 
 const (
@@ -85,10 +86,14 @@ func BootOpenAgent(version, commitHash string, logger *logfile.FileLogger) {
 		os.Exit(1)
 	}
 
-	hostSlice := strings.Split(hosts, "/")
+	hostSlice := strings.FieldsFunc(hosts, func(r rune) bool {
+		return r == '/' || r == ','
+	})
 	// Parse server list
 	for _, hostSliced := range hostSlice {
-		servers = append(servers, fmt.Sprintf("%s:%d", hostSliced, port))
+		if hostTrimmed := strings.TrimSpace(hostSliced); len(hostTrimmed) > 0 {
+			servers = append(servers, fmt.Sprintf("%s:%d", hostTrimmed, port))
+		}
 	}
 
 	// Set logger level based on debug configuration from whatap.conf
