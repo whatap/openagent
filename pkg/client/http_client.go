@@ -22,26 +22,19 @@ const (
 	kubernetesServicePort    = "KUBERNETES_SERVICE_PORT"
 )
 
-// SecretKeySelector defines a reference to a secret key
-type SecretKeySelector struct {
-	Name      string `json:"name" yaml:"name"`
-	Key       string `json:"key" yaml:"key"`
-	Namespace string `json:"namespace,omitempty" yaml:"namespace,omitempty"`
-}
-
 // TLSConfig represents TLS configuration options
 type TLSConfig struct {
 	// InsecureSkipVerify disables target certificate validation
 	InsecureSkipVerify bool `json:"insecureSkipVerify,omitempty" yaml:"insecureSkipVerify,omitempty"`
 
 	// CA certificate configuration via Kubernetes Secret
-	CASecret *SecretKeySelector `json:"caSecret,omitempty" yaml:"caSecret,omitempty"`
+	CASecret *configPkg.SecretKeySelector `json:"caSecret,omitempty" yaml:"caSecret,omitempty"`
 
 	// Client certificate configuration via Kubernetes Secret
-	CertSecret *SecretKeySelector `json:"certSecret,omitempty" yaml:"certSecret,omitempty"`
+	CertSecret *configPkg.SecretKeySelector `json:"certSecret,omitempty" yaml:"certSecret,omitempty"`
 
 	// Client private key configuration via Kubernetes Secret
-	KeySecret *SecretKeySelector `json:"keySecret,omitempty" yaml:"keySecret,omitempty"`
+	KeySecret *configPkg.SecretKeySelector `json:"keySecret,omitempty" yaml:"keySecret,omitempty"`
 
 	// CA certificate file path (alternative to CASecret)
 	CAFile string `json:"caFile,omitempty" yaml:"caFile,omitempty"`
@@ -240,7 +233,7 @@ func loadCertificateFromFile(filePath string) ([]byte, error) {
 }
 
 // loadCertificateFromSecret loads a certificate from a Kubernetes Secret
-func loadCertificateFromSecret(secretSelector *SecretKeySelector) ([]byte, error) {
+func loadCertificateFromSecret(secretSelector *configPkg.SecretKeySelector) ([]byte, error) {
 	if secretSelector == nil {
 		return nil, fmt.Errorf("secret selector is nil")
 	}
@@ -273,19 +266,33 @@ func loadCertificateFromSecret(secretSelector *SecretKeySelector) ([]byte, error
 	return data, nil
 }
 
+func resolveSecretString(selector *configPkg.SecretKeySelector) (string, error) {
+	data, err := loadCertificateFromSecret(selector)
+	if err != nil {
+		return "", err
+	}
+	// Trim newlines just in case
+	return strings.TrimSpace(string(data)), nil
+}
+
 func (c *HTTPClient) ExecuteGet(targetURL string) (string, error) {
-	return c.ExecuteGetWithTLSConfigAndTimeout(targetURL, nil, 0)
+	return c.ExecuteGetWithAuth(targetURL, nil, nil, 0)
 }
 
 func (c *HTTPClient) ExecuteGetWithTimeout(targetURL string, timeout time.Duration) (string, error) {
-	return c.ExecuteGetWithTLSConfigAndTimeout(targetURL, nil, timeout)
+	return c.ExecuteGetWithAuth(targetURL, nil, nil, timeout)
 }
 
 func (c *HTTPClient) ExecuteGetWithTLSConfig(targetURL string, tlsConfig *TLSConfig) (string, error) {
-	return c.ExecuteGetWithTLSConfigAndTimeout(targetURL, tlsConfig, 0)
+	return c.ExecuteGetWithAuth(targetURL, tlsConfig, nil, 0)
 }
 
+// Deprecated: Use ExecuteGetWithAuth instead
 func (c *HTTPClient) ExecuteGetWithTLSConfigAndTimeout(targetURL string, tlsConfig *TLSConfig, timeout time.Duration) (string, error) {
+	return c.ExecuteGetWithAuth(targetURL, tlsConfig, nil, timeout)
+}
+
+func (c *HTTPClient) ExecuteGetWithAuth(targetURL string, tlsConfig *TLSConfig, basicAuth *configPkg.BasicAuthConfig, timeout time.Duration) (string, error) {
 	formattedURL := FormatURL(targetURL)
 	// Log the request
 	if configPkg.IsDebugEnabled() {
@@ -297,23 +304,58 @@ func (c *HTTPClient) ExecuteGetWithTLSConfigAndTimeout(targetURL string, tlsConf
 		return "", fmt.Errorf("error creating request: %v", err)
 	}
 
-	// Try to add service account token for authentication in K8s environment only
-	k8sClient := k8s.GetInstance()
-	if k8sClient.IsInitialized() {
-		token, err := GetServiceAccountToken()
-		if err == nil {
-			req.Header.Set("Authorization", "Bearer "+token)
+	// Authentication
+	authSet := false
+
+	// 1. Basic Auth
+	if basicAuth != nil {
+		username := ""
+		password := ""
+
+		if basicAuth.Username != nil {
+			var err error
+			username, err = resolveSecretString(basicAuth.Username)
+			if err != nil {
+				logutil.Printf("WARN", "Failed to resolve username for Basic Auth: %v", err)
+			}
+		}
+		if basicAuth.Password != nil {
+			var err error
+			password, err = resolveSecretString(basicAuth.Password)
+			if err != nil {
+				logutil.Printf("WARN", "Failed to resolve password for Basic Auth: %v", err)
+			}
+		}
+
+		if username != "" || password != "" {
+			req.SetBasicAuth(username, password)
+			authSet = true
 			if configPkg.IsDebugEnabled() {
-				logutil.Debugf("HTTP_CLIENT", "Added Authorization header with Bearer token")
+				logutil.Debugf("HTTP_CLIENT", "Added Basic Auth header")
+			}
+		}
+	}
+
+	// 2. Service Account Token (Bearer Token) - only if Basic Auth is not set
+	if !authSet {
+		// Try to add service account token for authentication in K8s environment only
+		k8sClient := k8s.GetInstance()
+		if k8sClient.IsInitialized() {
+			token, err := GetServiceAccountToken()
+			if err == nil {
+				req.Header.Set("Authorization", "Bearer "+token)
+				if configPkg.IsDebugEnabled() {
+					logutil.Debugf("HTTP_CLIENT", "Added Authorization header with Bearer token")
+				}
+			} else {
+				if configPkg.IsDebugEnabled() {
+					logutil.Debugf("HTTP_CLIENT", "No service account token available: %v", err)
+				}
 			}
 		} else {
 			if configPkg.IsDebugEnabled() {
-				logutil.Debugf("HTTP_CLIENT", "No service account token available: %v", err)
+				logutil.Debugf("HTTP_CLIENT", "Not in Kubernetes environment, skipping service account token")
 			}
-		}
-	} else {
-		if configPkg.IsDebugEnabled() {
-			logutil.Debugf("HTTP_CLIENT", "Not in Kubernetes environment, skipping service account token")
 		}
 	}
 

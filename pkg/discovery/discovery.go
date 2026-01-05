@@ -3,6 +3,8 @@ package discovery
 import (
 	"context"
 	"time"
+
+	"open-agent/pkg/config"
 )
 
 // Target represents a discovered scrape target
@@ -69,6 +71,7 @@ type EndpointConfig struct {
 	Timeout              string                 // HTTP request timeout (e.g., "10s", "1m")
 	AdaptiveTimeout      *AdaptiveTimeoutConfig // Adaptive timeout configuration
 	TLSConfig            map[string]interface{}
+	BasicAuth            *config.BasicAuthConfig
 	MetricRelabelConfigs []interface{}
 	Params               map[string]interface{} // HTTP URL parameters
 	AddNodeLabel         bool

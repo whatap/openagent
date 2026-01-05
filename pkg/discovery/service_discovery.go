@@ -767,6 +767,17 @@ func (sd *ServiceDiscoveryImpl) parseEndpointConfig(endpointMap map[string]inter
 		endpointConfig.TLSConfig = tlsConfig
 	}
 
+	if basicAuth, ok := endpointMap["basicAuth"].(map[string]interface{}); ok {
+		authConfig := &configPkg.BasicAuthConfig{}
+		if username, ok := basicAuth["username"].(map[string]interface{}); ok {
+			authConfig.Username = parseSecretKeySelector(username)
+		}
+		if password, ok := basicAuth["password"].(map[string]interface{}); ok {
+			authConfig.Password = parseSecretKeySelector(password)
+		}
+		endpointConfig.BasicAuth = authConfig
+	}
+
 	if metricRelabelConfigs, ok := endpointMap["metricRelabelConfigs"].([]interface{}); ok {
 		endpointConfig.MetricRelabelConfigs = metricRelabelConfigs
 	}
@@ -810,4 +821,18 @@ func (sd *ServiceDiscoveryImpl) parseEndpointConfig(endpointMap map[string]inter
 	}
 
 	return endpointConfig
+}
+
+func parseSecretKeySelector(m map[string]interface{}) *configPkg.SecretKeySelector {
+	s := &configPkg.SecretKeySelector{}
+	if name, ok := m["name"].(string); ok {
+		s.Name = name
+	}
+	if key, ok := m["key"].(string); ok {
+		s.Key = key
+	}
+	if ns, ok := m["namespace"].(string); ok {
+		s.Namespace = ns
+	}
+	return s
 }

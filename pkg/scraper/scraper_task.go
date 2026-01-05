@@ -44,6 +44,7 @@ type ScraperTask struct {
 	Timeout              string            // HTTP timeout for the scrape request (e.g., "10s", "1m")
 	MetricRelabelConfigs model.RelabelConfigs
 	TLSConfig            *client.TLSConfig
+	BasicAuth            *config.BasicAuthConfig
 	Params               map[string][]string // HTTP URL parameters for the endpoint
 	NodeName             string              // Used to store the node name for PodMonitor targets
 	AddNodeLabel         bool                // Controls whether to add node label to metrics
@@ -274,7 +275,7 @@ func (st *ScraperTask) Run() (*model.ScrapeRawData, error) {
 	var response string
 	var httpErr error
 
-	response, httpErr = httpClient.ExecuteGetWithTLSConfigAndTimeout(formattedURL, st.TLSConfig, timeout)
+	response, httpErr = httpClient.ExecuteGetWithAuth(formattedURL, st.TLSConfig, st.BasicAuth, timeout)
 
 	if httpErr != nil {
 		logutil.Infof("SCRAPER", "Failed to collect from target [%s]: %v", st.TargetName, httpErr)

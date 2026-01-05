@@ -1017,6 +1017,14 @@ func (sm *ScraperManager) createScraperTaskFromTarget(target *discovery.Target) 
 			}
 		}
 
+		// Set BasicAuth if provided
+		if endpoint.BasicAuth != nil {
+			scraperTask.BasicAuth = endpoint.BasicAuth
+			if config.IsDebugEnabled() {
+				logutil.Printf("DEBUG", "[SCRAPER] Set BasicAuth for target %s", targetName)
+			}
+		}
+
 		if endpoint.Params != nil {
 			// Convert params from interface{} to map[string][]string
 			params := make(map[string][]string)
