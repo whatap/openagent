@@ -43,6 +43,7 @@ type ScraperTask struct {
 	Scheme               string            // Used for all types
 	Timeout              string            // HTTP timeout for the scrape request (e.g., "10s", "1m")
 	MetricRelabelConfigs model.RelabelConfigs
+	Labels               map[string]string // Target labels
 	TLSConfig            *client.TLSConfig
 	BasicAuth            *config.BasicAuthConfig
 	Params               map[string][]string // HTTP URL parameters for the endpoint
@@ -51,7 +52,7 @@ type ScraperTask struct {
 }
 
 // NewStaticEndpointsScraperTask creates a new ScraperTask instance for a StaticEndpoints target
-func NewStaticEndpointsScraperTask(targetName string, targetURL string, path string, scheme string, metricRelabelConfigs model.RelabelConfigs, tlsConfig *client.TLSConfig) *ScraperTask {
+func NewStaticEndpointsScraperTask(targetName string, targetURL string, path string, scheme string, metricRelabelConfigs model.RelabelConfigs, labels map[string]string, tlsConfig *client.TLSConfig) *ScraperTask {
 	return &ScraperTask{
 		TargetName:           targetName,
 		TargetType:           StaticEndpointsType,
@@ -59,6 +60,7 @@ func NewStaticEndpointsScraperTask(targetName string, targetURL string, path str
 		Path:                 path,
 		Scheme:               scheme,
 		MetricRelabelConfigs: metricRelabelConfigs,
+		Labels:               labels,
 		TLSConfig:            tlsConfig,
 	}
 }
@@ -288,9 +290,9 @@ func (st *ScraperTask) Run() (*model.ScrapeRawData, error) {
 	// Create a ScrapeRawData instance with the response
 	var rawData *model.ScrapeRawData
 	if st.NodeName != "" && st.AddNodeLabel {
-		rawData = model.NewScrapeRawDataWithNodeName(targetURL, response, st.MetricRelabelConfigs, st.NodeName, st.AddNodeLabel, collectionTime)
+		rawData = model.NewScrapeRawDataWithNodeName(targetURL, response, st.MetricRelabelConfigs, st.Labels, st.NodeName, st.AddNodeLabel, collectionTime)
 	} else {
-		rawData = model.NewScrapeRawData(targetURL, response, st.MetricRelabelConfigs, collectionTime)
+		rawData = model.NewScrapeRawData(targetURL, response, st.MetricRelabelConfigs, st.Labels, collectionTime)
 	}
 
 	// Log detailed information

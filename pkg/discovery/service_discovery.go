@@ -294,6 +294,7 @@ func (sd *ServiceDiscoveryImpl) processPodTarget(pod *corev1.Pod, config Discove
 		metaLabels := make(map[string]string)
 		metaLabels["job"] = config.TargetName
 		metaLabels["__address__"] = fmt.Sprintf("%s:%s", podIP, endpoint.Port)
+		metaLabels["instance"] = metaLabels["__address__"] // Add default instance label
 		metaLabels["__scheme__"] = scheme
 		metaLabels["__metrics_path__"] = path
 
@@ -595,6 +596,7 @@ func (sd *ServiceDiscoveryImpl) processServiceTarget(service *corev1.Service, co
 					metaLabels := make(map[string]string)
 					metaLabels["job"] = config.TargetName
 					metaLabels["__address__"] = fmt.Sprintf("%s:%d", address.IP, endpointPort)
+					metaLabels["instance"] = metaLabels["__address__"] // Add default instance label
 					metaLabels["__scheme__"] = scheme
 					metaLabels["__metrics_path__"] = path
 
@@ -666,6 +668,7 @@ func (sd *ServiceDiscoveryImpl) processServiceTarget(service *corev1.Service, co
 					metaLabels := make(map[string]string)
 					metaLabels["job"] = config.TargetName
 					metaLabels["__address__"] = fmt.Sprintf("%s:%d", address.IP, endpointPort)
+					metaLabels["instance"] = metaLabels["__address__"] // Add default instance label
 					metaLabels["__scheme__"] = scheme
 					metaLabels["__metrics_path__"] = path
 

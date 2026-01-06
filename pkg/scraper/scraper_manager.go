@@ -992,6 +992,12 @@ func (sm *ScraperManager) createScraperTaskFromTarget(target *discovery.Target) 
 	path := extractPathFromURL(target.URL)
 	scheme := extractSchemeFromURL(target.URL)
 
+	// Deep copy labels
+	labels := make(map[string]string)
+	for k, v := range target.Labels {
+		labels[k] = v
+	}
+
 	// Create the scraper task using StaticEndpoints approach
 	// ServiceDiscovery has already resolved the complete URL, so we use it directly
 	scraperTask := NewStaticEndpointsScraperTask(
@@ -1000,6 +1006,7 @@ func (sm *ScraperManager) createScraperTaskFromTarget(target *discovery.Target) 
 		path,
 		scheme,
 		relabelConfigs,
+		labels,
 		tlsConfig,
 	)
 

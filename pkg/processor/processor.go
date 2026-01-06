@@ -101,8 +101,15 @@ func (p *Processor) processRawData(rawData *model.ScrapeRawData) {
 		if !math.IsNaN(openMx.Value) && !math.IsInf(openMx.Value, 0) {
 			totalValidMetrics++
 
-			// Add instance label to each valid OpenMx
-			openMx.AddLabel("instance", rawData.TargetURL)
+			// Add target labels (including job and instance)
+			for k, v := range rawData.Labels {
+				openMx.AddLabel(k, v)
+			}
+
+			// Add instance label if missing (fallback for backward compatibility)
+			if _, exists := rawData.Labels["instance"]; !exists {
+				openMx.AddLabel("instance", rawData.TargetURL)
+			}
 
 			// Add node label if available and enabled
 			if rawData.NodeName != "" && rawData.AddNodeLabel {
@@ -125,7 +132,15 @@ func (p *Processor) processRawData(rawData *model.ScrapeRawData) {
 	nodePropertiesAdded := 0
 
 	for _, openMxHelp := range conversionResult.GetOpenMxHelpList() {
-		openMxHelp.Put("instance", rawData.TargetURL)
+		// Add target labels (including job and instance)
+		for k, v := range rawData.Labels {
+			openMxHelp.Put(k, v)
+		}
+
+		// Add instance property if missing
+		if _, exists := rawData.Labels["instance"]; !exists {
+			openMxHelp.Put("instance", rawData.TargetURL)
+		}
 
 		// Add node property if available and enabled
 		if rawData.NodeName != "" && rawData.AddNodeLabel {
