@@ -128,32 +128,6 @@ func (p *Processor) processRawData(rawData *model.ScrapeRawData) {
 	// Replace the original list with the filtered list
 	conversionResult.OpenMxList = filteredOpenMxList
 
-	// Add instance property to each OpenMxHelp
-	nodePropertiesAdded := 0
-
-	for _, openMxHelp := range conversionResult.GetOpenMxHelpList() {
-		// Add target labels (including job and instance)
-		for k, v := range rawData.Labels {
-			openMxHelp.Put(k, v)
-		}
-
-		// Add instance property if missing
-		if _, exists := rawData.Labels["instance"]; !exists {
-			openMxHelp.Put("instance", rawData.TargetURL)
-		}
-
-		// Add node property if available and enabled
-		if rawData.NodeName != "" && rawData.AddNodeLabel {
-			openMxHelp.Put("node", rawData.NodeName)
-			nodePropertiesAdded++
-		}
-	}
-
-	// Summary logging for node property addition
-	if config.IsDebugEnabled() && nodePropertiesAdded > 0 {
-		logutil.Debugf("PROCESSOR", "Added node properties to %d help items", nodePropertiesAdded)
-	}
-
 	// Summary logging for processed data
 	if config.IsDebugEnabled() {
 		validMetrics := 0
