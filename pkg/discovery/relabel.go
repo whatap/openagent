@@ -13,14 +13,21 @@ import (
 // ProcessRelabelConfigs applies relabel configs to the given labels.
 // Returns the resulting labels and a boolean indicating whether the target should be kept.
 func ProcessRelabelConfigs(labels map[string]string, configs model.RelabelConfigs) (map[string]string, bool) {
-	if len(configs) == 0 {
-		return labels, true
-	}
-
 	// Make a copy of labels to work on
 	resultLabels := make(map[string]string)
 	for k, v := range labels {
 		resultLabels[k] = v
+	}
+
+	if len(configs) == 0 {
+		// Clean up meta labels (starting with __) and return
+		finalLabels := make(map[string]string)
+		for k, v := range resultLabels {
+			if !strings.HasPrefix(k, "__") {
+				finalLabels[k] = v
+			}
+		}
+		return finalLabels, true
 	}
 
 	for _, config := range configs {
