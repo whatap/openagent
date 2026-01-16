@@ -381,28 +381,43 @@ func parseRecordLine(line string, timestamp int64) (*model.OpenMx, error) {
 			}
 		}
 
-		// Parse value
+		// Parse value and optional timestamp
+		// Format: "value" or "value timestamp"
 		rest := strings.TrimSpace(line[endBrace+1:])
-		if rest == "+Inf" {
+		parts := strings.Fields(rest)
+		if len(parts) == 0 {
+			return nil, fmt.Errorf("invalid metric format: missing value")
+		}
+
+		valStr := parts[0]
+		if valStr == "+Inf" {
 			value = math.Inf(1) // Positive infinity
-		} else if rest == "-Inf" {
+		} else if valStr == "-Inf" {
 			value = math.Inf(-1) // Negative infinity
 		} else {
 			var err error
-			value, err = strconv.ParseFloat(rest, 64)
+			value, err = strconv.ParseFloat(valStr, 64)
 			if err != nil {
 				return nil, fmt.Errorf("invalid metric value: %v", err)
 			}
 		}
+
+		// If timestamp is present in the metric line, use it instead of the provided timestamp
+		if len(parts) >= 2 {
+			if ts, err := strconv.ParseInt(parts[1], 10, 64); err == nil {
+				timestamp = ts
+			}
+		}
 	} else {
 		// No labels
-		spaceIndex := strings.Index(line, " ")
-		if spaceIndex == -1 {
+		// Format: "metric_name value" or "metric_name value timestamp"
+		parts := strings.Fields(line)
+		if len(parts) < 2 {
 			return nil, fmt.Errorf("invalid metric format: missing value")
 		}
 
-		metricName = strings.TrimSpace(line[:spaceIndex])
-		valStr := strings.TrimSpace(line[spaceIndex+1:])
+		metricName = parts[0]
+		valStr := parts[1]
 
 		if valStr == "+Inf" {
 			value = math.Inf(1) // Positive infinity
@@ -413,6 +428,13 @@ func parseRecordLine(line string, timestamp int64) (*model.OpenMx, error) {
 			value, err = strconv.ParseFloat(valStr, 64)
 			if err != nil {
 				return nil, fmt.Errorf("invalid metric value: %v", err)
+			}
+		}
+
+		// If timestamp is present in the metric line, use it instead of the provided timestamp
+		if len(parts) >= 3 {
+			if ts, err := strconv.ParseInt(parts[2], 10, 64); err == nil {
+				timestamp = ts
 			}
 		}
 	}
