@@ -6,7 +6,7 @@ toolchain go1.24.3
 
 require (
 	github.com/cakturk/go-netstat v0.0.0-20200220111822-e5b49efee7a5
-	github.com/containerd/containerd v1.7.27
+	github.com/containerd/containerd v1.7.29
 	github.com/docker/docker v28.2.2+incompatible
 	github.com/google/gopacket v1.1.19
 	github.com/shirou/gopsutil v3.21.11+incompatible
@@ -14,7 +14,7 @@ require (
 	github.com/stretchr/testify v1.10.0
 	github.com/whatap/gointernal v0.0.0
 	github.com/whatap/golib v0.0.35
-	golang.org/x/net v0.33.0
+	golang.org/x/net v0.42.0
 	gopkg.in/yaml.v2 v2.4.0
 	k8s.io/api v0.29.0
 	k8s.io/apimachinery v0.29.0
@@ -95,12 +95,12 @@ require (
 	go.opentelemetry.io/otel v1.36.0 // indirect
 	go.opentelemetry.io/otel/metric v1.36.0 // indirect
 	go.opentelemetry.io/otel/trace v1.36.0 // indirect
-	golang.org/x/oauth2 v0.22.0 // indirect
-	golang.org/x/sync v0.14.0 // indirect
-	golang.org/x/sys v0.28.0 // indirect
-	golang.org/x/term v0.27.0 // indirect
-	golang.org/x/text v0.25.0 // indirect
-	golang.org/x/time v0.3.0 // indirect
+	golang.org/x/oauth2 v0.30.0 // indirect
+	golang.org/x/sync v0.16.0 // indirect
+	golang.org/x/sys v0.34.0 // indirect
+	golang.org/x/term v0.33.0 // indirect
+	golang.org/x/text v0.27.0 // indirect
+	golang.org/x/time v0.12.0 // indirect
 	google.golang.org/genproto v0.0.0-20231211222908-989df2bf70f3 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240903143218-8af14fe29dc1 // indirect
 	google.golang.org/grpc v1.67.0 // indirect
