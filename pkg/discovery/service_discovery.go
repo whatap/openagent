@@ -9,6 +9,7 @@ import (
 	"open-agent/pkg/model"
 	"open-agent/tools/util/logutil"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -18,12 +19,13 @@ import (
 
 // ServiceDiscoveryImpl implements service discovery for various target types including Kubernetes and static endpoints
 type ServiceDiscoveryImpl struct {
-	configManager *configPkg.ConfigManager
-	k8sClient     *k8s.K8sClient
-	configs       []DiscoveryConfig
-	targets       map[string]*Target
-	targetsMutex  sync.RWMutex
-	stopCh        chan struct{}
+	configManager   *configPkg.ConfigManager
+	k8sClient       *k8s.K8sClient
+	configs         []DiscoveryConfig
+	targets         map[string]*Target
+	targetsMutex    sync.RWMutex
+	stopCh          chan struct{}
+	lastTargetNames []string
 }
 
 // NewServiceDiscovery creates a new ServiceDiscoveryImpl instance
@@ -99,7 +101,10 @@ func (sd *ServiceDiscoveryImpl) LoadTargets(targets []map[string]interface{}) er
 		sd.configs = append(sd.configs, parseDiscoveryConfig)
 	}
 
-	logutil.Infof("INFO", "Loaded %d discovery configurations", len(sd.configs))
+	logutil.Printf("DISCOVERY", "Loaded %d discovery configurations", len(sd.configs))
+	for _, cfg := range sd.configs {
+		logutil.Printf("DISCOVERY", " - Target: %s (Type: %s, Enabled: %t)", cfg.TargetName, cfg.Type, cfg.Enabled)
+	}
 	return nil
 }
 
@@ -193,6 +198,31 @@ func (sd *ServiceDiscoveryImpl) discoverTargets() {
 
 	if configPkg.IsDebugEnabled() {
 		logutil.Debugf("DISCOVERY", "Using %d current discovery configurations from latest ConfigManager data", len(currentConfigs))
+	}
+
+	// Track active targets
+	var newTargetNames []string
+	for _, cfg := range currentConfigs {
+		newTargetNames = append(newTargetNames, fmt.Sprintf("%s(%s)", cfg.TargetName, cfg.Type))
+	}
+	sort.Strings(newTargetNames)
+
+	// Check if changed
+	changed := false
+	if len(newTargetNames) != len(sd.lastTargetNames) {
+		changed = true
+	} else {
+		for i := range newTargetNames {
+			if newTargetNames[i] != sd.lastTargetNames[i] {
+				changed = true
+				break
+			}
+		}
+	}
+
+	if changed {
+		sd.lastTargetNames = newTargetNames
+		logutil.Printf("DISCOVERY", "Active Targets: %s", strings.Join(newTargetNames, ", "))
 	}
 
 	// Execute discovery with latest configurations

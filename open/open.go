@@ -13,6 +13,7 @@ import (
 	"open-agent/pkg/sender"
 	"open-agent/tools/util/logutil"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -68,10 +69,10 @@ func BootOpenAgent(version, commitHash string, logger *logfile.FileLogger) {
 		commitHash = "unknown"
 	}
 
-	logutil.Infof("START", "\nWHATAP Open Agent Starting\n")
-	logutil.Infof("START", " Version: %s\n", version)
-	logutil.Infof("START", " Build: %s\n", commitHash)
-	logutil.Infof("START", " Started at: %s\n\n", time.Now().Format("2006-01-02 15:04:05 MST"))
+	logutil.Printf("START", "\nWHATAP Open Agent Starting\n")
+	logutil.Printf("START", " Version: %s\n", version)
+	logutil.Printf("START", " Build: %s\n", commitHash)
+	logutil.Printf("START", " Started at: %s\n\n", time.Now().Format("2006-01-02 15:04:05 MST"))
 
 	// Get configuration values using the config package
 	servers := make([]string, 0)
@@ -96,13 +97,41 @@ func BootOpenAgent(version, commitHash string, logger *logfile.FileLogger) {
 		}
 	}
 
-	// Set logger level based on debug configuration from whatap.conf
-	if config.IsDebugEnabled() {
-		logutil.SetLevel(0) // LOG_LEVEL_DEBUG = 0
-		logutil.Infof("CONFIG", "Debug logging enabled from whatap.conf")
+	// Set logger level based on log_level configuration or debug configuration
+	configLogLevel := config.Get("log_level")
+	var logLevel int = -1
+
+	if configLogLevel != "" {
+		// Try to parse as integer first
+		if level, err := strconv.Atoi(configLogLevel); err == nil {
+			logLevel = level
+		} else {
+			// Try to parse as string
+			switch strings.ToUpper(configLogLevel) {
+			case "DEBUG":
+				logLevel = logutil.LOG_LEVEL_DEBUG
+			case "INFO":
+				logLevel = logutil.LOG_LEVEL_INFO
+			case "WARN", "WARNING":
+				logLevel = logutil.LOG_LEVEL_WARN
+			case "ERROR":
+				logLevel = logutil.LOG_LEVEL_ERROR
+			}
+		}
+	}
+
+	if logLevel != -1 {
+		logutil.SetLevel(logLevel)
+		logutil.Infof("CONFIG", "Log level set to %d (%s) from log_level config", logLevel, configLogLevel)
 	} else {
-		logutil.SetLevel(1) // LOG_LEVEL_INFO = 1
-		logutil.Infof("CONFIG", "Debug logging disabled from whatap.conf")
+		// Set logger level based on debug configuration from whatap.conf
+		if config.IsDebugEnabled() {
+			logutil.SetLevel(logutil.LOG_LEVEL_DEBUG) // LOG_LEVEL_DEBUG = 0
+			logutil.Infof("CONFIG", "Debug logging enabled from whatap.conf")
+		} else {
+			logutil.SetLevel(logutil.LOG_LEVEL_INFO) // LOG_LEVEL_INFO = 1
+			logutil.Infof("CONFIG", "Debug logging disabled from whatap.conf")
+		}
 	}
 
 	// Initialize secure communication

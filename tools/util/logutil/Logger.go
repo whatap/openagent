@@ -474,8 +474,10 @@ func Debugf(id string, format string, v ...interface{}) {
 }
 
 func (this *Logger) info(id string, message string) {
-	message = this.build(id, message)
-	this.printlnStd(message, false)
+	if this.Level <= LOG_LEVEL_INFO {
+		message = this.build(id, message)
+		this.printlnStd(message, false)
+	}
 }
 
 func (this *Logger) debug(id string, message string) {
@@ -504,35 +506,49 @@ func (this *Logger) SetLevel(lv int) {
 
 // Errorf logs an error message, patterned after log.Printf.
 func (this *Logger) Errorf(format string, args ...interface{}) {
-	Printf("ERROR", format, args...)
+	if this.Level <= LOG_LEVEL_ERROR {
+		Printf("ERROR", format, args...)
+	}
 }
 
 // Error logs an error message, patterned after log.Print.
 func (this *Logger) Error(args ...interface{}) {
-	Println("ERROR", args...)
+	if this.Level <= LOG_LEVEL_ERROR {
+		Println("ERROR", args...)
+	}
 }
 
 // Warnf logs a warning message, patterned after log.Printf.
 func (this *Logger) Warnf(format string, args ...interface{}) {
-	Printf("WARN", format, args...)
+	if this.Level <= LOG_LEVEL_WARN {
+		Printf("WARN", format, args...)
+	}
 }
 
 // Warn logs a warning message, patterned after log.Print.
 func (this *Logger) Warn(args ...interface{}) {
-	Println("WARN", args...)
+	if this.Level <= LOG_LEVEL_WARN {
+		Println("WARN", args...)
+	}
 }
 
 // Infof logs an information message, patterned after log.Printf.
 func (this *Logger) Infof(format string, args ...interface{}) {
-	Printf("INFO", format, args...)
+	if this.Level <= LOG_LEVEL_INFO {
+		Printf("INFO", format, args...)
+	}
 }
 
 // Info logs an information message, patterned after log.Print.
 func (this *Logger) Info(args ...interface{}) {
-	Println("INFO", args...)
+	if this.Level <= LOG_LEVEL_INFO {
+		Println("INFO", args...)
+	}
 }
 func (this *Logger) Infoln(args ...interface{}) {
-	Println("INFO", args...)
+	if this.Level <= LOG_LEVEL_INFO {
+		Println("INFO", args...)
+	}
 
 }
 
