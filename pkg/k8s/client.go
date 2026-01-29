@@ -356,12 +356,12 @@ func (c *K8sClient) GetPodsInNamespace(namespace string) ([]*corev1.Pod, error) 
 // GetPodsByLabels returns pods matching the specified labels in the specified namespace
 func (c *K8sClient) GetPodsByLabels(namespace string, labelSelector map[string]string) ([]*corev1.Pod, error) {
 	if !c.IsInitialized() {
-		logutil.Printf("DEBUG", "K8s client not initialized for GetPodsByLabels")
+		logutil.Debugf("K8S", "K8s client not initialized for GetPodsByLabels")
 		return nil, nil
 	}
 
 	selector := labels.SelectorFromSet(labelSelector)
-	logutil.Printf("DEBUG", "GetPodsByLabels - namespace: %s, labelSelector: %+v, selector: %s", namespace, labelSelector, selector.String())
+	logutil.Debugf("K8S", "GetPodsByLabels - namespace: %s, labelSelector: %+v, selector: %s", namespace, labelSelector, selector.String())
 
 	var pods []*corev1.Pod
 	totalPodsInStore := 0
@@ -373,18 +373,18 @@ func (c *K8sClient) GetPodsByLabels(namespace string, labelSelector map[string]s
 
 		if pod.Namespace == namespace {
 			podsInNamespace++
-			logutil.Printf("DEBUG", "GetPodsByLabels - Checking pod %s/%s with labels: %+v", pod.Namespace, pod.Name, pod.Labels)
+			logutil.Debugf("K8S", "GetPodsByLabels - Checking pod %s/%s with labels: %+v", pod.Namespace, pod.Name, pod.Labels)
 
 			if selector.Matches(labels.Set(pod.Labels)) {
-				logutil.Printf("DEBUG", "GetPodsByLabels - Pod %s/%s MATCHES selector", pod.Namespace, pod.Name)
+				logutil.Debugf("K8S", "GetPodsByLabels - Pod %s/%s MATCHES selector", pod.Namespace, pod.Name)
 				pods = append(pods, pod)
 			} else {
-				logutil.Printf("DEBUG", "GetPodsByLabels - Pod %s/%s does NOT match selector", pod.Namespace, pod.Name)
+				logutil.Debugf("K8S", "GetPodsByLabels - Pod %s/%s does NOT match selector", pod.Namespace, pod.Name)
 			}
 		}
 	}
 
-	logutil.Printf("DEBUG", "GetPodsByLabels - Total pods in store: %d, pods in namespace %s: %d, matching pods: %d",
+	logutil.Infof("K8S", "GetPodsByLabels - Total pods in store: %d, pods in namespace %s: %d, matching pods: %d",
 		totalPodsInStore, namespace, podsInNamespace, len(pods))
 
 	return pods, nil

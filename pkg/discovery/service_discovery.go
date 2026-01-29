@@ -150,7 +150,7 @@ func (sd *ServiceDiscoveryImpl) discoveryLoop() {
 	// Initial discovery
 	sd.discoverTargets()
 
-	// Periodic discovery every 30 seconds (like Prometheus)
+	// Periodic discovery every 15 seconds (like Prometheus)
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
 
