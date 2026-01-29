@@ -3,11 +3,11 @@
 # Format: MAJOR.MINOR.PATCH (Semantic Versioning)
 
 # Current version
-VERSION=1.6.0
+VERSION=1.7.0
 
 # Version components
 MAJOR=1
-MINOR=6
+MINOR=7
 PATCH=0
 
 # Build metadata

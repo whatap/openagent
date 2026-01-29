@@ -86,6 +86,10 @@ func (p *Processor) processRawData(rawData *model.ScrapeRawData) {
 		return
 	}
 
+	// Set target and timestamp info
+	conversionResult.SetTarget(rawData.TargetURL)
+	conversionResult.SetCollectionTime(rawData.CollectionTime)
+
 	// Apply metric relabeling if configured
 	if len(rawData.MetricRelabelConfigs) > 0 {
 		logutil.Infof("PROCESSOR", "Applying %d metric relabel configs", len(rawData.MetricRelabelConfigs))

@@ -787,7 +787,7 @@ func (sm *ScraperManager) scrapeTarget(target *discovery.Target) {
 	// Add panic recovery to prevent individual target failures from crashing the scraper
 	defer func() {
 		if r := recover(); r != nil {
-			logutil.Infoln("ERROR", "Panic recovered while scraping target %s: %v", target.ID, r)
+			logutil.Infof("ERROR", "Panic recovered while scraping target %s: %v", target.ID, r)
 		}
 	}()
 
