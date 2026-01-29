@@ -530,8 +530,9 @@ func (sm *ScraperManager) targetManagementLoop() {
 	if managementInterval < 5*time.Second {
 		managementInterval = 5 * time.Second
 	}
-
-	logutil.Printf("INFO", "[SCRAPER] Starting target management loop with interval: %v", managementInterval)
+	if config.IsDebugEnabled() {
+		logutil.Debugf("ScraperManager", "[SCRAPER] Starting target management loop with interval: %v", managementInterval)
+	}
 	ticker := time.NewTicker(managementInterval)
 	defer ticker.Stop()
 

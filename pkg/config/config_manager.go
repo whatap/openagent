@@ -143,8 +143,9 @@ func (cm *ConfigManager) LoadConfig() error {
 		cm.mu.Lock()
 		cm.config = config
 		cm.mu.Unlock()
-
-		logutil.Infof("CONFIG", "Configuration loaded from ConfigMap informer cache")
+		if IsDebugEnabled() {
+			logutil.Debugf("CONFIG", "Configuration loaded from ConfigMap informer cache")
+		}
 		return nil
 	}
 
@@ -197,10 +198,12 @@ func (cm *ConfigManager) GetScrapeInterval() string {
 
 func (cm *ConfigManager) GetScrapeConfigs() []map[string]interface{} {
 	// Always reload configuration from Informer cache in Kubernetes environment
-	logutil.Infof("GetScrapeConfigs", "START")
+	if IsDebugEnabled() {
+		logutil.Debugf("GetScrapeConfigs", "START")
+	}
 	if cm.k8sClient != nil && cm.k8sClient.IsInitialized() {
-		logutil.Infof("GetScrapeConfigs", "Kubernetes environment detected, using ConfigMap informer cache")
 		if IsDebugEnabled() {
+			logutil.Debugf("GetScrapeConfigs", "Kubernetes environment detected, using ConfigMap informer cache")
 			logutil.Debugf("CONFIG", "GetScrapeConfigs: Reloading latest configuration from Informer cache")
 		}
 		if err := cm.LoadConfig(); err != nil {
