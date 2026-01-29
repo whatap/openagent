@@ -356,7 +356,7 @@ func (c *K8sClient) GetPodsInNamespace(namespace string) ([]*corev1.Pod, error) 
 // GetPodsByLabels returns pods matching the specified labels in the specified namespace
 func (c *K8sClient) GetPodsByLabels(namespace string, labelSelector map[string]string) ([]*corev1.Pod, error) {
 	if !c.IsInitialized() {
-		logutil.Debugf("K8S", "K8s client not initialized for GetPodsByLabels")
+		logutil.Infof("K8S", "K8s client not initialized for GetPodsByLabels")
 		return nil, nil
 	}
 

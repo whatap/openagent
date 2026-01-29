@@ -151,7 +151,7 @@ func BootOpenAgent(version, commitHash string, logger *logfile.FileLogger) {
 		// The code below will not be executed in test mode
 	}
 
-	logger.Infoln("BootOpenAgent-Test mode disabled, starting agent")
+	logutil.Infoln("BootOpenAgent, test-mode disabled")
 	// Create channels for communication between components
 	rawQueue := make(chan *model.ScrapeRawData, RawQueueSize)
 	processedQueue := make(chan *model.ConversionResult, ProcessedQueueSize)

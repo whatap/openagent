@@ -289,9 +289,7 @@ func (sd *ServiceDiscoveryImpl) discoverPodTargets(config DiscoveryConfig) {
 			sd.processPodTarget(pod, config)
 		}
 	}
-	if configPkg.IsDebugEnabled() {
-		logutil.Debugf("DISCOVERY", "PodMonitor %s - Total pods discovered: %d", config.TargetName, totalPodsFound)
-	}
+	logutil.Infof("DISCOVERY", "PodMonitor %s - Total pods discovered: %d", config.TargetName, totalPodsFound)
 }
 
 func (sd *ServiceDiscoveryImpl) processPodTarget(pod *corev1.Pod, config DiscoveryConfig) {
@@ -300,8 +298,9 @@ func (sd *ServiceDiscoveryImpl) processPodTarget(pod *corev1.Pod, config Discove
 
 	for _, endpoint := range config.Endpoints {
 		// Include path in targetID to ensure uniqueness when multiple endpoints use the same port
+		// Use / as separator to distinguish from hyphens in pod names
 		pathSafe := strings.ReplaceAll(endpoint.Path, "/", "-")
-		targetID := fmt.Sprintf("%s-%s-%s-%s-%s", config.TargetName, pod.Namespace, pod.Name, endpoint.Port, pathSafe)
+		targetID := fmt.Sprintf("%s/%s/%s/%s%s", config.TargetName, pod.Namespace, pod.Name, endpoint.Port, pathSafe)
 
 		// Get pod IP
 		podIP := pod.Status.PodIP
@@ -423,9 +422,7 @@ func (sd *ServiceDiscoveryImpl) updateTarget(newTarget *Target) {
 	if !exists {
 		// New target
 		sd.targets[newTarget.ID] = newTarget
-		if configPkg.IsDebugEnabled() {
-			logutil.Debugf("DISCOVERY", "Added new target: %s (state: %s)", newTarget.ID, newTarget.State)
-		}
+		logutil.Infof("DISCOVERY", "Added new target: %s (state: %s)", newTarget.ID, newTarget.State)
 	} else {
 		// Always update target to ensure metadata changes are reflected
 		// This includes metricRelabelConfigs changes from ConfigMap updates
@@ -611,8 +608,9 @@ func (sd *ServiceDiscoveryImpl) processServiceTarget(service *corev1.Service, co
 				// Process ready addresses
 				for addrIdx, address := range subset.Addresses {
 					// Include path in targetID to ensure uniqueness when multiple endpoints use the same port
+					// Use / as separator to distinguish from hyphens in service names
 					pathSafe := strings.ReplaceAll(endpointConfig.Path, "/", "-")
-					targetID := fmt.Sprintf("%s-%s-%s-%s-%d-%d-%s", config.TargetName, service.Namespace, service.Name, endpointConfig.Port, subsetIdx, addrIdx, pathSafe)
+					targetID := fmt.Sprintf("%s/%s/%s/%s/%d/%d%s", config.TargetName, service.Namespace, service.Name, endpointConfig.Port, subsetIdx, addrIdx, pathSafe)
 
 					// Determine scheme
 					scheme := sd.determineScheme(endpointConfig.Scheme, endpointConfig.Port, endpointConfig.TLSConfig)
