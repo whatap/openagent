@@ -180,7 +180,9 @@ COPY --from=builder /workspace/openagent /app/openagent
 COPY scrape_config.yaml /app/scrape_config.yaml
 COPY whatap.conf /app/whatap.conf
 
-RUN mkdir -p /app/logs
+RUN mkdir -p /app/logs && \
+    chmod 666 /app/whatap.conf && \
+    chmod 777 /app/logs
 ENV WHATAP_HOME=/app
 
 ENTRYPOINT ["/app/openagent"]
@@ -368,8 +370,7 @@ function extract_and_upload_binary() {
     local binary_name="openagent-${arch}"
     
     # Extract binary from Docker image using docker create/cp approach
-    # This avoids the "exec format error" when extracting cross-architecture binaries
-    echo "🔧 Creating temporary container for ${arch} binary extraction..."
+    # This avoids the "exec format error" when extracting cross-architecture binariesㅁ    echo "🔧 Creating temporary container for ${arch} binary extraction..."
     local container_id=$(docker create --platform "linux/${arch}" "${IMG}")
     
     if [[ -z "$container_id" ]]; then
