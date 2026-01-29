@@ -23,7 +23,7 @@ COPY --from=builder /app/scrape_config.yaml /app/scrape_config.yaml
 COPY --from=builder /app/whatap.conf /app/whatap.conf
 
 RUN mkdir -p /app/logs && \
-    chmod 666 /app/whatap.conf && \
+    chmod 777 /app/whatap.conf && \
     chmod 777 /app/logs
 ENV WHATAP_HOME=/app
 
