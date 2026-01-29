@@ -3,12 +3,12 @@
 # Format: MAJOR.MINOR.PATCH (Semantic Versioning)
 
 # Current version
-VERSION=1.7.1
+VERSION=1.7.2
 
 # Version components
 MAJOR=1
 MINOR=7
-PATCH=1
+PATCH=2
 
 # Build metadata
 BUILD_NUMBER=27
@@ -16,7 +16,7 @@ RELEASE_DATE=2025-07-29
 RELEASE_NOTES=Version 1.3.27 - Production build
 
 # Git information (will be updated automatically during build)
-GIT_COMMIT=8852e72
+GIT_COMMIT=85e333a
 GIT_BRANCH=master
 GIT_TAG=
 
