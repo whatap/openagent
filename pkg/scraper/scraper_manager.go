@@ -1102,18 +1102,6 @@ func extractPathFromURL(url string) string {
 	return hostPort[pathIndex:]
 }
 
-func (sm *ScraperManager) runScraperTaskWithError(scraperTask *ScraperTask) error {
-	rawData, err := scraperTask.Run()
-	if err != nil {
-		logutil.Errorf("ERROR", "Error running scraper task: %v\n", err)
-		return err
-	}
-
-	// Add the raw data to the queue
-	sm.rawQueue <- rawData
-	return nil
-}
-
 // AddRawData adds raw data to the queue
 func (sm *ScraperManager) AddRawData(data *model.ScrapeRawData) {
 	sm.rawQueue <- data

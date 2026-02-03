@@ -226,22 +226,48 @@ func (sd *ServiceDiscoveryImpl) discoverTargets() {
 	}
 
 	// Execute discovery with latest configurations
+	activeTargetIDs := make(map[string]bool)
 	for _, discoveryConfig := range currentConfigs {
 		switch discoveryConfig.Type {
 		case "PodMonitor":
-			sd.discoverPodTargets(discoveryConfig)
+			sd.discoverPodTargets(discoveryConfig, activeTargetIDs)
 		case "ServiceMonitor":
-			sd.discoverServiceTargets(discoveryConfig)
+			sd.discoverServiceTargets(discoveryConfig, activeTargetIDs)
 		case "StaticEndpoints":
-			sd.discoverStaticTargets(discoveryConfig)
+			sd.discoverStaticTargets(discoveryConfig, activeTargetIDs)
 		default:
 			logutil.Infof("WARN", "Unknown target type: %s", discoveryConfig.Type)
 		}
 	}
+
+	// Clean up stale targets
+	sd.cleanupStaleTargets(activeTargetIDs)
+}
+
+// cleanupStaleTargets removes targets that were not found in the current discovery cycle
+func (sd *ServiceDiscoveryImpl) cleanupStaleTargets(activeTargetIDs map[string]bool) {
+	sd.targetsMutex.Lock()
+	defer sd.targetsMutex.Unlock()
+
+	var targetsToRemove []string
+	for targetID := range sd.targets {
+		if !activeTargetIDs[targetID] {
+			targetsToRemove = append(targetsToRemove, targetID)
+		}
+	}
+
+	for _, targetID := range targetsToRemove {
+		if configPkg.IsDebugEnabled() {
+			logutil.Debugf("DISCOVERY", "Removing stale target: %s", targetID)
+		} else {
+			logutil.Infof("DISCOVERY", "Removing stale target: %s", targetID)
+		}
+		delete(sd.targets, targetID)
+	}
 }
 
 // discoverPodTargets discovers Pod-based targets
-func (sd *ServiceDiscoveryImpl) discoverPodTargets(config DiscoveryConfig) {
+func (sd *ServiceDiscoveryImpl) discoverPodTargets(config DiscoveryConfig, activeTargetIDs map[string]bool) {
 	if configPkg.IsDebugEnabled() {
 		logutil.Debugf("DISCOVERY", "Discovering PodMonitor targets for %s", config.TargetName)
 	}
@@ -286,13 +312,13 @@ func (sd *ServiceDiscoveryImpl) discoverPodTargets(config DiscoveryConfig) {
 			if configPkg.IsDebugEnabled() {
 				logutil.Debugf("DISCOVERY", "PodMonitor %s - Processing pod %s/%s with labels: %+v", config.TargetName, pod.Namespace, pod.Name, pod.Labels)
 			}
-			sd.processPodTarget(pod, config)
+			sd.processPodTarget(pod, config, activeTargetIDs)
 		}
 	}
 	logutil.Infof("DISCOVERY", "PodMonitor %s - Total pods discovered: %d", config.TargetName, totalPodsFound)
 }
 
-func (sd *ServiceDiscoveryImpl) processPodTarget(pod *corev1.Pod, config DiscoveryConfig) {
+func (sd *ServiceDiscoveryImpl) processPodTarget(pod *corev1.Pod, config DiscoveryConfig, activeTargetIDs map[string]bool) {
 	// Check if pod is ready
 	isReady := sd.isPodReady(pod)
 
@@ -393,6 +419,7 @@ func (sd *ServiceDiscoveryImpl) processPodTarget(pod *corev1.Pod, config Discove
 		}
 
 		sd.updateTarget(target)
+		activeTargetIDs[target.ID] = true
 	}
 }
 
@@ -506,7 +533,7 @@ func (sd *ServiceDiscoveryImpl) determineScheme(endpointScheme, port string, tls
 }
 
 // ServiceMonitor and StaticEndpoints discovery implementations
-func (sd *ServiceDiscoveryImpl) discoverServiceTargets(config DiscoveryConfig) {
+func (sd *ServiceDiscoveryImpl) discoverServiceTargets(config DiscoveryConfig, activeTargetIDs map[string]bool) {
 	if configPkg.IsDebugEnabled() {
 		logutil.Debugf("DISCOVERY", "Discovering ServiceMonitor targets for %s", config.TargetName)
 	}
@@ -532,7 +559,7 @@ func (sd *ServiceDiscoveryImpl) discoverServiceTargets(config DiscoveryConfig) {
 		}
 
 		for _, service := range services {
-			sd.processServiceTarget(service, config)
+			sd.processServiceTarget(service, config, activeTargetIDs)
 		}
 	}
 }
@@ -558,7 +585,7 @@ func (sd *ServiceDiscoveryImpl) getMatchingServices(namespace string, selector m
 }
 
 // processServiceTarget processes a single service target
-func (sd *ServiceDiscoveryImpl) processServiceTarget(service *corev1.Service, config DiscoveryConfig) {
+func (sd *ServiceDiscoveryImpl) processServiceTarget(service *corev1.Service, config DiscoveryConfig, activeTargetIDs map[string]bool) {
 	// Get endpoints for this service
 	endpoints, err := sd.k8sClient.GetEndpointsForService(service.Namespace, service.Name)
 	if err != nil {
@@ -673,6 +700,7 @@ func (sd *ServiceDiscoveryImpl) processServiceTarget(service *corev1.Service, co
 					}
 
 					sd.updateTarget(target)
+					activeTargetIDs[target.ID] = true
 					if configPkg.IsDebugEnabled() {
 						logutil.Debugf("DISCOVERY", "Added ServiceMonitor target: %s", targetID)
 					}
@@ -745,6 +773,7 @@ func (sd *ServiceDiscoveryImpl) processServiceTarget(service *corev1.Service, co
 					}
 
 					sd.updateTarget(target)
+					activeTargetIDs[target.ID] = true
 					if configPkg.IsDebugEnabled() {
 						logutil.Debugf("DISCOVERY", "Added pending ServiceMonitor target: %s", targetID)
 					}
@@ -758,7 +787,7 @@ func (sd *ServiceDiscoveryImpl) processServiceTarget(service *corev1.Service, co
 	}
 }
 
-func (sd *ServiceDiscoveryImpl) discoverStaticTargets(config DiscoveryConfig) {
+func (sd *ServiceDiscoveryImpl) discoverStaticTargets(config DiscoveryConfig, activeTargetIDs map[string]bool) {
 	if configPkg.IsDebugEnabled() {
 		logutil.Debugf("DISCOVERY", "Discovering StaticEndpoints targets for %s", config.TargetName)
 	}
@@ -821,6 +850,7 @@ func (sd *ServiceDiscoveryImpl) discoverStaticTargets(config DiscoveryConfig) {
 		}
 
 		sd.updateTarget(target)
+		activeTargetIDs[target.ID] = true
 		if configPkg.IsDebugEnabled() {
 			logutil.Debugf("DISCOVERY", "Added StaticEndpoints target: %s (URL: %s)", targetID, url)
 		}
