@@ -708,6 +708,13 @@ func (sm *ScraperManager) startTargetScheduler(target *discovery.Target) {
 	}
 
 	sm.schedulerMutex.Lock()
+	// Double check if scheduler already exists to prevent race conditions
+	if _, exists := sm.targetSchedulers[target.ID]; exists {
+		sm.schedulerMutex.Unlock()
+		logutil.Printf("WARN", "Scheduler for target %s already exists, skipping start", target.ID)
+		return
+	}
+
 	sm.targetSchedulers[target.ID] = scheduler
 	sm.schedulerMutex.Unlock()
 
