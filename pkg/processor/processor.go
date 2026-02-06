@@ -3,8 +3,10 @@ package processor
 import (
 	"math"
 	"open-agent/tools/util/logutil"
+	"strconv"
 	"strings"
 
+	"github.com/whatap/gointernal/net/secure"
 	"open-agent/pkg/config"
 	"open-agent/pkg/converter"
 	"open-agent/pkg/model"
@@ -101,6 +103,13 @@ func (p *Processor) processRawData(rawData *model.ScrapeRawData) {
 	nodeLabelsAdded := 0
 	totalValidMetrics := 0
 
+	// Get PCODE from SecurityMaster
+	pcode := secure.GetSecurityMaster().PCODE
+	var pcodeStr string
+	if pcode > 0 {
+		pcodeStr = strconv.FormatInt(pcode, 10)
+	}
+
 	for _, openMx := range conversionResult.GetOpenMxList() {
 		if !math.IsNaN(openMx.Value) && !math.IsInf(openMx.Value, 0) {
 			totalValidMetrics++
@@ -108,6 +117,11 @@ func (p *Processor) processRawData(rawData *model.ScrapeRawData) {
 			// Add target labels (including job and instance)
 			for k, v := range rawData.Labels {
 				openMx.AddLabel(k, v)
+			}
+
+			// Add pcode label
+			if pcodeStr != "" {
+				openMx.AddLabel("pcode", pcodeStr)
 			}
 
 			// Add instance label if missing (fallback for backward compatibility)
