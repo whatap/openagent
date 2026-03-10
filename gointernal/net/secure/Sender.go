@@ -151,7 +151,7 @@ func runSend() {
 
 			if now > last_time_sync+int64(conf.TimeSyncIntervalMs) {
 				if conf.DebugTcpSendTimeSyncEnabled {
-					conf.Log.Infoln("[DEBUG]", "NET_TIME_SYNC now=", now, ",last_time_sync=", last_time_sync, ",conf=", conf.TimeSyncIntervalMs)
+					conf.Log.Debugf("[DEBUG] NET_TIME_SYNC now=%d last_time_sync=%d conf=%d", now, last_time_sync, conf.TimeSyncIntervalMs)
 				}
 				last_time_sync = now
 				session.Send(NET_TIME_SYNC, io.ToBytesLong(now), true)
@@ -160,7 +160,7 @@ func runSend() {
 			if conf.CypherLevel == 0 {
 				b := pack.ToBytesPack(p.pack)
 				if conf.DebugTcpSendEnabled && stringutil.InArray(pack.GetPackTypeString((p.pack).GetPackType()), conf.DebugTcpSendPacks) {
-					conf.Log.Infoln("[DEBUG]", "Send NET_NORMAL ", pack.GetPackTypeString((p.pack).GetPackType()), " flush=", p.flush, " size=", len(b)) //, p.pack)
+					conf.Log.Debugf("[DEBUG] Send NET_NORMAL %s flush=%v size=%d", pack.GetPackTypeString((p.pack).GetPackType()), p.flush, len(b))
 				}
 				if conf.NetFailoverRetrySendDataEnabled {
 					session.RetryQueue.PutForce(&p)
@@ -168,9 +168,10 @@ func runSend() {
 				session.Send(p.flag, b, p.flush)
 				pack_len = len(b)
 			} else {
-				if conf.DebugTcpSendEnabled && stringutil.InArray(pack.GetPackTypeString((p.pack).GetPackType()), conf.DebugTcpSendPacks) {
+				packTypeStr := pack.GetPackTypeString((p.pack).GetPackType())
+				if conf.DebugTcpSendEnabled && stringutil.InArray(packTypeStr, conf.DebugTcpSendPacks) {
 					debugM := fmt.Sprintf("SendTest flag=%v//packType=%v,flush=%v\n", p.flag, p.pack.GetPackType(), p.flush)
-					conf.Log.Infoln("[DEBUG]", debugM)
+					conf.Log.Debugf("[DEBUG] %s", debugM)
 				}
 				switch GetSecureMask(p.flag) {
 				case NET_SECURE_HIDE:
@@ -178,7 +179,7 @@ func runSend() {
 						b := pack.ToBytesPack(p.pack)
 						b = secuTcp.Cypher.Hide(b)
 						if conf.DebugTcpSendEnabled && stringutil.InArray(pack.GetPackTypeString((p.pack).GetPackType()), conf.DebugTcpSendPacks) {
-							conf.Log.Infoln("[DEBUG]", "Send NET_SECURE_HIDE ", pack.GetPackTypeString((p.pack).GetPackType()), " flush=", p.flush, " size=", len(b)) //, p.pack)
+							conf.Log.Debugf("[DEBUG] Send NET_SECURE_HIDE %s flush=%v size=%d", pack.GetPackTypeString((p.pack).GetPackType()), p.flush, len(b))
 						}
 						if conf.NetFailoverRetrySendDataEnabled {
 							session.RetryQueue.PutForce(&p)
@@ -191,7 +192,7 @@ func runSend() {
 						// send default
 						b := pack.ToBytesPack(p.pack)
 						if conf.DebugTcpSendEnabled && stringutil.InArray(pack.GetPackTypeString((p.pack).GetPackType()), conf.DebugTcpSendPacks) {
-							conf.Log.Infoln("[DEBUG]", "Send NET_SECURE_HIDE Default ", pack.GetPackTypeString((p.pack).GetPackType()), " flush=", p.flush, " size=", len(b)) //, p.pack)
+							conf.Log.Debugf("[DEBUG] Send NET_SECURE_HIDE Default %s flush=%v size=%d", pack.GetPackTypeString((p.pack).GetPackType()), p.flush, len(b))
 						}
 						if conf.NetFailoverRetrySendDataEnabled {
 							session.RetryQueue.PutForce(&p)
@@ -204,7 +205,7 @@ func runSend() {
 						b := pack.ToBytesPackECB(p.pack, int(conf.CypherLevel/8)) // 16bytes배수로
 						b = secuTcp.Cypher.Encrypt(b)
 						if conf.DebugTcpSendEnabled && stringutil.InArray(pack.GetPackTypeString((p.pack).GetPackType()), conf.DebugTcpSendPacks) {
-							conf.Log.Infoln("[DEBUG]", "Send NET_SECURE_CYPHER ", pack.GetPackTypeString((p.pack).GetPackType()), " flush=", p.flush, " size=", len(b)) //, p.pack)
+							conf.Log.Debugf("[DEBUG] Send NET_SECURE_CYPHER %s flush=%v size=%d", pack.GetPackTypeString((p.pack).GetPackType()), p.flush, len(b))
 						}
 						if conf.NetFailoverRetrySendDataEnabled {
 							session.RetryQueue.PutForce(&p)
@@ -217,7 +218,7 @@ func runSend() {
 						// send default
 						b := pack.ToBytesPack(p.pack)
 						if conf.DebugTcpSendEnabled && stringutil.InArray(pack.GetPackTypeString((p.pack).GetPackType()), conf.DebugTcpSendPacks) {
-							conf.Log.Infoln("[DEBUG]", "Send NET_SECURE_CYPHER Default ", pack.GetPackTypeString((p.pack).GetPackType()), " flush=", p.flush, " size=", len(b)) //, p.pack)
+							conf.Log.Debugf("[DEBUG] Send NET_SECURE_CYPHER Default %s flush=%v size=%d", pack.GetPackTypeString((p.pack).GetPackType()), p.flush, len(b))
 						}
 						if conf.NetFailoverRetrySendDataEnabled {
 							session.RetryQueue.PutForce(&p)
@@ -228,7 +229,7 @@ func runSend() {
 				default:
 					b := pack.ToBytesPack(p.pack)
 					if conf.DebugTcpSendEnabled && stringutil.InArray(pack.GetPackTypeString((p.pack).GetPackType()), conf.DebugTcpSendPacks) {
-						conf.Log.Infoln("[DEBUG]", "Send Default ", pack.GetPackTypeString((p.pack).GetPackType()), " flush=", p.flush, " size=", len(b)) //, p.pack)
+						conf.Log.Debugf("[DEBUG] Send Default %s flush=%v size=%d", pack.GetPackTypeString((p.pack).GetPackType()), p.flush, len(b))
 					}
 					if conf.NetFailoverRetrySendDataEnabled {
 						session.RetryQueue.PutForce(&p)

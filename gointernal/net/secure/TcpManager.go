@@ -47,6 +47,7 @@ func newTcpManager(opts ...TcpSessionOption) *TcpManager {
 	conf.cancel = o.cancel
 	conf.Timeout = o.Timeout
 	conf.ObjectName = o.ObjectName
+	conf.ConfigObserver = o.ConfigObserver
 	//p.lastTime = dateutil.SystemNow()
 	// p.Log.Info("newOneWayTcpClient license=", p.License)
 	if conf.ConfigObserver != nil {
@@ -110,6 +111,18 @@ func (this *TcpManager) ApplyConfig(c config.Config) {
 		TcpQueue.SetCapacity(int(conf.NetSendQueue1Size), int(conf.NetSendQueue2Size))
 	}
 	// o.QueueTcpSenderThreadCount = getInt("queue_tcp_sender_thread_count", 2)
+
+	// Preserve fields that are not in whatap.conf
+	o.Log = conf.Log
+	o.ConfigObserver = conf.ConfigObserver
+	o.Servers = conf.Servers
+	o.AccessKey = conf.AccessKey
+	o.License = conf.License
+	o.ObjectName = conf.ObjectName
+	o.AppName = conf.AppName
+	o.Pcode = conf.Pcode
+	o.Oid = conf.Oid
+
 	conf = o
 
 	// 라이센스 변경사항 확인

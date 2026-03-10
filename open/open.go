@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/whatap/gointernal/net/secure"
+	golibconfig "github.com/whatap/golib/config"
 	"github.com/whatap/golib/logger/logfile"
 	"github.com/whatap/golib/util/dateutil"
 )
@@ -105,8 +106,14 @@ func BootOpenAgent(version, commitHash string, logger *logfile.FileLogger) {
 		logutil.Infof("CONFIG", "Debug logging disabled from whatap.conf")
 	}
 
+	// Register FileLogger with ConfigObserver so log_level from whatap.conf is applied
+	golibconfig.GetConfigObserver().Add("FileLogger", logger)
+
 	// Initialize secure communication
-	secure.StartNet(secure.WithLogger(logger), secure.WithAccessKey(license), secure.WithServers(servers), secure.WithOname("test"))
+	secure.StartNet(secure.WithLogger(logger), secure.WithAccessKey(license), secure.WithServers(servers), secure.WithOname("test"), secure.WithConfigObserver(golibconfig.GetConfigObserver()))
+
+	// Apply initial config from whatap.conf to secure package
+	golibconfig.GetConfigObserver().Run(config.GetInstance())
 
 	// Check if test mode is enabled
 	testMode := os.Getenv("test")
