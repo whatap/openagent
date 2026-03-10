@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -104,27 +105,43 @@ func (this *SecurityMaster) update() {
 }
 
 func (this *SecurityMaster) DecideAgentOnameOid(myIp string) {
-	this.AutoAgentNameOrPattern(myIp)
-
 	ip := io.ToInt(iputil.ToBytes(myIp), 0)
-
-	oidutil.SetIp(os.Getenv("whatap.ip"))
-	oidutil.SetPort(os.Getenv("whatap.port"))
-	oidutil.SetHostName(os.Getenv("whatap.hostname"))
-	oidutil.SetType(os.Getenv("whatap.type"))
-	oidutil.SetProcess(os.Getenv("whatap.process"))
-	//docker full id
-	oidutil.SetDocker(os.Getenv("whatap.docker"))
-	oidutil.SetIps(os.Getenv("whatap.ips"))
-	oname := oidutil.MakeOname(os.Getenv("whatap.name"))
-
 	this.IP = ip
-	this.ONAME = oname
-	this.OID = hash.HashStr(oname)
-	conf.Oid = this.OID
 
-	os.Setenv("whatap.oid", strconv.Itoa(int(this.OID)))
-	os.Setenv("whatap.oname", this.ONAME)
+	// If Oname is explicitly set (via whatap.oname / WHATAP_ONAME), use it directly
+	oname := strings.TrimSpace(conf.Oname)
+	if oname != "" {
+		conf.Log.Println("WA10802", " [DecideOname] Using explicit oname=", oname)
+		this.ONAME = oname
+		this.OID = hash.HashStr(oname)
+		conf.Oid = this.OID
+		os.Setenv("whatap.oid", strconv.Itoa(int(this.OID)))
+		os.Setenv("whatap.oname", this.ONAME)
+		conf.Log.Println("WA10802", " [DecideOname] oname=", this.ONAME, ", OID=", this.OID)
+	} else {
+		// Auto-generate ONAME from pattern
+		this.AutoAgentNameOrPattern(myIp)
+
+		oidutil.SetIp(os.Getenv("whatap.ip"))
+		oidutil.SetPort(os.Getenv("whatap.port"))
+		oidutil.SetHostName(os.Getenv("whatap.hostname"))
+		oidutil.SetType(os.Getenv("whatap.type"))
+		oidutil.SetProcess(os.Getenv("whatap.process"))
+		//docker full id
+		oidutil.SetDocker(os.Getenv("whatap.docker"))
+		oidutil.SetIps(os.Getenv("whatap.ips"))
+
+		pattern := os.Getenv("whatap.name")
+		conf.Log.Println("WA10802", " [DecideOname] Using pattern=", pattern)
+		oname = oidutil.MakeOname(pattern)
+
+		this.ONAME = oname
+		this.OID = hash.HashStr(oname)
+		conf.Oid = this.OID
+		os.Setenv("whatap.oid", strconv.Itoa(int(this.OID)))
+		os.Setenv("whatap.oname", this.ONAME)
+		conf.Log.Println("WA10802", " [DecideOname] oname=", this.ONAME, ", OID=", this.OID)
+	}
 	if this.lastOid != int64(this.OID) {
 		this.lastOid = int64(this.OID)
 

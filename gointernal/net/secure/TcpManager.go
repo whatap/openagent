@@ -2,6 +2,7 @@ package secure
 
 import (
 	// "context"
+	"os"
 	"sync"
 	// "time"
 
@@ -46,7 +47,17 @@ func newTcpManager(opts ...TcpSessionOption) *TcpManager {
 	conf.ctx = o.ctx
 	conf.cancel = o.cancel
 	conf.Timeout = o.Timeout
-	conf.ObjectName = o.ObjectName
+	conf.Oname = o.Oname
+	// Only override ObjectName if explicitly set; preserve the default pattern otherwise
+	if o.ObjectName != "" {
+		conf.ObjectName = o.ObjectName
+	}
+	if o.AppName != "" {
+		conf.AppName = o.AppName
+	}
+	if o.AppProcessName != "" {
+		conf.AppProcessName = o.AppProcessName
+	}
 	conf.ConfigObserver = o.ConfigObserver
 	//p.lastTime = dateutil.SystemNow()
 	// p.Log.Info("newOneWayTcpClient license=", p.License)
@@ -112,14 +123,25 @@ func (this *TcpManager) ApplyConfig(c config.Config) {
 	}
 	// o.QueueTcpSenderThreadCount = getInt("queue_tcp_sender_thread_count", 2)
 
+	// Determine oname: whatap.oname > WHATAP_ONAME > app_name (all used directly)
+	onameFromConf := c.GetValue("whatap.oname")
+	if onameFromConf == "" {
+		onameFromConf = os.Getenv("WHATAP_ONAME")
+	}
+	if onameFromConf == "" {
+		onameFromConf = c.GetValue("app_name")
+	}
+
 	// Preserve fields that are not in whatap.conf
 	o.Log = conf.Log
 	o.ConfigObserver = conf.ConfigObserver
 	o.Servers = conf.Servers
 	o.AccessKey = conf.AccessKey
 	o.License = conf.License
+	o.Oname = onameFromConf
 	o.ObjectName = conf.ObjectName
 	o.AppName = conf.AppName
+	o.AppProcessName = conf.AppProcessName
 	o.Pcode = conf.Pcode
 	o.Oid = conf.Oid
 
