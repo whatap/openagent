@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/rand"
 	"open-agent/pkg/config"
+	"open-agent/pkg/counter"
 	"open-agent/pkg/discovery"
 	"open-agent/pkg/k8s"
 	"open-agent/pkg/model"
@@ -58,7 +59,7 @@ func GetAppLogger() *logfile.FileLogger {
 }
 
 // BootOpenAgent initializes and starts the Prometheus Agent
-func BootOpenAgent(version, commitHash string, logger *logfile.FileLogger) {
+func BootOpenAgent(version, commitHash, buildTime string, logger *logfile.FileLogger) {
 	// Store the logger in the global variable for centralized access
 	SetAppLogger(logger)
 
@@ -70,27 +71,35 @@ func BootOpenAgent(version, commitHash string, logger *logfile.FileLogger) {
 		commitHash = "unknown"
 	}
 
+	if buildTime == "" {
+		buildTime = "unknown"
+	}
+
+	// Set WHATAP_VERSION environment variable for version reporting
+	os.Setenv("WHATAP_VERSION", version)
+
 	logutil.Infof("START", "\nWHATAP Open Agent Starting\n")
 	logutil.Infof("START", " Version: %s\n", version)
-	logutil.Infof("START", " Build: %s\n", commitHash)
+	logutil.Infof("START", " Commit: %s\n", commitHash)
+	logutil.Infof("START", " Build Time: %s\n", buildTime)
 	logutil.Infof("START", " Started at: %s\n\n", time.Now().Format("2006-01-02 15:04:05 MST"))
 
 	// Get configuration values using the config package
 	// Support multiple key formats for whatap.conf and environment variables
 	servers := make([]string, 0)
 	license := getFirstNonEmpty(
-		config.Get("WHATAP_LICENSE"),       // whatap.conf: WHATAP_LICENSE / env: WHATAP_LICENSE
-		config.Get("license"),             // whatap.conf: license
+		config.Get("WHATAP_LICENSE"), // whatap.conf: WHATAP_LICENSE / env: WHATAP_LICENSE
+		config.Get("license"),        // whatap.conf: license
 	)
 	hosts := getFirstNonEmpty(
-		config.Get("WHATAP_HOST"),          // whatap.conf: WHATAP_HOST / env: WHATAP_HOST
-		config.Get("whatap.server.host"),   // whatap.conf: whatap.server.host
-		os.Getenv("WHATAP_SERVER_HOST"),    // env: WHATAP_SERVER_HOST
+		config.Get("WHATAP_HOST"),        // whatap.conf: WHATAP_HOST / env: WHATAP_HOST
+		config.Get("whatap.server.host"), // whatap.conf: whatap.server.host
+		os.Getenv("WHATAP_SERVER_HOST"),  // env: WHATAP_SERVER_HOST
 	)
 	port := getFirstNonZeroInt(
-		config.GetIntWithDefault("WHATAP_PORT", 0),          // whatap.conf: WHATAP_PORT / env: WHATAP_PORT
-		config.GetIntWithDefault("whatap.server.port", 0),   // whatap.conf: whatap.server.port
-		getEnvInt("WHATAP_SERVER_PORT", 0),                  // env: WHATAP_SERVER_PORT
+		config.GetIntWithDefault("WHATAP_PORT", 0),        // whatap.conf: WHATAP_PORT / env: WHATAP_PORT
+		config.GetIntWithDefault("whatap.server.port", 0), // whatap.conf: whatap.server.port
+		getEnvInt("WHATAP_SERVER_PORT", 0),                // env: WHATAP_SERVER_PORT
 	)
 	if port == 0 {
 		port = 6600
@@ -144,6 +153,14 @@ func BootOpenAgent(version, commitHash string, logger *logfile.FileLogger) {
 
 	// Apply initial config from whatap.conf to secure package
 	golibconfig.GetConfigObserver().Run(config.GetInstance())
+
+	// Start CounterPack1 + ParamPack sender if counter_enabled=true (default: false)
+	if config.GetBoolWithDefault("counter_enabled", false) {
+		logutil.Infof("CONFIG", "counter_enabled=true, starting CounterPack1/ParamPack sender")
+		counter.StartCounterManager()
+	} else {
+		logutil.Infof("CONFIG", "counter_enabled=false, CounterPack1/ParamPack sender disabled")
+	}
 
 	// Check if test mode is enabled
 	testMode := os.Getenv("test")
