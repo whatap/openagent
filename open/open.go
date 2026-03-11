@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/rand"
 	"open-agent/pkg/config"
+	"open-agent/pkg/control"
 	"open-agent/pkg/counter"
 	"open-agent/pkg/discovery"
 	"open-agent/pkg/k8s"
@@ -153,6 +154,9 @@ func BootOpenAgent(version, commitHash, buildTime string, logger *logfile.FileLo
 
 	// Apply initial config from whatap.conf to secure package
 	golibconfig.GetConfigObserver().Run(config.GetInstance())
+
+	// Start control handler for server-side commands (GET_ENV, CONFIGURE_GET, SET_CONFIG, AGENT_LOG_LIST, AGENT_LOG_READ)
+	control.InitControlHandler(logger)
 
 	// Start CounterPack1 + ParamPack sender if counter_enabled=true (default: false)
 	if config.GetBoolWithDefault("counter_enabled", false) {
