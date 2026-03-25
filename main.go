@@ -28,6 +28,7 @@ import (
 var (
 	version    string // Version of the application
 	commitHash string // Git commit hash
+	buildTime  string // Build timestamp
 )
 
 // startPprofServer starts the pprof HTTP server for performance profiling
@@ -107,7 +108,7 @@ func run(home string, logger *logfile.FileLogger) {
 	}()
 
 	// Start the agent
-	open.BootOpenAgent(version, commitHash, logger)
+	open.BootOpenAgent(version, commitHash, buildTime, logger)
 
 	logger.Infoln("run", "Received termination signal, shutting down")
 	<-stopper

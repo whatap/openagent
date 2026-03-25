@@ -24,6 +24,7 @@ type tcpSessionConfig struct {
 	Config         config.Config
 	ConfigObserver *config.ConfigObserver
 
+	Oname          string
 	ObjectName     string
 	AppName        string
 	AppProcessName string
@@ -134,7 +135,19 @@ func WithConfig(config config.Config) TcpSessionOption {
 
 func WithOname(oname string) TcpSessionOption {
 	return newFuncTcpSessionOption(func(c *tcpSessionConfig) {
-		c.ObjectName = oname
+		c.Oname = oname
+	})
+}
+
+func WithAppName(appName string) TcpSessionOption {
+	return newFuncTcpSessionOption(func(c *tcpSessionConfig) {
+		c.AppName = appName
+	})
+}
+
+func WithAppProcessName(appProcessName string) TcpSessionOption {
+	return newFuncTcpSessionOption(func(c *tcpSessionConfig) {
+		c.AppProcessName = appProcessName
 	})
 }
 

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"math/rand"
 	"open-agent/pkg/config"
+	"open-agent/pkg/control"
+	"open-agent/pkg/counter"
 	"open-agent/pkg/discovery"
 	"open-agent/pkg/k8s"
 	"open-agent/pkg/model"
@@ -18,6 +20,7 @@ import (
 	"time"
 
 	"github.com/whatap/gointernal/net/secure"
+	golibconfig "github.com/whatap/golib/config"
 	"github.com/whatap/golib/logger/logfile"
 	"github.com/whatap/golib/util/dateutil"
 )
@@ -57,7 +60,7 @@ func GetAppLogger() *logfile.FileLogger {
 }
 
 // BootOpenAgent initializes and starts the Prometheus Agent
-func BootOpenAgent(version, commitHash string, logger *logfile.FileLogger) {
+func BootOpenAgent(version, commitHash, buildTime string, logger *logfile.FileLogger) {
 	// Store the logger in the global variable for centralized access
 	SetAppLogger(logger)
 
@@ -75,15 +78,30 @@ func BootOpenAgent(version, commitHash string, logger *logfile.FileLogger) {
 	logutil.Printf("START", " Started at: %s\n\n", time.Now().Format("2006-01-02 15:04:05 MST"))
 
 	// Get configuration values using the config package
+	// Support multiple key formats for whatap.conf and environment variables
 	servers := make([]string, 0)
-	license := config.Get("WHATAP_LICENSE")
-	hosts := config.Get("WHATAP_HOST")
-	port := config.GetIntWithDefault("WHATAP_PORT", 6600)
+	license := getFirstNonEmpty(
+		config.Get("WHATAP_LICENSE"), // whatap.conf: WHATAP_LICENSE / env: WHATAP_LICENSE
+		config.Get("license"),        // whatap.conf: license
+	)
+	hosts := getFirstNonEmpty(
+		config.Get("WHATAP_HOST"),        // whatap.conf: WHATAP_HOST / env: WHATAP_HOST
+		config.Get("whatap.server.host"), // whatap.conf: whatap.server.host
+		os.Getenv("WHATAP_SERVER_HOST"),  // env: WHATAP_SERVER_HOST
+	)
+	port := getFirstNonZeroInt(
+		config.GetIntWithDefault("WHATAP_PORT", 0),        // whatap.conf: WHATAP_PORT / env: WHATAP_PORT
+		config.GetIntWithDefault("whatap.server.port", 0), // whatap.conf: whatap.server.port
+		getEnvInt("WHATAP_SERVER_PORT", 0),                // env: WHATAP_SERVER_PORT
+	)
+	if port == 0 {
+		port = 6600
+	}
 	if license == "" || hosts == "" {
 		logutil.Println("SETTING", "Please set the following configuration values:")
-		logutil.Println("SETTING", "WHATAP_LICENSE - The license key for the WHATAP server")
-		logutil.Println("SETTING", "WHATAP_HOST - The hostname or IP address of the WHATAP server")
-		logutil.Println("SETTING", "WHATAP_PORT - The port number of the WHATAP server (default: 6600)")
+		logutil.Println("SETTING", "  license: WHATAP_LICENSE (conf/env) or license (conf)")
+		logutil.Println("SETTING", "  host:    WHATAP_HOST (conf/env), whatap.server.host (conf), or WHATAP_SERVER_HOST (env)")
+		logutil.Println("SETTING", "  port:    WHATAP_PORT (conf/env), whatap.server.port (conf), or WHATAP_SERVER_PORT (env) (default: 6600)")
 		os.Exit(1)
 	}
 
@@ -134,8 +152,39 @@ func BootOpenAgent(version, commitHash string, logger *logfile.FileLogger) {
 		}
 	}
 
+	// Register FileLogger with ConfigObserver so log_level from whatap.conf is applied
+	golibconfig.GetConfigObserver().Add("FileLogger", logger)
+
+	// Determine oname: whatap.oname > WHATAP_ONAME > app_name (all used directly, no pattern)
+	oname := config.Get("whatap.oname")
+	if oname == "" {
+		oname = os.Getenv("WHATAP_ONAME")
+	}
+	if oname == "" {
+		oname = config.Get("app_name")
+	}
+	if oname != "" {
+		logutil.Infof("CONFIG", "oname: %s", oname)
+	} else {
+		logutil.Infof("CONFIG", "No oname set (whatap.oname / WHATAP_ONAME / app_name), will use auto-generated pattern")
+	}
+
 	// Initialize secure communication
-	secure.StartNet(secure.WithLogger(logger), secure.WithAccessKey(license), secure.WithServers(servers), secure.WithOname("test"))
+	secure.StartNet(secure.WithLogger(logger), secure.WithAccessKey(license), secure.WithServers(servers), secure.WithOname(oname), secure.WithConfigObserver(golibconfig.GetConfigObserver()))
+
+	// Apply initial config from whatap.conf to secure package
+	golibconfig.GetConfigObserver().Run(config.GetInstance())
+
+	// Start control handler for server-side commands (GET_ENV, CONFIGURE_GET, SET_CONFIG, AGENT_LOG_LIST, AGENT_LOG_READ)
+	control.InitControlHandler(logger)
+
+	// Start CounterPack1 + ParamPack sender if counter_enabled=true (default: false)
+	if config.GetBoolWithDefault("counter_enabled", false) {
+		logutil.Infof("CONFIG", "counter_enabled=true, starting CounterPack1/ParamPack sender")
+		counter.StartCounterManager()
+	} else {
+		logutil.Infof("CONFIG", "counter_enabled=false, CounterPack1/ParamPack sender disabled")
+	}
 
 	// Check if test mode is enabled
 	testMode := os.Getenv("test")
@@ -712,4 +761,37 @@ func promaxSplitLabel(label string) []string {
 		return []string{}
 	}
 	return []string{label[:idx], label[idx+1:]}
+}
+
+// getFirstNonEmpty returns the first non-empty string from the given values
+func getFirstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// getFirstNonZeroInt returns the first non-zero int from the given values
+func getFirstNonZeroInt(values ...int) int {
+	for _, v := range values {
+		if v != 0 {
+			return v
+		}
+	}
+	return 0
+}
+
+// getEnvInt reads an environment variable as int, returns def if not set or invalid
+func getEnvInt(key string, def int) int {
+	v := os.Getenv(key)
+	if v == "" {
+		return def
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return def
+	}
+	return n
 }

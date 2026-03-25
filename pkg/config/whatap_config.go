@@ -2,6 +2,7 @@ package config
 
 import (
 	"bufio"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -10,6 +11,8 @@ import (
 	"time"
 
 	"open-agent/tools/util/logutil"
+
+	golibconfig "github.com/whatap/golib/config"
 )
 
 // singleton instance of WhatapConfig
@@ -24,6 +27,11 @@ func init() {
 	once.Do(func() {
 		instance = NewWhatapConfig()
 	})
+}
+
+// GetInstance returns the singleton WhatapConfig instance.
+func GetInstance() *WhatapConfig {
+	return instance
 }
 
 // GetConfig returns the configuration as a Config struct from the singleton instance.
@@ -62,10 +70,10 @@ func GetBoolWithDefault(key string, defaultValue bool) bool {
 	return instance.GetBoolWithDefault(key, defaultValue)
 }
 
-// GetInt returns the integer value for the given key from the singleton instance.
+// GetIntValue returns the integer value for the given key from the singleton instance.
 // This function can be called directly without creating a WhatapConfig instance.
-func GetInt(key string) int {
-	return instance.GetInt(key)
+func GetIntValue(key string) int {
+	return int(instance.GetInt(key, 0))
 }
 
 // GetIntWithDefault returns the integer value for the given key, or the default value if the key is not found from the singleton instance.
@@ -301,39 +309,10 @@ func (wc *WhatapConfig) GetConfigMap() map[string]string {
 	return configCopy
 }
 
-// GetInt returns the integer value for the given key.
-// If the key is not found or the value cannot be converted to an integer, it returns 0.
-// This method is thread-safe as it uses the Get method which is thread-safe.
-func (wc *WhatapConfig) GetInt(key string) int {
-	value := wc.Get(key)
-	if value == "" {
-		return 0
-	}
-
-	intValue, err := strconv.Atoi(value)
-	if err != nil {
-		logutil.Infof("CONFIG", "Error converting %s to integer: %v", value, err)
-		return 0
-	}
-
-	return intValue
-}
-
 // GetIntWithDefault returns the integer value for the given key, or the default value if the key is not found or cannot be converted to an integer.
 // This method is thread-safe as it uses the Get method which is thread-safe.
 func (wc *WhatapConfig) GetIntWithDefault(key string, defaultValue int) int {
-	value := wc.Get(key)
-	if value == "" {
-		return defaultValue
-	}
-
-	intValue, err := strconv.Atoi(value)
-	if err != nil {
-		logutil.Infof("CONFIG", "Error converting %s to integer: %v", value, err)
-		return defaultValue
-	}
-
-	return intValue
+	return int(wc.GetInt(key, defaultValue))
 }
 
 // IsDebugEnabled returns true if debug is enabled in the configuration.
@@ -367,12 +346,128 @@ func (wc *WhatapConfig) watchConfig() {
 				lastModTime = fileInfo.ModTime()
 				if err := wc.LoadConfig(); err != nil {
 					logutil.Infof("CONFIG", "Error reloading config: %v", err)
+				} else {
+					golibconfig.GetConfigObserver().Run(wc)
 				}
 			}
 		case <-wc.stopCh:
 			return
 		}
 	}
+}
+
+// golib/config.Config interface implementation for WhatapConfig
+
+func (wc *WhatapConfig) ApplyDefault() {}
+
+func (wc *WhatapConfig) GetConfFile() string {
+	return wc.configFile
+}
+
+func (wc *WhatapConfig) Destroy() {}
+
+func (wc *WhatapConfig) GetKeys() []string {
+	wc.mu.RLock()
+	defer wc.mu.RUnlock()
+	keys := make([]string, 0, len(wc.values))
+	for k := range wc.values {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+func (wc *WhatapConfig) GetValue(key string) string {
+	return wc.Get(key)
+}
+
+func (wc *WhatapConfig) GetValueDef(key, def string) string {
+	return wc.GetWithDefault(key, def)
+}
+
+func (wc *WhatapConfig) GetBoolean(key string, def bool) bool {
+	return wc.GetBoolWithDefault(key, def)
+}
+
+func (wc *WhatapConfig) GetInt(key string, def int) int32 {
+	value := wc.Get(key)
+	if value == "" {
+		return int32(def)
+	}
+	intValue, err := strconv.Atoi(value)
+	if err != nil {
+		return int32(def)
+	}
+	return int32(intValue)
+}
+
+func (wc *WhatapConfig) GetIntSet(key, def, deli string) []int32 {
+	value := wc.GetWithDefault(key, def)
+	parts := strings.Split(value, deli)
+	result := make([]int32, 0, len(parts))
+	for _, p := range parts {
+		if v, err := strconv.Atoi(strings.TrimSpace(p)); err == nil {
+			result = append(result, int32(v))
+		}
+	}
+	return result
+}
+
+func (wc *WhatapConfig) GetLong(key string, def int64) int64 {
+	value := wc.Get(key)
+	if value == "" {
+		return def
+	}
+	longValue, err := strconv.ParseInt(value, 10, 64)
+	if err != nil {
+		return def
+	}
+	return longValue
+}
+
+func (wc *WhatapConfig) GetStringArray(key string, def string, deli string) []string {
+	value := wc.GetWithDefault(key, def)
+	parts := strings.Split(value, deli)
+	result := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if trimmed := strings.TrimSpace(p); trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
+}
+
+func (wc *WhatapConfig) GetStringHashSet(key, def, deli string) []int32 {
+	return wc.GetIntSet(key, def, deli)
+}
+
+func (wc *WhatapConfig) GetStringHashCodeSet(key, def, deli string) []int32 {
+	return wc.GetIntSet(key, def, deli)
+}
+
+func (wc *WhatapConfig) GetFloat(key string, def float32) float32 {
+	value := wc.Get(key)
+	if value == "" {
+		return def
+	}
+	floatValue, err := strconv.ParseFloat(value, 32)
+	if err != nil {
+		return def
+	}
+	return float32(floatValue)
+}
+
+func (wc *WhatapConfig) SetValues(v *map[string]string) {
+	wc.mu.Lock()
+	defer wc.mu.Unlock()
+	wc.values = *v
+}
+
+func (wc *WhatapConfig) ToString() string {
+	return fmt.Sprintf("WhatapConfig{configFile: %s}", wc.configFile)
+}
+
+func (wc *WhatapConfig) String() string {
+	return wc.ToString()
 }
 
 // Stop stops the configuration watcher.

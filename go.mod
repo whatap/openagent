@@ -13,7 +13,7 @@ require (
 	github.com/shirou/gopsutil/v3 v3.24.5
 	github.com/stretchr/testify v1.10.0
 	github.com/whatap/gointernal v0.0.0
-	github.com/whatap/golib v0.0.35
+	github.com/whatap/golib v0.0.41
 	golang.org/x/net v0.33.0
 	gopkg.in/yaml.v2 v2.4.0
 	k8s.io/api v0.29.0
