@@ -530,8 +530,9 @@ func (sm *ScraperManager) targetManagementLoop() {
 	if managementInterval < 5*time.Second {
 		managementInterval = 5 * time.Second
 	}
-
-	logutil.Printf("INFO", "[SCRAPER] Starting target management loop with interval: %v", managementInterval)
+	if config.IsDebugEnabled() {
+		logutil.Debugf("ScraperManager", "[SCRAPER] Starting target management loop with interval: %v", managementInterval)
+	}
 	ticker := time.NewTicker(managementInterval)
 	defer ticker.Stop()
 
@@ -707,6 +708,13 @@ func (sm *ScraperManager) startTargetScheduler(target *discovery.Target) {
 	}
 
 	sm.schedulerMutex.Lock()
+	// Double check if scheduler already exists to prevent race conditions
+	if _, exists := sm.targetSchedulers[target.ID]; exists {
+		sm.schedulerMutex.Unlock()
+		logutil.Printf("WARN", "Scheduler for target %s already exists, skipping start", target.ID)
+		return
+	}
+
 	sm.targetSchedulers[target.ID] = scheduler
 	sm.schedulerMutex.Unlock()
 
@@ -787,7 +795,7 @@ func (sm *ScraperManager) scrapeTarget(target *discovery.Target) {
 	// Add panic recovery to prevent individual target failures from crashing the scraper
 	defer func() {
 		if r := recover(); r != nil {
-			logutil.Infoln("ERROR", "Panic recovered while scraping target %s: %v", target.ID, r)
+			logutil.Infof("ERROR", "Panic recovered while scraping target %s: %v", target.ID, r)
 		}
 	}()
 
@@ -1092,18 +1100,6 @@ func extractPathFromURL(url string) string {
 	}
 
 	return hostPort[pathIndex:]
-}
-
-func (sm *ScraperManager) runScraperTaskWithError(scraperTask *ScraperTask) error {
-	rawData, err := scraperTask.Run()
-	if err != nil {
-		logutil.Errorf("ERROR", "Error running scraper task: %v\n", err)
-		return err
-	}
-
-	// Add the raw data to the queue
-	sm.rawQueue <- rawData
-	return nil
 }
 
 // AddRawData adds raw data to the queue

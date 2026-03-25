@@ -9,6 +9,7 @@ import (
 	"open-agent/pkg/model"
 	"open-agent/tools/util/logutil"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -18,12 +19,13 @@ import (
 
 // ServiceDiscoveryImpl implements service discovery for various target types including Kubernetes and static endpoints
 type ServiceDiscoveryImpl struct {
-	configManager *configPkg.ConfigManager
-	k8sClient     *k8s.K8sClient
-	configs       []DiscoveryConfig
-	targets       map[string]*Target
-	targetsMutex  sync.RWMutex
-	stopCh        chan struct{}
+	configManager   *configPkg.ConfigManager
+	k8sClient       *k8s.K8sClient
+	configs         []DiscoveryConfig
+	targets         map[string]*Target
+	targetsMutex    sync.RWMutex
+	stopCh          chan struct{}
+	lastTargetNames []string
 }
 
 // NewServiceDiscovery creates a new ServiceDiscoveryImpl instance
@@ -99,7 +101,10 @@ func (sd *ServiceDiscoveryImpl) LoadTargets(targets []map[string]interface{}) er
 		sd.configs = append(sd.configs, parseDiscoveryConfig)
 	}
 
-	logutil.Infof("INFO", "Loaded %d discovery configurations", len(sd.configs))
+	logutil.Printf("DISCOVERY", "Loaded %d discovery configurations", len(sd.configs))
+	for _, cfg := range sd.configs {
+		logutil.Printf("DISCOVERY", " - Target: %s (Type: %s, Enabled: %t)", cfg.TargetName, cfg.Type, cfg.Enabled)
+	}
 	return nil
 }
 
@@ -145,7 +150,7 @@ func (sd *ServiceDiscoveryImpl) discoveryLoop() {
 	// Initial discovery
 	sd.discoverTargets()
 
-	// Periodic discovery every 30 seconds (like Prometheus)
+	// Periodic discovery every 15 seconds (like Prometheus)
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
 
@@ -195,23 +200,74 @@ func (sd *ServiceDiscoveryImpl) discoverTargets() {
 		logutil.Debugf("DISCOVERY", "Using %d current discovery configurations from latest ConfigManager data", len(currentConfigs))
 	}
 
+	// Track active targets
+	var newTargetNames []string
+	for _, cfg := range currentConfigs {
+		newTargetNames = append(newTargetNames, fmt.Sprintf("%s(%s)", cfg.TargetName, cfg.Type))
+	}
+	sort.Strings(newTargetNames)
+
+	// Check if changed
+	changed := false
+	if len(newTargetNames) != len(sd.lastTargetNames) {
+		changed = true
+	} else {
+		for i := range newTargetNames {
+			if newTargetNames[i] != sd.lastTargetNames[i] {
+				changed = true
+				break
+			}
+		}
+	}
+
+	if changed {
+		sd.lastTargetNames = newTargetNames
+		logutil.Printf("DISCOVERY", "Active Targets: %s", strings.Join(newTargetNames, ", "))
+	}
+
 	// Execute discovery with latest configurations
+	activeTargetIDs := make(map[string]bool)
 	for _, discoveryConfig := range currentConfigs {
 		switch discoveryConfig.Type {
 		case "PodMonitor":
-			sd.discoverPodTargets(discoveryConfig)
+			sd.discoverPodTargets(discoveryConfig, activeTargetIDs)
 		case "ServiceMonitor":
-			sd.discoverServiceTargets(discoveryConfig)
+			sd.discoverServiceTargets(discoveryConfig, activeTargetIDs)
 		case "StaticEndpoints":
-			sd.discoverStaticTargets(discoveryConfig)
+			sd.discoverStaticTargets(discoveryConfig, activeTargetIDs)
 		default:
 			logutil.Infof("WARN", "Unknown target type: %s", discoveryConfig.Type)
 		}
 	}
+
+	// Clean up stale targets
+	sd.cleanupStaleTargets(activeTargetIDs)
+}
+
+// cleanupStaleTargets removes targets that were not found in the current discovery cycle
+func (sd *ServiceDiscoveryImpl) cleanupStaleTargets(activeTargetIDs map[string]bool) {
+	sd.targetsMutex.Lock()
+	defer sd.targetsMutex.Unlock()
+
+	var targetsToRemove []string
+	for targetID := range sd.targets {
+		if !activeTargetIDs[targetID] {
+			targetsToRemove = append(targetsToRemove, targetID)
+		}
+	}
+
+	for _, targetID := range targetsToRemove {
+		if configPkg.IsDebugEnabled() {
+			logutil.Debugf("DISCOVERY", "Removing stale target: %s", targetID)
+		} else {
+			logutil.Infof("DISCOVERY", "Removing stale target: %s", targetID)
+		}
+		delete(sd.targets, targetID)
+	}
 }
 
 // discoverPodTargets discovers Pod-based targets
-func (sd *ServiceDiscoveryImpl) discoverPodTargets(config DiscoveryConfig) {
+func (sd *ServiceDiscoveryImpl) discoverPodTargets(config DiscoveryConfig, activeTargetIDs map[string]bool) {
 	if configPkg.IsDebugEnabled() {
 		logutil.Debugf("DISCOVERY", "Discovering PodMonitor targets for %s", config.TargetName)
 	}
@@ -256,22 +312,21 @@ func (sd *ServiceDiscoveryImpl) discoverPodTargets(config DiscoveryConfig) {
 			if configPkg.IsDebugEnabled() {
 				logutil.Debugf("DISCOVERY", "PodMonitor %s - Processing pod %s/%s with labels: %+v", config.TargetName, pod.Namespace, pod.Name, pod.Labels)
 			}
-			sd.processPodTarget(pod, config)
+			sd.processPodTarget(pod, config, activeTargetIDs)
 		}
 	}
-	if configPkg.IsDebugEnabled() {
-		logutil.Debugf("DISCOVERY", "PodMonitor %s - Total pods discovered: %d", config.TargetName, totalPodsFound)
-	}
+	logutil.Infof("DISCOVERY", "PodMonitor %s - Total pods discovered: %d", config.TargetName, totalPodsFound)
 }
 
-func (sd *ServiceDiscoveryImpl) processPodTarget(pod *corev1.Pod, config DiscoveryConfig) {
+func (sd *ServiceDiscoveryImpl) processPodTarget(pod *corev1.Pod, config DiscoveryConfig, activeTargetIDs map[string]bool) {
 	// Check if pod is ready
 	isReady := sd.isPodReady(pod)
 
 	for _, endpoint := range config.Endpoints {
 		// Include path in targetID to ensure uniqueness when multiple endpoints use the same port
+		// Use / as separator to distinguish from hyphens in pod names
 		pathSafe := strings.ReplaceAll(endpoint.Path, "/", "-")
-		targetID := fmt.Sprintf("%s-%s-%s-%s-%s", config.TargetName, pod.Namespace, pod.Name, endpoint.Port, pathSafe)
+		targetID := fmt.Sprintf("%s/%s/%s/%s%s", config.TargetName, pod.Namespace, pod.Name, endpoint.Port, pathSafe)
 
 		// Get pod IP
 		podIP := pod.Status.PodIP
@@ -364,6 +419,7 @@ func (sd *ServiceDiscoveryImpl) processPodTarget(pod *corev1.Pod, config Discove
 		}
 
 		sd.updateTarget(target)
+		activeTargetIDs[target.ID] = true
 	}
 }
 
@@ -393,9 +449,7 @@ func (sd *ServiceDiscoveryImpl) updateTarget(newTarget *Target) {
 	if !exists {
 		// New target
 		sd.targets[newTarget.ID] = newTarget
-		if configPkg.IsDebugEnabled() {
-			logutil.Debugf("DISCOVERY", "Added new target: %s (state: %s)", newTarget.ID, newTarget.State)
-		}
+		logutil.Infof("DISCOVERY", "Added new target: %s (state: %s)", newTarget.ID, newTarget.State)
 	} else {
 		// Always update target to ensure metadata changes are reflected
 		// This includes metricRelabelConfigs changes from ConfigMap updates
@@ -479,7 +533,7 @@ func (sd *ServiceDiscoveryImpl) determineScheme(endpointScheme, port string, tls
 }
 
 // ServiceMonitor and StaticEndpoints discovery implementations
-func (sd *ServiceDiscoveryImpl) discoverServiceTargets(config DiscoveryConfig) {
+func (sd *ServiceDiscoveryImpl) discoverServiceTargets(config DiscoveryConfig, activeTargetIDs map[string]bool) {
 	if configPkg.IsDebugEnabled() {
 		logutil.Debugf("DISCOVERY", "Discovering ServiceMonitor targets for %s", config.TargetName)
 	}
@@ -505,7 +559,7 @@ func (sd *ServiceDiscoveryImpl) discoverServiceTargets(config DiscoveryConfig) {
 		}
 
 		for _, service := range services {
-			sd.processServiceTarget(service, config)
+			sd.processServiceTarget(service, config, activeTargetIDs)
 		}
 	}
 }
@@ -531,7 +585,7 @@ func (sd *ServiceDiscoveryImpl) getMatchingServices(namespace string, selector m
 }
 
 // processServiceTarget processes a single service target
-func (sd *ServiceDiscoveryImpl) processServiceTarget(service *corev1.Service, config DiscoveryConfig) {
+func (sd *ServiceDiscoveryImpl) processServiceTarget(service *corev1.Service, config DiscoveryConfig, activeTargetIDs map[string]bool) {
 	// Get endpoints for this service
 	endpoints, err := sd.k8sClient.GetEndpointsForService(service.Namespace, service.Name)
 	if err != nil {
@@ -581,8 +635,9 @@ func (sd *ServiceDiscoveryImpl) processServiceTarget(service *corev1.Service, co
 				// Process ready addresses
 				for addrIdx, address := range subset.Addresses {
 					// Include path in targetID to ensure uniqueness when multiple endpoints use the same port
+					// Use / as separator to distinguish from hyphens in service names
 					pathSafe := strings.ReplaceAll(endpointConfig.Path, "/", "-")
-					targetID := fmt.Sprintf("%s-%s-%s-%s-%d-%d-%s", config.TargetName, service.Namespace, service.Name, endpointConfig.Port, subsetIdx, addrIdx, pathSafe)
+					targetID := fmt.Sprintf("%s/%s/%s/%s/%d/%d%s", config.TargetName, service.Namespace, service.Name, endpointConfig.Port, subsetIdx, addrIdx, pathSafe)
 
 					// Determine scheme
 					scheme := sd.determineScheme(endpointConfig.Scheme, endpointConfig.Port, endpointConfig.TLSConfig)
@@ -645,6 +700,7 @@ func (sd *ServiceDiscoveryImpl) processServiceTarget(service *corev1.Service, co
 					}
 
 					sd.updateTarget(target)
+					activeTargetIDs[target.ID] = true
 					if configPkg.IsDebugEnabled() {
 						logutil.Debugf("DISCOVERY", "Added ServiceMonitor target: %s", targetID)
 					}
@@ -717,6 +773,7 @@ func (sd *ServiceDiscoveryImpl) processServiceTarget(service *corev1.Service, co
 					}
 
 					sd.updateTarget(target)
+					activeTargetIDs[target.ID] = true
 					if configPkg.IsDebugEnabled() {
 						logutil.Debugf("DISCOVERY", "Added pending ServiceMonitor target: %s", targetID)
 					}
@@ -730,7 +787,7 @@ func (sd *ServiceDiscoveryImpl) processServiceTarget(service *corev1.Service, co
 	}
 }
 
-func (sd *ServiceDiscoveryImpl) discoverStaticTargets(config DiscoveryConfig) {
+func (sd *ServiceDiscoveryImpl) discoverStaticTargets(config DiscoveryConfig, activeTargetIDs map[string]bool) {
 	if configPkg.IsDebugEnabled() {
 		logutil.Debugf("DISCOVERY", "Discovering StaticEndpoints targets for %s", config.TargetName)
 	}
@@ -793,6 +850,7 @@ func (sd *ServiceDiscoveryImpl) discoverStaticTargets(config DiscoveryConfig) {
 		}
 
 		sd.updateTarget(target)
+		activeTargetIDs[target.ID] = true
 		if configPkg.IsDebugEnabled() {
 			logutil.Debugf("DISCOVERY", "Added StaticEndpoints target: %s (URL: %s)", targetID, url)
 		}

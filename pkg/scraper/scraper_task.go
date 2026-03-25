@@ -2,10 +2,11 @@ package scraper
 
 import (
 	"fmt"
-	corev1 "k8s.io/api/core/v1"
 	"net/url"
 	"strings"
 	"time"
+
+	corev1 "k8s.io/api/core/v1"
 
 	"open-agent/pkg/client"
 	"open-agent/pkg/config"
@@ -217,7 +218,6 @@ func (st *ScraperTask) ResolveEndpoint() (string, error) {
 	return "", fmt.Errorf("unsupported target type: %s", st.TargetType)
 }
 
-// Run executes the scraper task
 func (st *ScraperTask) Run() (*model.ScrapeRawData, error) {
 	// Resolve the endpoint
 	targetURL, resolveErr := st.ResolveEndpoint()

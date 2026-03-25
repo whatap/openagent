@@ -72,18 +72,10 @@ func BootOpenAgent(version, commitHash, buildTime string, logger *logfile.FileLo
 		commitHash = "unknown"
 	}
 
-	if buildTime == "" {
-		buildTime = "unknown"
-	}
-
-	// Set WHATAP_VERSION environment variable for version reporting
-	os.Setenv("WHATAP_VERSION", version)
-
-	logutil.Infof("START", "\nWHATAP Open Agent Starting\n")
-	logutil.Infof("START", " Version: %s\n", version)
-	logutil.Infof("START", " Commit: %s\n", commitHash)
-	logutil.Infof("START", " Build Time: %s\n", buildTime)
-	logutil.Infof("START", " Started at: %s\n\n", time.Now().Format("2006-01-02 15:04:05 MST"))
+	logutil.Printf("START", "\nWHATAP Open Agent Starting\n")
+	logutil.Printf("START", " Version: %s\n", version)
+	logutil.Printf("START", " Build: %s\n", commitHash)
+	logutil.Printf("START", " Started at: %s\n\n", time.Now().Format("2006-01-02 15:04:05 MST"))
 
 	// Get configuration values using the config package
 	// Support multiple key formats for whatap.conf and environment variables
@@ -123,13 +115,41 @@ func BootOpenAgent(version, commitHash, buildTime string, logger *logfile.FileLo
 		}
 	}
 
-	// Set logger level based on debug configuration from whatap.conf
-	if config.IsDebugEnabled() {
-		logutil.SetLevel(0) // LOG_LEVEL_DEBUG = 0
-		logutil.Infof("CONFIG", "Debug logging enabled from whatap.conf")
+	// Set logger level based on log_level configuration or debug configuration
+	configLogLevel := config.Get("log_level")
+	var logLevel int = -1
+
+	if configLogLevel != "" {
+		// Try to parse as integer first
+		if level, err := strconv.Atoi(configLogLevel); err == nil {
+			logLevel = level
+		} else {
+			// Try to parse as string
+			switch strings.ToUpper(configLogLevel) {
+			case "DEBUG":
+				logLevel = logutil.LOG_LEVEL_DEBUG
+			case "INFO":
+				logLevel = logutil.LOG_LEVEL_INFO
+			case "WARN", "WARNING":
+				logLevel = logutil.LOG_LEVEL_WARN
+			case "ERROR":
+				logLevel = logutil.LOG_LEVEL_ERROR
+			}
+		}
+	}
+
+	if logLevel != -1 {
+		logutil.SetLevel(logLevel)
+		logutil.Infof("CONFIG", "Log level set to %d (%s) from log_level config", logLevel, configLogLevel)
 	} else {
-		logutil.SetLevel(1) // LOG_LEVEL_INFO = 1
-		logutil.Infof("CONFIG", "Debug logging disabled from whatap.conf")
+		// Set logger level based on debug configuration from whatap.conf
+		if config.IsDebugEnabled() {
+			logutil.SetLevel(logutil.LOG_LEVEL_DEBUG) // LOG_LEVEL_DEBUG = 0
+			logutil.Infof("CONFIG", "Debug logging enabled from whatap.conf")
+		} else {
+			logutil.SetLevel(logutil.LOG_LEVEL_INFO) // LOG_LEVEL_INFO = 1
+			logutil.Infof("CONFIG", "Debug logging disabled from whatap.conf")
+		}
 	}
 
 	// Register FileLogger with ConfigObserver so log_level from whatap.conf is applied
@@ -180,7 +200,7 @@ func BootOpenAgent(version, commitHash, buildTime string, logger *logfile.FileLo
 		// The code below will not be executed in test mode
 	}
 
-	logger.Infoln("BootOpenAgent-Test mode disabled, starting agent")
+	logutil.Infoln("BootOpenAgent, test-mode disabled")
 	// Create channels for communication between components
 	rawQueue := make(chan *model.ScrapeRawData, RawQueueSize)
 	processedQueue := make(chan *model.ConversionResult, ProcessedQueueSize)

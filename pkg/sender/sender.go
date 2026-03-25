@@ -2,6 +2,7 @@ package sender
 
 import (
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/whatap/gointernal/net/secure"
@@ -28,6 +29,8 @@ type Sender struct {
 	logger         *logfile.FileLogger
 	shutdownCh     chan struct{}
 	doneCh         chan struct{}
+	lastSendTime   map[string]int64
+	mu             sync.Mutex
 }
 
 // NewSender creates a new Sender instance
@@ -42,6 +45,7 @@ func NewSender(processedQueue chan *model.ConversionResult, logger *logfile.File
 		logger:         logger,
 		shutdownCh:     make(chan struct{}),
 		doneCh:         make(chan struct{}),
+		lastSendTime:   make(map[string]int64),
 	}
 }
 
@@ -88,6 +92,24 @@ func (s *Sender) sendLoop() {
 
 // sendResult sends a single conversion result
 func (s *Sender) sendResult(result *model.ConversionResult) {
+	// Log target and timestamp information
+	if result.GetTarget() != "" {
+		collectionTime := time.UnixMilli(result.GetCollectionTime())
+		s.logger.Println("Sender", fmt.Sprintf("Processing data for target: %s, collected at: %s",
+			result.GetTarget(), collectionTime.Format(time.RFC3339)))
+
+		// Check for duplicate metrics (same target, same timestamp)
+		s.mu.Lock()
+		if lastTime, exists := s.lastSendTime[result.GetTarget()]; exists {
+			if lastTime == result.GetCollectionTime() {
+				s.logger.Println("Sender", fmt.Sprintf("WARNING: Duplicate metrics detected for target %s at time %d (%s). This may cause data duplication.",
+					result.GetTarget(), result.GetCollectionTime(), collectionTime.Format(time.RFC3339)))
+			}
+		}
+		s.lastSendTime[result.GetTarget()] = result.GetCollectionTime()
+		s.mu.Unlock()
+	}
+
 	// Send OpenMxHelp data
 	openMxHelpList := result.GetOpenMxHelpList()
 	if len(openMxHelpList) > 0 {

@@ -4,6 +4,8 @@ package model
 type ConversionResult struct {
 	OpenMxList     []*OpenMx
 	OpenMxHelpList []*OpenMxHelp
+	Target         string
+	CollectionTime int64
 }
 
 // NewConversionResult creates a new ConversionResult instance
@@ -22,4 +24,24 @@ func (cr *ConversionResult) GetOpenMxList() []*OpenMx {
 // GetOpenMxHelpList returns the list of OpenMxHelp instances
 func (cr *ConversionResult) GetOpenMxHelpList() []*OpenMxHelp {
 	return cr.OpenMxHelpList
+}
+
+// GetTarget returns the target
+func (cr *ConversionResult) GetTarget() string {
+	return cr.Target
+}
+
+// SetTarget sets the target
+func (cr *ConversionResult) SetTarget(target string) {
+	cr.Target = target
+}
+
+// GetCollectionTime returns the collection time
+func (cr *ConversionResult) GetCollectionTime() int64 {
+	return cr.CollectionTime
+}
+
+// SetCollectionTime sets the collection time
+func (cr *ConversionResult) SetCollectionTime(time int64) {
+	cr.CollectionTime = time
 }
