@@ -112,7 +112,7 @@ func sendTextPacks() {
 		tp.Time = now
 		tp.AddText(pack.TextRec{Div: pack.TEXT_ONAME, Hash: secu.OID, Text: secu.ONAME})
 		secure.Send(secure.NET_SECURE_HIDE, tp, true)
-		logutil.Infoln("CounterManager", fmt.Sprintf("Sent TextPack ONAME: hash=%d, text=%s", secu.OID, secu.ONAME))
+		//logutil.Infoln("CounterManager", fmt.Sprintf("Sent TextPack ONAME: hash=%d, text=%s", secu.OID, secu.ONAME))
 	}
 
 	// TextPack for OKIND
@@ -125,7 +125,7 @@ func sendTextPacks() {
 		tp.Time = now
 		tp.AddText(pack.TextRec{Div: pack.TEXT_OKIND, Hash: secu.OKIND, Text: secu.OKIND_NAME})
 		secure.Send(secure.NET_SECURE_HIDE, tp, true)
-		logutil.Infoln("CounterManager", fmt.Sprintf("Sent TextPack OKIND: hash=%d, text=%s", secu.OKIND, secu.OKIND_NAME))
+		//logutil.Infoln("CounterManager", fmt.Sprintf("Sent TextPack OKIND: hash=%d, text=%s", secu.OKIND, secu.OKIND_NAME))
 	}
 
 	// TextPack for ONODE_NAME
@@ -138,7 +138,7 @@ func sendTextPacks() {
 		tp.Time = now
 		tp.AddText(pack.TextRec{Div: pack.ONODE_NAME, Hash: secu.ONODE, Text: secu.ONODE_NAME})
 		secure.Send(secure.NET_SECURE_HIDE, tp, true)
-		logutil.Infoln("CounterManager", fmt.Sprintf("Sent TextPack ONODE_NAME: hash=%d, text=%s", secu.ONODE, secu.ONODE_NAME))
+		//logutil.Infoln("CounterManager", fmt.Sprintf("Sent TextPack ONODE_NAME: hash=%d, text=%s", secu.ONODE, secu.ONODE_NAME))
 	}
 }
 

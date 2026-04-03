@@ -169,6 +169,15 @@ func BootOpenAgent(version, commitHash, buildTime string, logger *logfile.FileLo
 		logutil.Infof("CONFIG", "No oname set (whatap.oname / WHATAP_ONAME / app_name), will use auto-generated pattern")
 	}
 
+	// Determine object_name pattern: whatap.name > WHATAP_NAME > object_name (for auto-generation when oname is empty)
+	objectNamePattern := config.Get("whatap.name")
+	if objectNamePattern == "" {
+		objectNamePattern = os.Getenv("WHATAP_NAME")
+	}
+	if objectNamePattern == "" {
+		objectNamePattern = config.Get("object_name")
+	}
+
 	// Determine okind: whatap.okind > WHATAP_OKIND
 	okindName := config.Get("whatap.okind")
 	if okindName == "" {
@@ -182,7 +191,20 @@ func BootOpenAgent(version, commitHash, buildTime string, logger *logfile.FileLo
 	}
 
 	// Initialize secure communication
-	secure.StartNet(secure.WithLogger(logger), secure.WithAccessKey(license), secure.WithServers(servers), secure.WithOname(oname), secure.WithOkindName(okindName), secure.WithOnodeName(onodeName), secure.WithConfigObserver(golibconfig.GetConfigObserver()))
+	opts := []secure.TcpSessionOption{
+		secure.WithLogger(logger),
+		secure.WithAccessKey(license),
+		secure.WithServers(servers),
+		secure.WithOname(oname),
+		secure.WithOkindName(okindName),
+		secure.WithOnodeName(onodeName),
+		secure.WithConfigObserver(golibconfig.GetConfigObserver()),
+	}
+	if objectNamePattern != "" {
+		opts = append(opts, secure.WithObjectName(objectNamePattern))
+		logutil.Infof("CONFIG", "object_name pattern: %s", objectNamePattern)
+	}
+	secure.StartNet(opts...)
 
 	// Apply initial config from whatap.conf to secure package
 	golibconfig.GetConfigObserver().Run(config.GetInstance())

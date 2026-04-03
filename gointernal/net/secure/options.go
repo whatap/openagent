@@ -153,6 +153,12 @@ func WithAppProcessName(appProcessName string) TcpSessionOption {
 	})
 }
 
+func WithObjectName(objectName string) TcpSessionOption {
+	return newFuncTcpSessionOption(func(c *tcpSessionConfig) {
+		c.ObjectName = objectName
+	})
+}
+
 func WithOkindName(okindName string) TcpSessionOption {
 	return newFuncTcpSessionOption(func(c *tcpSessionConfig) {
 		c.OkindName = okindName
