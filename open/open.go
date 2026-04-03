@@ -190,12 +190,12 @@ func BootOpenAgent(version, commitHash, buildTime string, logger *logfile.FileLo
 	// Start control handler for server-side commands (GET_ENV, CONFIGURE_GET, SET_CONFIG, AGENT_LOG_LIST, AGENT_LOG_READ)
 	control.InitControlHandler(logger)
 
-	// Start CounterPack1 + ParamPack sender if counter_enabled=true (default: false)
-	if config.GetBoolWithDefault("counter_enabled", false) {
-		logutil.Infof("CONFIG", "counter_enabled=true, starting CounterPack1/ParamPack sender")
+	// Start TagCountPack + TextPack + ParamPack sender if tag_counter_enabled=true (default: false)
+	if config.GetBoolWithDefault("tag_counter_enabled", false) {
+		logutil.Infof("CONFIG", "tag_counter_enabled=true, starting TagCountPack/TextPack/ParamPack sender")
 		counter.StartCounterManager()
 	} else {
-		logutil.Infof("CONFIG", "counter_enabled=false, CounterPack1/ParamPack sender disabled")
+		logutil.Infof("CONFIG", "tag_counter_enabled=false, TagCountPack/TextPack/ParamPack sender disabled")
 	}
 
 	// Check if test mode is enabled
