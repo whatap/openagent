@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"os"
 	"runtime"
-	"strconv"
 	"time"
 
 	"github.com/whatap/gointernal/net/secure"
 	"github.com/whatap/golib/lang/pack"
+	"github.com/whatap/golib/lang/value"
 	"github.com/whatap/golib/util/dateutil"
 
 	"open-agent/tools/util/logutil"
@@ -217,16 +217,16 @@ func sendTagCountPack(now int64) {
 	// TagCountPack specific
 	p.Category = "common_agent_info"
 
-	// Tags: agent identification
-	p.PutTag("otype", fmt.Sprintf("%d", OTYPE_INTEGRATIONS))
-	p.PutTag("subType", "1")
-	p.PutTag("hostIp", fmt.Sprintf("%d", secu.IP))
-	p.PutTag("startTime", strconv.FormatInt(agentStartTime, 10))
+	// Tags: agent identification (must use numeric types for yard-side getInt() parsing)
+	p.Tags.Put("otype", value.NewDecimalValue(int64(OTYPE_INTEGRATIONS)))
+	p.Tags.Put("subType", value.NewDecimalValue(1))
+	p.Tags.Put("hostIp", value.NewDecimalValue(int64(secu.IP)))
+	p.Tags.Put("startTime", value.NewDecimalValue(agentStartTime))
 	cpuCores := getCgroupCpuLimitFloat()
 	if cpuCores <= 0 {
 		cpuCores = float64(runtime.NumCPU())
 	}
-	p.PutTag("cpuCores", strconv.FormatFloat(cpuCores, 'f', -1, 64))
+	p.Tags.Put("cpuCores", value.NewDecimalValue(int64(cpuCores)))
 
 	//// Tags: name information (for server-side resolution)
 	//p.PutTag("oname", secu.ONAME)
