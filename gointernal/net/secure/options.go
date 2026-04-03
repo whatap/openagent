@@ -28,6 +28,8 @@ type tcpSessionConfig struct {
 	ObjectName     string
 	AppName        string
 	AppProcessName string
+	OkindName      string
+	OnodeName      string
 
 	TcpSoTimeout         int32
 	TcpSoSendTimeout     int32
@@ -148,6 +150,18 @@ func WithAppName(appName string) TcpSessionOption {
 func WithAppProcessName(appProcessName string) TcpSessionOption {
 	return newFuncTcpSessionOption(func(c *tcpSessionConfig) {
 		c.AppProcessName = appProcessName
+	})
+}
+
+func WithOkindName(okindName string) TcpSessionOption {
+	return newFuncTcpSessionOption(func(c *tcpSessionConfig) {
+		c.OkindName = okindName
+	})
+}
+
+func WithOnodeName(onodeName string) TcpSessionOption {
+	return newFuncTcpSessionOption(func(c *tcpSessionConfig) {
+		c.OnodeName = onodeName
 	})
 }
 

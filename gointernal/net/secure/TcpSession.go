@@ -170,7 +170,9 @@ func (this *TcpSession) readKeyReset(in *io.DataInputX) []byte {
 	data := in.ReadIntBytesLimit(1024)
 	secu := GetSecurityMaster()
 
-	conf.Log.Println(">>>>> readKeyReset", "pcode=", pcode, ", oid=", oid)
+	conf.Log.Println(">>>>> readKeyReset", "pcode=", pcode, ", oid=", oid,
+		", okind=", secu.OKIND, "(", secu.OKIND_NAME, ")",
+		", onode=", secu.ONODE, "(", secu.ONODE_NAME, ")")
 	if pcode != secu.PCODE || oid != secu.OID {
 		return []byte{}
 	} else {

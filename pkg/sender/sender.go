@@ -206,9 +206,11 @@ func (s *Sender) sendToServer(p pack.Pack) error {
 		return fmt.Errorf("no security master available")
 	}
 
-	// Set the PCODE and OID from the security master
+	// Set the PCODE, OID, OKIND, ONODE from the security master
 	p.SetPCODE(securityMaster.PCODE)
 	p.SetOID(securityMaster.OID)
+	p.SetOKIND(securityMaster.OKIND)
+	p.SetONODE(securityMaster.ONODE)
 
 	// Set the time to the current time
 	p.SetTime(time.Now().UnixMilli())

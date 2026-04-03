@@ -92,6 +92,8 @@ func sendAgentBootInfo() {
 	p := pack.NewParamPack()
 	p.Pcode = secu.PCODE
 	p.Oid = secu.OID
+	p.Okind = secu.OKIND
+	p.Onode = secu.ONODE
 	p.Time = now
 	p.Id = AGENT_BOOT_ENV
 
@@ -157,6 +159,8 @@ func sendCounterPack(now int64) {
 	// Identification
 	p.Pcode = secu.PCODE
 	p.Oid = secu.OID
+	p.Okind = secu.OKIND
+	p.Onode = secu.ONODE
 	p.Time = now
 	p.Duration = 5
 

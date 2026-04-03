@@ -169,8 +169,20 @@ func BootOpenAgent(version, commitHash, buildTime string, logger *logfile.FileLo
 		logutil.Infof("CONFIG", "No oname set (whatap.oname / WHATAP_ONAME / app_name), will use auto-generated pattern")
 	}
 
+	// Determine okind: whatap.okind > WHATAP_OKIND
+	okindName := config.Get("whatap.okind")
+	if okindName == "" {
+		okindName = os.Getenv("WHATAP_OKIND")
+	}
+
+	// Determine onode: whatap.onode > WHATAP_ONODE
+	onodeName := config.Get("whatap.onode")
+	if onodeName == "" {
+		onodeName = os.Getenv("WHATAP_ONODE")
+	}
+
 	// Initialize secure communication
-	secure.StartNet(secure.WithLogger(logger), secure.WithAccessKey(license), secure.WithServers(servers), secure.WithOname(oname), secure.WithConfigObserver(golibconfig.GetConfigObserver()))
+	secure.StartNet(secure.WithLogger(logger), secure.WithAccessKey(license), secure.WithServers(servers), secure.WithOname(oname), secure.WithOkindName(okindName), secure.WithOnodeName(onodeName), secure.WithConfigObserver(golibconfig.GetConfigObserver()))
 
 	// Apply initial config from whatap.conf to secure package
 	golibconfig.GetConfigObserver().Run(config.GetInstance())
