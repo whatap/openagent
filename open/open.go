@@ -212,12 +212,16 @@ func BootOpenAgent(version, commitHash, buildTime string, logger *logfile.FileLo
 	// Start control handler for server-side commands (GET_ENV, CONFIGURE_GET, SET_CONFIG, AGENT_LOG_LIST, AGENT_LOG_READ)
 	control.InitControlHandler(logger)
 
-	// Start TagCountPack + TextPack + ParamPack sender if tag_counter_enabled=true (default: false)
-	if config.GetBoolWithDefault("tag_counter_enabled", false) {
-		logutil.Infof("CONFIG", "tag_counter_enabled=true, starting TagCountPack/TextPack/ParamPack sender")
-		counter.StartCounterManager()
+	// Read config flags
+	tagCounterEnabled := config.GetBoolWithDefault("tag_counter_enabled", false)
+	endpointMeteringEnabled := config.GetBoolWithDefault("endpoint_metering_enabled", false)
+	logutil.Infof("CONFIG", "tag_counter_enabled=%v, endpoint_metering_enabled=%v", tagCounterEnabled, endpointMeteringEnabled)
+
+	// Start CounterManager if either tag_counter or endpoint_metering is enabled
+	if tagCounterEnabled || endpointMeteringEnabled {
+		counter.StartCounterManager(tagCounterEnabled, endpointMeteringEnabled)
 	} else {
-		logutil.Infof("CONFIG", "tag_counter_enabled=false, TagCountPack/TextPack/ParamPack sender disabled")
+		logutil.Infof("CONFIG", "CounterManager disabled")
 	}
 
 	// Check if test mode is enabled
@@ -370,7 +374,7 @@ func BootOpenAgent(version, commitHash, buildTime string, logger *logfile.FileLo
 	}()
 
 	// Create and start the sender with error recovery and shutdown handling
-	senderInstance = sender.NewSender(processedQueue, GetAppLogger())
+	senderInstance = sender.NewSender(processedQueue, GetAppLogger(), endpointMeteringEnabled)
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {

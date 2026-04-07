@@ -11,11 +11,14 @@ import (
 	"github.com/whatap/golib/lang/value"
 	"github.com/whatap/golib/util/dateutil"
 
+	"open-agent/pkg/endpoint"
+	"open-agent/pkg/model"
 	"open-agent/tools/util/logutil"
 )
 
 const (
-	counterInterval    = 5000 // 5 seconds in milliseconds
+	counterInterval    = 5000  // 5 seconds in milliseconds
+	endpointInterval   = 60000 // 60 seconds in milliseconds
 	AGENT_BOOT_ENV     = 2
 	OTYPE_INTEGRATIONS = 0x0016
 )
@@ -26,8 +29,16 @@ var agentStartTime int64
 // agentBootInfo stores the ParamPack for periodic resending
 var agentBootInfo *pack.ParamPack
 
-// StartCounterManager starts a goroutine that sends TagCountPack every 5 seconds
-func StartCounterManager() {
+// tagCounterEnabled controls whether TagCountPack/TextPack/ParamPack are sent
+var tagCounterEnabled bool
+
+// endpointMeteringEnabled controls whether EndpointPack is sent
+var endpointMeteringEnabled bool
+
+// StartCounterManager starts a goroutine that runs the counter loop
+func StartCounterManager(tagCounterFlag bool, endpointMeteringFlag bool) {
+	tagCounterEnabled = tagCounterFlag
+	endpointMeteringEnabled = endpointMeteringFlag
 	agentStartTime = dateutil.Now()
 	go runCounter()
 }
@@ -48,11 +59,13 @@ func runCounter() {
 		time.Sleep(500 * time.Millisecond)
 	}
 
-	logutil.Infoln("CounterManager", "TagCountPack sender started, interval=5s")
+	logutil.Infoln("CounterManager", fmt.Sprintf("CounterManager started (tagCounter=%v, endpoint=%v)", tagCounterEnabled, endpointMeteringEnabled))
 
 	// === Boot-time sends (1 time) ===
-	sendTextPacks()
-	sendAgentBootInfo()
+	if tagCounterEnabled {
+		sendTextPacks()
+		sendAgentBootInfo()
+	}
 
 	// Align to 5-second boundary
 	now := dateutil.Now()
@@ -64,23 +77,31 @@ func runCounter() {
 	// Next time to resend TextPacks (every 5 minutes)
 	nextTextTime := now/dateutil.MILLIS_PER_FIVE_MINUTE*dateutil.MILLIS_PER_FIVE_MINUTE + dateutil.MILLIS_PER_FIVE_MINUTE
 
+	// Next time to send EndpointPack (every 60 seconds)
+	nextEndpointTime := now/int64(endpointInterval)*int64(endpointInterval) + int64(endpointInterval)
+
 	for {
 		sleepUntil(next)
 		now = dateutil.Now()
 
-		sendTagCountPack(now)
-		sendIntegrationsCounter(now)
+		if tagCounterEnabled {
+			sendTagCountPack(now)
+			sendIntegrationsCounter(now)
 
-		// Resend TextPacks every 5 minutes
-		if now >= nextTextTime {
-			sendTextPacks()
-			nextTextTime = now/dateutil.MILLIS_PER_FIVE_MINUTE*dateutil.MILLIS_PER_FIVE_MINUTE + dateutil.MILLIS_PER_FIVE_MINUTE
+			if now >= nextTextTime {
+				sendTextPacks()
+				nextTextTime = now/dateutil.MILLIS_PER_FIVE_MINUTE*dateutil.MILLIS_PER_FIVE_MINUTE + dateutil.MILLIS_PER_FIVE_MINUTE
+			}
+
+			if now >= nextBootInfoTime {
+				resendAgentBootInfo(now)
+				nextBootInfoTime = now/dateutil.MILLIS_PER_HOUR*dateutil.MILLIS_PER_HOUR + dateutil.MILLIS_PER_HOUR
+			}
 		}
 
-		// Resend agent boot info every hour
-		if now >= nextBootInfoTime {
-			resendAgentBootInfo(now)
-			nextBootInfoTime = now/dateutil.MILLIS_PER_HOUR*dateutil.MILLIS_PER_HOUR + dateutil.MILLIS_PER_HOUR
+		if endpointMeteringEnabled && now >= nextEndpointTime {
+			sendEndpointPack(now)
+			nextEndpointTime = now/int64(endpointInterval)*int64(endpointInterval) + int64(endpointInterval)
 		}
 
 		next = (now/int64(counterInterval))*int64(counterInterval) + int64(counterInterval)
@@ -267,6 +288,36 @@ func sendIntegrationsCounter(now int64) {
 	p.Category = "integrations_counter"
 
 	secure.Send(secure.NET_SECURE_HIDE, p, true)
+}
+
+// sendEndpointPack sends OpenMxEndpointPack with collected endpoints
+func sendEndpointPack(now int64) {
+	defer func() {
+		if r := recover(); r != nil {
+			logutil.Errorln("CounterManager", "Recovered from panic in sendEndpointPack:", r)
+		}
+	}()
+
+	secu := secure.GetSecurityMaster()
+	if secu == nil || secu.PCODE == 0 {
+		return
+	}
+
+	eps := endpoint.Snapshot()
+	if len(eps) == 0 {
+		return
+	}
+
+	p := model.NewOpenMxEndpointPack()
+	p.Pcode = secu.PCODE
+	p.Oid = secu.OID
+	p.Okind = secu.OKIND
+	p.Onode = secu.ONODE
+	p.Time = now
+	p.Endpoints = eps
+
+	secure.Send(secure.NET_SECURE_HIDE, p, true)
+	logutil.Infoln("CounterManager", fmt.Sprintf("Sent OpenMxEndpointPack with %d endpoints", len(eps)))
 }
 
 func sleepUntil(targetMs int64) {
