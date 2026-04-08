@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"strconv"
 	"time"
 
 	"github.com/whatap/gointernal/net/secure"
@@ -189,12 +190,31 @@ func sendAgentBootInfo() {
 	// Agent version
 	p.PutString("whatap.version", os.Getenv("WHATAP_VERSION"))
 
+	// Agent start time
+	p.PutString("whatap.starttime", strconv.FormatInt(agentStartTime, 10))
+
+	// Agent identity
+	p.PutString("whatap.oname", secu.ONAME)
+	p.PutString("whatap.name", os.Getenv("whatap.name"))
+	p.PutString("whatap.ip", os.Getenv("whatap.ip"))
+	p.PutString("whatap.hostname", os.Getenv("whatap.hostname"))
+	p.PutString("whatap.type", os.Getenv("whatap.type"))
+	p.PutString("whatap.pid", strconv.Itoa(os.Getpid()))
+
 	// OS info
 	p.PutString("os.name", runtime.GOOS)
 	p.PutString("os.arch", runtime.GOARCH)
 
-	logutil.Infoln("CounterManager", fmt.Sprintf("Sending agent boot info: version=%s, os.name=%s, os.arch=%s",
-		os.Getenv("WHATAP_VERSION"), runtime.GOOS, runtime.GOARCH))
+	// CPU cores (cgroup-aware)
+	cpuCores := getCgroupCpuLimitFloat()
+	if cpuCores <= 0 {
+		cpuCores = float64(runtime.NumCPU())
+	}
+	p.PutString("os.cpucore", strconv.FormatFloat(cpuCores, 'f', -1, 64))
+
+	logutil.Infoln("CounterManager", fmt.Sprintf("Sending agent boot info: version=%s, pid=%d, os=%s/%s, cpucore=%s",
+		os.Getenv("WHATAP_VERSION"), os.Getpid(), runtime.GOOS, runtime.GOARCH,
+		strconv.FormatFloat(cpuCores, 'f', -1, 64)))
 
 	// Send with flush
 	secure.Send(secure.NET_SECURE_HIDE, p, true)
