@@ -209,6 +209,10 @@ func BootOpenAgent(version, commitHash, buildTime string, logger *logfile.FileLo
 	// Apply initial config from whatap.conf to secure package
 	golibconfig.GetConfigObserver().Run(config.GetInstance())
 
+	// Apply log_keep_days config to logutil.Logger (golib FileLogger reads it via ApplyConfig automatically)
+	conf := config.GetConfig()
+	logutil.SetLogKeepDays(conf.LogKeepDays)
+
 	// Start control handler for server-side commands (GET_ENV, CONFIGURE_GET, SET_CONFIG, AGENT_LOG_LIST, AGENT_LOG_READ)
 	control.InitControlHandler(logger)
 

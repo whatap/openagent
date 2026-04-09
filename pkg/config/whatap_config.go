@@ -247,6 +247,7 @@ type Config struct {
 	ServerHost     string
 	LogLevel       string
 	LogFile        string
+	LogKeepDays    int
 	EnableMetrics  bool
 	EnableTracing  bool
 	EnableLogging  bool
@@ -286,6 +287,7 @@ func (wc *WhatapConfig) GetConfig() *Config {
 		ServerHost:     wc.Get("server_host"),
 		LogLevel:       wc.Get("log_level"),
 		LogFile:        wc.Get("log_file"),
+		LogKeepDays:    parseIntValue(wc.Get("log_keep_days"), 7),
 		EnableMetrics:  isTruthy(wc.Get("enable_metrics")),
 		EnableTracing:  isTruthy(wc.Get("enable_tracing")),
 		EnableLogging:  isTruthy(wc.Get("enable_logging")),
