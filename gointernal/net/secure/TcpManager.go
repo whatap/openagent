@@ -58,6 +58,8 @@ func newTcpManager(opts ...TcpSessionOption) *TcpManager {
 	if o.AppProcessName != "" {
 		conf.AppProcessName = o.AppProcessName
 	}
+	conf.OkindName = o.OkindName
+	conf.OnodeName = o.OnodeName
 	conf.ConfigObserver = o.ConfigObserver
 	//p.lastTime = dateutil.SystemNow()
 	// p.Log.Info("newOneWayTcpClient license=", p.License)
@@ -144,6 +146,20 @@ func (this *TcpManager) ApplyConfig(c config.Config) {
 	o.AppProcessName = conf.AppProcessName
 	o.Pcode = conf.Pcode
 	o.Oid = conf.Oid
+
+	// OKIND: whatap.okind from conf
+	okindFromConf := c.GetValue("whatap.okind")
+	if okindFromConf == "" {
+		okindFromConf = os.Getenv("WHATAP_OKIND")
+	}
+	o.OkindName = okindFromConf
+
+	// ONODE: whatap.onode from conf
+	onodeFromConf := c.GetValue("whatap.onode")
+	if onodeFromConf == "" {
+		onodeFromConf = os.Getenv("WHATAP_ONODE")
+	}
+	o.OnodeName = onodeFromConf
 
 	conf = o
 

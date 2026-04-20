@@ -9,21 +9,38 @@ import (
 
 	"github.com/whatap/gointernal/net/secure"
 	"github.com/whatap/golib/lang/pack"
+	"github.com/whatap/golib/lang/value"
 	"github.com/whatap/golib/util/dateutil"
 
+	"open-agent/pkg/endpoint"
+	"open-agent/pkg/model"
 	"open-agent/tools/util/logutil"
 )
 
 const (
-	counterInterval = 5000 // 5 seconds in milliseconds
-	AGENT_BOOT_ENV  = 2
+	counterInterval    = 5000  // 5 seconds in milliseconds
+	endpointInterval   = 60000 // 60 seconds in milliseconds
+	AGENT_BOOT_ENV     = 2
+	OTYPE_INTEGRATIONS = 0x0016
 )
+
+// agentStartTime stores the agent process start time in ms
+var agentStartTime int64
 
 // agentBootInfo stores the ParamPack for periodic resending
 var agentBootInfo *pack.ParamPack
 
-// StartCounterManager starts a goroutine that sends CounterPack1 every 5 seconds
-func StartCounterManager() {
+// tagCounterEnabled controls whether TagCountPack/TextPack/ParamPack are sent
+var tagCounterEnabled bool
+
+// endpointMeteringEnabled controls whether EndpointPack is sent
+var endpointMeteringEnabled bool
+
+// StartCounterManager starts a goroutine that runs the counter loop
+func StartCounterManager(tagCounterFlag bool, endpointMeteringFlag bool) {
+	tagCounterEnabled = tagCounterFlag
+	endpointMeteringEnabled = endpointMeteringFlag
+	agentStartTime = dateutil.Now()
 	go runCounter()
 }
 
@@ -43,13 +60,13 @@ func runCounter() {
 		time.Sleep(500 * time.Millisecond)
 	}
 
-	logutil.Infoln("CounterManager", "CounterPack1 sender started, interval=5s")
+	logutil.Infoln("CounterManager", fmt.Sprintf("CounterManager started (tagCounter=%v, endpoint=%v)", tagCounterEnabled, endpointMeteringEnabled))
 
-	// Send agent boot info (ParamPack with version, oname, etc.)
-	sendAgentBootInfo()
-
-	// Initialize first CPU reading (delta needs two data points)
-	collectCpuPercent()
+	// === Boot-time sends (1 time) ===
+	if tagCounterEnabled {
+		sendTextPacks()
+		sendAgentBootInfo()
+	}
 
 	// Align to 5-second boundary
 	now := dateutil.Now()
@@ -58,19 +75,92 @@ func runCounter() {
 	// Next time to resend agent boot info (every 1 hour)
 	nextBootInfoTime := now/dateutil.MILLIS_PER_HOUR*dateutil.MILLIS_PER_HOUR + dateutil.MILLIS_PER_HOUR
 
+	// Next time to resend TextPacks (every 5 minutes)
+	nextTextTime := now/dateutil.MILLIS_PER_FIVE_MINUTE*dateutil.MILLIS_PER_FIVE_MINUTE + dateutil.MILLIS_PER_FIVE_MINUTE
+
+	// Next time to send EndpointPack (every 60 seconds)
+	nextEndpointTime := now/int64(endpointInterval)*int64(endpointInterval) + int64(endpointInterval)
+
 	for {
 		sleepUntil(next)
 		now = dateutil.Now()
 
-		sendCounterPack(now)
+		if tagCounterEnabled {
+			sendTagCountPack(now)
+			sendIntegrationsCounter(now)
 
-		// Resend agent boot info every hour
-		if now >= nextBootInfoTime {
-			resendAgentBootInfo(now)
-			nextBootInfoTime = now/dateutil.MILLIS_PER_HOUR*dateutil.MILLIS_PER_HOUR + dateutil.MILLIS_PER_HOUR
+			if now >= nextTextTime {
+				sendTextPacks()
+				nextTextTime = now/dateutil.MILLIS_PER_FIVE_MINUTE*dateutil.MILLIS_PER_FIVE_MINUTE + dateutil.MILLIS_PER_FIVE_MINUTE
+			}
+
+			if now >= nextBootInfoTime {
+				resendAgentBootInfo(now)
+				nextBootInfoTime = now/dateutil.MILLIS_PER_HOUR*dateutil.MILLIS_PER_HOUR + dateutil.MILLIS_PER_HOUR
+			}
+		}
+
+		if endpointMeteringEnabled && now >= nextEndpointTime {
+			sendEndpointPack(now)
+			nextEndpointTime = now/int64(endpointInterval)*int64(endpointInterval) + int64(endpointInterval)
 		}
 
 		next = (now/int64(counterInterval))*int64(counterInterval) + int64(counterInterval)
+	}
+}
+
+// sendTextPacks sends TextPacks for ONAME, OKIND, ONODE_NAME registration
+func sendTextPacks() {
+	defer func() {
+		if r := recover(); r != nil {
+			logutil.Errorln("CounterManager", "Recovered from panic in sendTextPacks:", r)
+		}
+	}()
+
+	secu := secure.GetSecurityMaster()
+	if secu == nil || secu.PCODE == 0 {
+		return
+	}
+
+	now := dateutil.Now()
+
+	// TextPack for ONAME
+	if len(secu.ONAME) > 0 {
+		tp := pack.NewTextPack()
+		tp.Pcode = secu.PCODE
+		tp.Oid = secu.OID
+		tp.Okind = secu.OKIND
+		tp.Onode = secu.ONODE
+		tp.Time = now
+		tp.AddText(pack.TextRec{Div: pack.TEXT_ONAME, Hash: secu.OID, Text: secu.ONAME})
+		secure.Send(secure.NET_SECURE_HIDE, tp, true)
+		//logutil.Infoln("CounterManager", fmt.Sprintf("Sent TextPack ONAME: hash=%d, text=%s", secu.OID, secu.ONAME))
+	}
+
+	// TextPack for OKIND
+	if secu.OKIND != 0 && len(secu.OKIND_NAME) > 0 {
+		tp := pack.NewTextPack()
+		tp.Pcode = secu.PCODE
+		tp.Oid = secu.OID
+		tp.Okind = secu.OKIND
+		tp.Onode = secu.ONODE
+		tp.Time = now
+		tp.AddText(pack.TextRec{Div: pack.TEXT_OKIND, Hash: secu.OKIND, Text: secu.OKIND_NAME})
+		secure.Send(secure.NET_SECURE_HIDE, tp, true)
+		//logutil.Infoln("CounterManager", fmt.Sprintf("Sent TextPack OKIND: hash=%d, text=%s", secu.OKIND, secu.OKIND_NAME))
+	}
+
+	// TextPack for ONODE_NAME
+	if secu.ONODE != 0 && len(secu.ONODE_NAME) > 0 {
+		tp := pack.NewTextPack()
+		tp.Pcode = secu.PCODE
+		tp.Oid = secu.OID
+		tp.Okind = secu.OKIND
+		tp.Onode = secu.ONODE
+		tp.Time = now
+		tp.AddText(pack.TextRec{Div: pack.ONODE_NAME, Hash: secu.ONODE, Text: secu.ONODE_NAME})
+		secure.Send(secure.NET_SECURE_HIDE, tp, true)
+		//logutil.Infoln("CounterManager", fmt.Sprintf("Sent TextPack ONODE_NAME: hash=%d, text=%s", secu.ONODE, secu.ONODE_NAME))
 	}
 }
 
@@ -92,36 +182,39 @@ func sendAgentBootInfo() {
 	p := pack.NewParamPack()
 	p.Pcode = secu.PCODE
 	p.Oid = secu.OID
+	p.Okind = secu.OKIND
+	p.Onode = secu.ONODE
 	p.Time = now
 	p.Id = AGENT_BOOT_ENV
 
 	// Agent version
 	p.PutString("whatap.version", os.Getenv("WHATAP_VERSION"))
 
-	// Start time
-	os.Setenv("whatap.starttime", strconv.FormatInt(now, 10))
-	p.PutString("whatap.starttime", os.Getenv("whatap.starttime"))
+	// Agent start time
+	p.PutString("whatap.starttime", strconv.FormatInt(agentStartTime, 10))
 
 	// Agent identity
 	p.PutString("whatap.oname", secu.ONAME)
 	p.PutString("whatap.name", os.Getenv("whatap.name"))
-	p.PutString("whatap.ip", int32ToIP(secu.IP))
-	hostName, _ := os.Hostname()
-	p.PutString("whatap.hostname", hostName)
+	p.PutString("whatap.ip", os.Getenv("whatap.ip"))
+	p.PutString("whatap.hostname", os.Getenv("whatap.hostname"))
 	p.PutString("whatap.type", os.Getenv("whatap.type"))
 	p.PutString("whatap.pid", strconv.Itoa(os.Getpid()))
 
 	// OS info
-	p.PutString("os.arch", runtime.GOARCH)
 	p.PutString("os.name", runtime.GOOS)
+	p.PutString("os.arch", runtime.GOARCH)
+
+	// CPU cores (cgroup-aware)
 	cpuCores := getCgroupCpuLimitFloat()
 	if cpuCores <= 0 {
 		cpuCores = float64(runtime.NumCPU())
 	}
 	p.PutString("os.cpucore", strconv.FormatFloat(cpuCores, 'f', -1, 64))
 
-	logutil.Infoln("CounterManager", fmt.Sprintf("Sending agent boot info: version=%s, oname=%s",
-		os.Getenv("WHATAP_VERSION"), secu.ONAME))
+	logutil.Infoln("CounterManager", fmt.Sprintf("Sending agent boot info: version=%s, pid=%d, os=%s/%s, cpucore=%s",
+		os.Getenv("WHATAP_VERSION"), os.Getpid(), runtime.GOOS, runtime.GOARCH,
+		strconv.FormatFloat(cpuCores, 'f', -1, 64)))
 
 	// Send with flush
 	secure.Send(secure.NET_SECURE_HIDE, p, true)
@@ -140,10 +233,11 @@ func resendAgentBootInfo(now int64) {
 	secure.Send(secure.NET_SECURE_HIDE, agentBootInfo, true)
 }
 
-func sendCounterPack(now int64) {
+// sendTagCountPack sends TagCountPack with category "common_agent_info"
+func sendTagCountPack(now int64) {
 	defer func() {
 		if r := recover(); r != nil {
-			logutil.Errorln("CounterManager", "Recovered from panic in sendCounterPack:", r)
+			logutil.Errorln("CounterManager", "Recovered from panic in sendTagCountPack:", r)
 		}
 	}()
 
@@ -152,57 +246,98 @@ func sendCounterPack(now int64) {
 		return
 	}
 
-	p := pack.NewCounterPack1()
+	p := pack.NewTagCountPack()
 
-	// Identification
+	// AbstractPack common fields
 	p.Pcode = secu.PCODE
 	p.Oid = secu.OID
+	p.Okind = secu.OKIND
+	p.Onode = secu.ONODE
 	p.Time = now
-	p.Duration = 5
 
-	// CPU cores (container-aware)
-	p.CpuCores = GetCPUCores()
+	// TagCountPack specific
+	p.Category = "common_agent_info"
 
-	// System CPU %
-	//cpuInfo := collectCpuPercent()
-	//p.Cpu = cpuInfo.Cpu
-	//p.CpuSys = cpuInfo.CpuSys
-	//p.CpuUsr = cpuInfo.CpuUsr
-	//p.CpuWait = cpuInfo.CpuWait
-	//p.CpuSteal = cpuInfo.CpuSteal
-	//p.CpuIrq = cpuInfo.CpuIrq
+	// Tags: agent identification (must use numeric types for yard-side getInt() parsing)
+	p.Tags.Put("otype", value.NewDecimalValue(int64(OTYPE_INTEGRATIONS)))
+	p.Tags.Put("subType", value.NewDecimalValue(1))
+	p.Tags.Put("hostIp", value.NewDecimalValue(int64(secu.IP)))
+	p.Tags.Put("startTime", value.NewDecimalValue(agentStartTime))
+	cpuCores := getCgroupCpuLimitFloat()
+	if cpuCores <= 0 {
+		cpuCores = float64(runtime.NumCPU())
+	}
+	p.Tags.Put("cpuCores", value.NewDecimalValue(int64(cpuCores)))
 
-	// System memory %
-	//memInfo := collectMemPercent()
-	//p.Mem = memInfo.Mem
-	//p.Swap = memInfo.Swap
-
-	// Process CPU %
-	//p.CpuProc = collectProcCpuPercent(p.CpuCores)
-
-	// Host IP (int32 from SecurityMaster, set during TCP connection)
-	p.HostIp = secu.IP
-
-	// Pack version
-	p.Version = 1
-
-	// Go runtime heap memory
-	var memStats runtime.MemStats
-	runtime.ReadMemStats(&memStats)
-	p.HeapUse = int64(memStats.HeapInuse)
-	p.HeapTot = int64(memStats.HeapSys)
-
-	// Thread (goroutine) count
-	p.ThreadCount = int32(runtime.NumGoroutine())
-
-	// PID
-	p.Pid = int32(os.Getpid())
-
-	// Starttime
-	p.Starttime, _ = strconv.ParseInt(os.Getenv("whatap.starttime"), 10, 64)
+	//// Tags: name information (for server-side resolution)
+	//p.PutTag("oname", secu.ONAME)
+	//p.PutTag("okindName", secu.OKIND_NAME)
+	//p.PutTag("onodeName", secu.ONODE_NAME)
+	//
+	//// Fields: runtime metrics
+	//var memStats runtime.MemStats
+	//runtime.ReadMemStats(&memStats)
+	//p.Put("heapUsed", int64(memStats.HeapInuse))
+	//p.Put("heapTotal", int64(memStats.HeapSys))
+	//p.Put("goroutineCount", int32(runtime.NumGoroutine()))
+	//p.Put("pid", int32(os.Getpid()))
 
 	// Send with immediate flush
 	secure.Send(secure.NET_SECURE_HIDE, p, true)
+}
+
+// sendIntegrationsCounter sends TagCountPack with category "integrations_counter"
+func sendIntegrationsCounter(now int64) {
+	defer func() {
+		if r := recover(); r != nil {
+			logutil.Errorln("CounterManager", "Recovered from panic in sendIntegrationsCounter:", r)
+		}
+	}()
+
+	secu := secure.GetSecurityMaster()
+	if secu == nil || secu.PCODE == 0 {
+		return
+	}
+
+	p := pack.NewTagCountPack()
+	p.Pcode = secu.PCODE
+	p.Oid = secu.OID
+	p.Okind = secu.OKIND
+	p.Onode = secu.ONODE
+	p.Time = now
+	p.Category = "integrations_counter"
+
+	secure.Send(secure.NET_SECURE_HIDE, p, true)
+}
+
+// sendEndpointPack sends OpenMxEndpointPack with collected endpoints
+func sendEndpointPack(now int64) {
+	defer func() {
+		if r := recover(); r != nil {
+			logutil.Errorln("CounterManager", "Recovered from panic in sendEndpointPack:", r)
+		}
+	}()
+
+	secu := secure.GetSecurityMaster()
+	if secu == nil || secu.PCODE == 0 {
+		return
+	}
+
+	eps := endpoint.Snapshot()
+	if len(eps) == 0 {
+		return
+	}
+
+	p := model.NewOpenMxEndpointPack()
+	p.Pcode = secu.PCODE
+	p.Oid = secu.OID
+	p.Okind = secu.OKIND
+	p.Onode = secu.ONODE
+	p.Time = now
+	p.Endpoints = eps
+
+	secure.Send(secure.NET_SECURE_HIDE, p, true)
+	logutil.Infoln("CounterManager", fmt.Sprintf("Sent OpenMxEndpointPack with %d endpoints", len(eps)))
 }
 
 func sleepUntil(targetMs int64) {

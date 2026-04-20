@@ -9,6 +9,7 @@ import (
 	"github.com/whatap/golib/lang/pack"
 	"github.com/whatap/golib/logger/logfile"
 
+	"open-agent/pkg/endpoint"
 	"open-agent/pkg/model"
 )
 
@@ -25,27 +26,29 @@ const (
 
 // Sender is responsible for sending processed metrics to the server
 type Sender struct {
-	processedQueue chan *model.ConversionResult
-	logger         *logfile.FileLogger
-	shutdownCh     chan struct{}
-	doneCh         chan struct{}
-	lastSendTime   map[string]int64
-	mu             sync.Mutex
+	processedQueue          chan *model.ConversionResult
+	logger                  *logfile.FileLogger
+	shutdownCh              chan struct{}
+	doneCh                  chan struct{}
+	lastSendTime            map[string]int64
+	mu                      sync.Mutex
+	endpointMeteringEnabled bool
 }
 
 // NewSender creates a new Sender instance
-func NewSender(processedQueue chan *model.ConversionResult, logger *logfile.FileLogger) *Sender {
+func NewSender(processedQueue chan *model.ConversionResult, logger *logfile.FileLogger, endpointMeteringEnabled bool) *Sender {
 	if logger == nil {
 		// Fallback to a default logger if not provided
 		logger = logfile.NewFileLogger()
 	}
 
 	return &Sender{
-		processedQueue: processedQueue,
-		logger:         logger,
-		shutdownCh:     make(chan struct{}),
-		doneCh:         make(chan struct{}),
-		lastSendTime:   make(map[string]int64),
+		processedQueue:          processedQueue,
+		logger:                  logger,
+		shutdownCh:              make(chan struct{}),
+		doneCh:                  make(chan struct{}),
+		lastSendTime:            make(map[string]int64),
+		endpointMeteringEnabled: endpointMeteringEnabled,
 	}
 }
 
@@ -110,6 +113,12 @@ func (s *Sender) sendResult(result *model.ConversionResult) {
 		s.mu.Unlock()
 	}
 
+	target := result.GetTarget()
+
+	if s.endpointMeteringEnabled {
+		endpoint.Register(target)
+	}
+
 	// Send OpenMxHelp data
 	openMxHelpList := result.GetOpenMxHelpList()
 	if len(openMxHelpList) > 0 {
@@ -119,7 +128,7 @@ func (s *Sender) sendResult(result *model.ConversionResult) {
 	// Send OpenMx data
 	openMxList := result.GetOpenMxList()
 	if len(openMxList) > 0 {
-		s.sendMetrics(openMxList)
+		s.sendMetrics(openMxList, target)
 	}
 }
 
@@ -142,7 +151,7 @@ func (s *Sender) sendHelp(helpList []*model.OpenMxHelp) {
 }
 
 // sendMetrics sends OpenMx data in chunks
-func (s *Sender) sendMetrics(metrics []*model.OpenMx) {
+func (s *Sender) sendMetrics(metrics []*model.OpenMx, target string) {
 	total := len(metrics)
 	for i := 0; i < total; i += ChunkSize {
 		end := i + ChunkSize
@@ -154,7 +163,7 @@ func (s *Sender) sendMetrics(metrics []*model.OpenMx) {
 		s.logger.Println("Sender", fmt.Sprintf("Sending %d OpenMx records", len(chunk)))
 
 		// Create a pack and send it
-		metricsPack := createMetricsPack(chunk)
+		metricsPack := createMetricsPack(chunk, s.endpointMeteringEnabled, target)
 		s.sendToServerWithRetry(metricsPack)
 	}
 }
@@ -169,10 +178,13 @@ func createHelpPack(helpList []*model.OpenMxHelp) pack.Pack {
 }
 
 // createMetricsPack creates a pack of OpenMx records for sending
-func createMetricsPack(metrics []*model.OpenMx) pack.Pack {
+func createMetricsPack(metrics []*model.OpenMx, endpointMeteringEnabled bool, target string) pack.Pack {
 	// Create a pack for the metrics data
 	p := model.NewOpenMxPack()
 	p.SetRecords(metrics)
+	if endpointMeteringEnabled {
+		p.Endpoint = target
+	}
 
 	return p
 }
@@ -206,9 +218,11 @@ func (s *Sender) sendToServer(p pack.Pack) error {
 		return fmt.Errorf("no security master available")
 	}
 
-	// Set the PCODE and OID from the security master
+	// Set the PCODE, OID, OKIND, ONODE from the security master
 	p.SetPCODE(securityMaster.PCODE)
 	p.SetOID(securityMaster.OID)
+	p.SetOKIND(securityMaster.OKIND)
+	p.SetONODE(securityMaster.ONODE)
 
 	// Set the time to the current time
 	p.SetTime(time.Now().UnixMilli())

@@ -14,9 +14,10 @@ const (
 // OpenMxPack represents a pack of OpenMx records for sending to the server
 type OpenMxPack struct {
 	pack.AbstractPack
-	zip     byte
-	bytes   []byte
-	records []*OpenMx
+	zip      byte
+	bytes    []byte
+	records  []*OpenMx
+	Endpoint string
 }
 
 // GetPackType returns the pack type
@@ -32,6 +33,9 @@ func (p *OpenMxPack) Write(dout *io.DataOutputX) {
 	}
 	dout.WriteByte(p.zip)
 	dout.WriteBlob(p.bytes)
+	if len(p.Endpoint) > 0 {
+		dout.WriteText(p.Endpoint)
+	}
 }
 
 // Read deserializes the pack from a DataInputX
@@ -39,6 +43,9 @@ func (p *OpenMxPack) Read(din *io.DataInputX) {
 	p.AbstractPack.Read(din)
 	p.zip = din.ReadByte()
 	p.bytes = din.ReadBlob()
+	if din.Available() > 0 {
+		p.Endpoint = din.ReadText()
+	}
 }
 
 // SetRecords sets the records for the pack

@@ -127,6 +127,11 @@ func exitOnStdinClose(logger *logfile.FileLogger) {
 
 func main() {
 
+	// Set version to environment variable for use by other packages
+	if version != "" {
+		os.Setenv("WHATAP_VERSION", version)
+	}
+
 	printWhatap := fmt.Sprint("\n" +
 		" _      ____       ______WHATAP-OPEN-AGENT\n" +
 		"| | /| / / /  ___ /_  __/__ ____\n" +

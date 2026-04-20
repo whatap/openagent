@@ -169,21 +169,63 @@ func BootOpenAgent(version, commitHash, buildTime string, logger *logfile.FileLo
 		logutil.Infof("CONFIG", "No oname set (whatap.oname / WHATAP_ONAME / app_name), will use auto-generated pattern")
 	}
 
+	// Determine object_name pattern: whatap.name > WHATAP_NAME > object_name (for auto-generation when oname is empty)
+	objectNamePattern := config.Get("whatap.name")
+	if objectNamePattern == "" {
+		objectNamePattern = os.Getenv("WHATAP_NAME")
+	}
+	if objectNamePattern == "" {
+		objectNamePattern = config.Get("object_name")
+	}
+
+	// Determine okind: whatap.okind > WHATAP_OKIND
+	okindName := config.Get("whatap.okind")
+	if okindName == "" {
+		okindName = os.Getenv("WHATAP_OKIND")
+	}
+
+	// Determine onode: whatap.onode > WHATAP_ONODE
+	onodeName := config.Get("whatap.onode")
+	if onodeName == "" {
+		onodeName = os.Getenv("WHATAP_ONODE")
+	}
+
 	// Initialize secure communication
-	secure.StartNet(secure.WithLogger(logger), secure.WithAccessKey(license), secure.WithServers(servers), secure.WithOname(oname), secure.WithConfigObserver(golibconfig.GetConfigObserver()))
+	opts := []secure.TcpSessionOption{
+		secure.WithLogger(logger),
+		secure.WithAccessKey(license),
+		secure.WithServers(servers),
+		secure.WithOname(oname),
+		secure.WithOkindName(okindName),
+		secure.WithOnodeName(onodeName),
+		secure.WithConfigObserver(golibconfig.GetConfigObserver()),
+	}
+	if objectNamePattern != "" {
+		opts = append(opts, secure.WithObjectName(objectNamePattern))
+		logutil.Infof("CONFIG", "object_name pattern: %s", objectNamePattern)
+	}
+	secure.StartNet(opts...)
 
 	// Apply initial config from whatap.conf to secure package
 	golibconfig.GetConfigObserver().Run(config.GetInstance())
 
+	// Apply log_keep_days config to logutil.Logger (golib FileLogger reads it via ApplyConfig automatically)
+	conf := config.GetConfig()
+	logutil.SetLogKeepDays(conf.LogKeepDays)
+
 	// Start control handler for server-side commands (GET_ENV, CONFIGURE_GET, SET_CONFIG, AGENT_LOG_LIST, AGENT_LOG_READ)
 	control.InitControlHandler(logger)
 
-	// Start CounterPack1 + ParamPack sender if counter_enabled=true (default: false)
-	if config.GetBoolWithDefault("counter_enabled", false) {
-		logutil.Infof("CONFIG", "counter_enabled=true, starting CounterPack1/ParamPack sender")
-		counter.StartCounterManager()
+	// Read config flags
+	tagCounterEnabled := config.GetBoolWithDefault("tag_counter_enabled", false)
+	endpointMeteringEnabled := config.GetBoolWithDefault("endpoint_metering_enabled", false)
+	logutil.Infof("CONFIG", "tag_counter_enabled=%v, endpoint_metering_enabled=%v", tagCounterEnabled, endpointMeteringEnabled)
+
+	// Start CounterManager if either tag_counter or endpoint_metering is enabled
+	if tagCounterEnabled || endpointMeteringEnabled {
+		counter.StartCounterManager(tagCounterEnabled, endpointMeteringEnabled)
 	} else {
-		logutil.Infof("CONFIG", "counter_enabled=false, CounterPack1/ParamPack sender disabled")
+		logutil.Infof("CONFIG", "CounterManager disabled")
 	}
 
 	// Check if test mode is enabled
@@ -336,7 +378,7 @@ func BootOpenAgent(version, commitHash, buildTime string, logger *logfile.FileLo
 	}()
 
 	// Create and start the sender with error recovery and shutdown handling
-	senderInstance = sender.NewSender(processedQueue, GetAppLogger())
+	senderInstance = sender.NewSender(processedQueue, GetAppLogger(), endpointMeteringEnabled)
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {

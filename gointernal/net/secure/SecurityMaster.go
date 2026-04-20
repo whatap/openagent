@@ -22,6 +22,10 @@ type SecurityMaster struct {
 	PCODE       int64
 	OID         int32
 	ONAME       string
+	OKIND       int32
+	OKIND_NAME  string
+	ONODE       int32
+	ONODE_NAME  string
 	IP          int32
 	SECURE_KEY  []byte
 	Cypher      *crypto.Cypher
@@ -142,9 +146,43 @@ func (this *SecurityMaster) DecideAgentOnameOid(myIp string) {
 		os.Setenv("whatap.oname", this.ONAME)
 		conf.Log.Println("WA10802", " [DecideOname] oname=", this.ONAME, ", OID=", this.OID)
 	}
+
+	// OKIND: OKIND env → POD_NAME에서 추출 → whatap.okind 설정값
+	okindName := strings.TrimSpace(conf.OkindName)
+	if okindName == "" {
+		okindName = strings.TrimSpace(os.Getenv("OKIND"))
+	}
+	if okindName == "" {
+		podName := os.Getenv("POD_NAME")
+		if podName == "" {
+			podName = os.Getenv("PODNAME")
+		}
+		if podName != "" {
+			if idx := strings.LastIndex(podName, "-"); idx > 0 {
+				okindName = podName[:idx]
+			}
+		}
+	}
+	if okindName != "" {
+		this.OKIND = hash.HashStr(okindName)
+		this.OKIND_NAME = okindName
+	}
+
+	// ONODE: whatap.onode 설정값 → NODE_NAME env → NODE_IP env
+	onodeName := strings.TrimSpace(conf.OnodeName)
+	if onodeName == "" {
+		onodeName = strings.TrimSpace(os.Getenv("NODE_NAME"))
+	}
+	if onodeName == "" {
+		onodeName = strings.TrimSpace(os.Getenv("NODE_IP"))
+	}
+	if onodeName != "" {
+		this.ONODE = hash.HashStr(onodeName)
+		this.ONODE_NAME = onodeName
+	}
+
 	if this.lastOid != int64(this.OID) {
 		this.lastOid = int64(this.OID)
-
 	}
 	props := map[string]string{}
 	props["PCODE"] = fmt.Sprint(this.PCODE)
@@ -154,8 +192,9 @@ func (this *SecurityMaster) DecideAgentOnameOid(myIp string) {
 		conf.Config.SetValues(&props)
 	}
 
-	//fmt.Println("PCODE=", this.PCODE, "OID=", this.OID, "ONAME=", this.ONAME)
-	//logutil.Println("WA10802"," PCODE=", this.PCODE, "OID=", this.OID, "ONAME=", this.ONAME)
+	conf.Log.Println("WA10802", " [DecideOname] oname=", this.ONAME, ", OID=", this.OID,
+		", okind=", this.OKIND, "(", this.OKIND_NAME, ")",
+		", onode=", this.ONODE, "(", this.ONODE_NAME, ")")
 }
 
 func (this *SecurityMaster) AutoAgentNameOrPattern(myIp string) {
