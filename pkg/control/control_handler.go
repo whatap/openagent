@@ -213,9 +213,11 @@ func mergeWriteConfig(newValues map[string]string) {
 		// If key starts with a word char (not a comment like #key=val)
 		if len(key) > 0 && key[0] != '#' {
 			if newVal, ok := newValues[key]; ok {
-				if strings.TrimSpace(newVal) != "" {
-					val = newVal
+				// Empty value means "delete this key"
+				if strings.TrimSpace(newVal) == "" {
+					continue
 				}
+				val = newVal
 			}
 		}
 
