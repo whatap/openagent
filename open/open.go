@@ -17,6 +17,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/whatap/gointernal/net/secure"
@@ -31,50 +32,125 @@ const (
 	ProcessedQueueSize = 10000
 )
 
-var isRun = false
-var readyHealthCheck = false
-var runDate int64
-
-// Global logger for the application
+// appLogger is a process-wide logger reference set when an Agent is
+// constructed. External callers obtain it via GetAppLogger.
 var appLogger *logfile.FileLogger
 
-// Channels for shutdown coordination
-var shutdownCh = make(chan struct{})
-var doneCh = make(chan struct{}, 3) // Buffer for 3 components: scraper, processor, sender
+// Test-mode globals, used only by the optional `test=true` env loop in Run.
+// Kept at package scope because the test loop predates the Agent refactor
+// and there is no benefit to making it reentrant.
+var (
+	deltaMap         = make(map[string]int64)
+	lastHelpSendTime int64
+)
 
-// Debug mode variables
-// Map to store the last value for each metric to calculate deltas
-var deltaMap = make(map[string]int64)
+// defaultAgent backs the package-level BootOpenAgent / Shutdown / IsOK
+// helpers. New code should construct an Agent directly via NewAgent.
+var (
+	defaultAgentMu sync.Mutex
+	defaultAgent   *Agent
+)
 
-// Last time help information was sent
-var lastHelpSendTime int64 = 0
-
-// SetAppLogger sets the application logger
+// SetAppLogger sets the process-wide logger reference.
 func SetAppLogger(logger *logfile.FileLogger) {
 	appLogger = logger
 }
 
-// GetAppLogger returns the application logger
+// GetAppLogger returns the process-wide logger reference.
 func GetAppLogger() *logfile.FileLogger {
 	return appLogger
 }
 
-// BootOpenAgent initializes and starts the Prometheus Agent
-func BootOpenAgent(version, commitHash, buildTime string, logger *logfile.FileLogger) {
-	// Store the logger in the global variable for centralized access
-	SetAppLogger(logger)
+// Agent is one runnable instance of the OpenAgent worker pipeline.
+//
+// An Agent can be Run and Shutdown repeatedly within a single process, which
+// is required for HA modes that gate scraping behind leader election (Run on
+// leader acquire, Shutdown on leader loss).
+type Agent struct {
+	version    string
+	commitHash string
+	buildTime  string
+	logger     *logfile.FileLogger
 
-	// Display version information prominently
+	mu               sync.Mutex
+	isRun            bool
+	readyHealthCheck bool
+	runDate          int64
+
+	// cancel cancels the context derived in Run. Shutdown calls it to
+	// signal background goroutines (notably ServiceDiscovery) to exit.
+	// nil when the agent is not running.
+	cancel context.CancelFunc
+
+	// wg tracks goroutines owned directly by Run that do not have their
+	// own Stop() (currently: the ServiceDiscovery launcher). Stored as a
+	// pointer so each Run can swap in a fresh WaitGroup without racing
+	// against late wg.Done() calls from a previous Run's goroutines (each
+	// goroutine captures the pointer locally before calling Done).
+	wg *sync.WaitGroup
+
+	// Component references retained so that Shutdown can stop them in the
+	// proper data-flow-reverse order. Cleared on Shutdown.
+	scraperManager   *scraper.ScraperManager
+	processor        *processor.Processor
+	senderInstance   *sender.Sender
+	serviceDiscovery discovery.ServiceDiscovery
+}
+
+// NewAgent constructs an Agent. It does not start any goroutines or open
+// any network connections; call Run to start the pipeline.
+func NewAgent(version, commitHash, buildTime string, logger *logfile.FileLogger) *Agent {
 	if version == "" {
 		version = "dev"
 	}
 	if commitHash == "" {
 		commitHash = "unknown"
 	}
+	return &Agent{
+		version:    version,
+		commitHash: commitHash,
+		buildTime:  buildTime,
+		logger:     logger,
+	}
+}
+
+// Run starts the agent pipeline (Scraper, Processor, Sender). For normal
+// (non-test) modes Run returns once initialization completes; the actual
+// pipeline runs in goroutines until Shutdown is called. In test mode
+// (env test=true) Run blocks forever in the legacy test loop.
+//
+// Calling Run on an already-running Agent is a no-op.
+//
+// The context is currently used for ServiceDiscovery. Full context-based
+// shutdown of Scraper/Processor/Sender is a follow-up.
+func (a *Agent) Run(ctx context.Context) {
+	a.mu.Lock()
+	if a.isRun {
+		a.mu.Unlock()
+		if a.logger != nil {
+			a.logger.Infoln("Agent.Run", "Agent already running")
+		}
+		return
+	}
+	// Derive a per-run cancellable context. Shutdown calls cancel to
+	// signal background goroutines. Allocate a fresh WaitGroup pointer
+	// so that any leftover Done() calls from a previous Run (e.g. after
+	// a Shutdown timeout) operate on the old WaitGroup rather than this
+	// one. Goroutines below capture wg locally to preserve that contract.
+	derivedCtx, cancel := context.WithCancel(ctx)
+	a.cancel = cancel
+	a.wg = &sync.WaitGroup{}
+	wg := a.wg
+	a.mu.Unlock()
+	ctx = derivedCtx
+
+	// Store the logger in the package-level reference for centralized access.
+	SetAppLogger(a.logger)
+	logger := a.logger
 
 	logutil.Printf("START", "\nWHATAP Open Agent Starting\n")
-	logutil.Printf("START", " Version: %s\n", version)
-	logutil.Printf("START", " Build: %s\n", commitHash)
+	logutil.Printf("START", " Version: %s\n", a.version)
+	logutil.Printf("START", " Build: %s\n", a.commitHash)
 	logutil.Printf("START", " Started at: %s\n\n", time.Now().Format("2006-01-02 15:04:05 MST"))
 
 	// Get configuration values using the config package
@@ -257,8 +333,13 @@ func BootOpenAgent(version, commitHash, buildTime string, logger *logfile.FileLo
 
 	// Create service discovery
 	serviceDiscovery := discovery.NewServiceDiscovery(configManager)
-	// Start service discovery as an independent component
+	a.serviceDiscovery = serviceDiscovery
+	// Start service discovery as an independent component. Tracked by the
+	// per-run WaitGroup (captured locally so a future Run cannot reassign
+	// it under us) so Shutdown can wait for the launcher to finish.
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		defer func() {
 			if r := recover(); r != nil {
 				logutil.Errorln("ServiceDiscoveryPanic", fmt.Sprintf("Recovered from panic: %v", r))
@@ -274,7 +355,7 @@ func BootOpenAgent(version, commitHash, buildTime string, logger *logfile.FileLo
 			}
 
 			// Start service discovery
-			if err := serviceDiscovery.Start(context.Background()); err != nil {
+			if err := serviceDiscovery.Start(ctx); err != nil {
 				logutil.Infoln("ServiceDiscovery", fmt.Sprintf("Failed to start service discovery: %v", err))
 				return
 			}
@@ -301,136 +382,44 @@ func BootOpenAgent(version, commitHash, buildTime string, logger *logfile.FileLo
 		}
 	}
 
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				logger.Infoln("ScraperManagerPanic", fmt.Sprintf("Recovered from panic: %v", r))
-				// Restart the scraper manager after a short delay
-				select {
-				case <-shutdownCh:
-					// Don't restart if we're shutting down
-					doneCh <- struct{}{}
-					return
-				case <-time.After(5 * time.Second):
-					go scraperManager.StartScraping()
-				}
-			} else {
-				// Normal exit
-				doneCh <- struct{}{}
-			}
-		}()
+	// Each component below spawns its own internal goroutine on Start,
+	// handles its own panic recovery, and exits cleanly on Stop. We hold
+	// references on the Agent so Shutdown can drive their lifecycle in
+	// the proper data-flow-reverse order (Scraper -> Processor -> Sender).
+	a.scraperManager = scraperManager
+	scraperManager.StartScraping()
 
-		// Start scraping in a separate goroutine so we can listen for shutdown
-		scrapeDone := make(chan struct{})
-		go func() {
-			scraperManager.StartScraping()
-			close(scrapeDone)
-		}()
-
-		// Wait for either scraping to finish or shutdown signal
-		select {
-		case <-scrapeDone:
-			// Scraping finished normally
-		case <-shutdownCh:
-			// Shutdown requested, cleanup will be handled by defer
-			logger.Println("ScraperManager", "Shutdown requested")
-			// Here we would call a stop method on scraperManager if it had one
-		}
-	}()
-
-	// Create and start the newProcessor with error recovery and shutdown handling
 	newProcessor := processor.NewProcessor(rawQueue, processedQueue)
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				logger.Println("ProcessorPanic", fmt.Sprintf("Recovered from panic: %v", r))
-				// Restart the newProcessor after a short delay
-				select {
-				case <-shutdownCh:
-					// Don't restart if we're shutting down
-					doneCh <- struct{}{}
-					return
-				case <-time.After(5 * time.Second):
-					newProcessor.Start()
-				}
-			} else {
-				// Normal exit
-				doneCh <- struct{}{}
-			}
-		}()
+	a.processor = newProcessor
+	newProcessor.Start()
 
-		// Start processing in a separate goroutine so we can listen for shutdown
-		processDone := make(chan struct{})
-		go func() {
-			newProcessor.Start()
-			close(processDone)
-		}()
-
-		// Wait for either processing to finish or shutdown signal
-		select {
-		case <-processDone:
-			// Processing finished normally
-		case <-shutdownCh:
-			// Shutdown requested, cleanup will be handled by defer
-			logger.Println("Processor", "Shutdown requested")
-			// Here we would call a stop method on newProcessor if it had one
-		}
-	}()
-
-	// Create and start the sender with error recovery and shutdown handling
-	senderInstance = sender.NewSender(processedQueue, GetAppLogger(), endpointMeteringEnabled)
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				logger.Println("SenderPanic", fmt.Sprintf("Recovered from panic: %v", r))
-				// Restart the sender after a short delay
-				select {
-				case <-shutdownCh:
-					// Don't restart if we're shutting down
-					doneCh <- struct{}{}
-					return
-				case <-time.After(5 * time.Second):
-					senderInstance.Start()
-				}
-			} else {
-				// Normal exit
-				doneCh <- struct{}{}
-			}
-		}()
-
-		// Start sending in a separate goroutine so we can listen for shutdown
-		sendDone := make(chan struct{})
-		go func() {
-			senderInstance.Start()
-			close(sendDone)
-		}()
-
-		// Wait for either sending to finish or shutdown signal
-		select {
-		case <-sendDone:
-			// Sending finished normally
-		case <-shutdownCh:
-			// Shutdown requested, cleanup will be handled by defer
-			logger.Infoln("Sender", "Shutdown requested")
-			// Call Stop on the sender
-			senderInstance.Stop()
-		}
-	}()
+	a.senderInstance = sender.NewSender(processedQueue, GetAppLogger(), endpointMeteringEnabled)
+	a.senderInstance.Start()
 
 	// Set flags to indicate the agent is running
-	isRun = true
-	runDate = dateutil.SystemNow()
+	a.mu.Lock()
+	a.isRun = true
+	a.runDate = dateutil.SystemNow()
+	a.mu.Unlock()
 
 	logger.Infoln("BootOpenAgent", "OpenAgent started successfully")
 }
 
-// IsOK checks if the agent is running properly
-func IsOK() bool {
+// IsOK reports whether the agent is running and the secure session is healthy.
+func (a *Agent) IsOK() bool {
+	a.mu.Lock()
+	isRun := a.isRun
+	runDate := a.runDate
+	ready := a.readyHealthCheck
+	a.mu.Unlock()
+
 	// If health check is not ready yet, check if it's time to enable it
-	if !readyHealthCheck {
+	if !ready {
 		if isRun && (dateutil.SystemNow()-runDate > 2*dateutil.MILLIS_PER_MINUTE) {
-			GetAppLogger().Println("HealthCheckReady", "Worker HealthCheck Ready")
-			readyHealthCheck = true
+			a.logger.Println("HealthCheckReady", "Worker HealthCheck Ready")
+			a.mu.Lock()
+			a.readyHealthCheck = true
+			a.mu.Unlock()
 		}
 		return true // Return healthy until health check is ready
 	}
@@ -440,67 +429,152 @@ func IsOK() bool {
 
 	// Check PCODE
 	if secu.PCODE == 0 {
-		GetAppLogger().Println("HealthCheckFail", fmt.Sprintf("PCODE Error: %d", secu.PCODE))
+		a.logger.Println("HealthCheckFail", fmt.Sprintf("PCODE Error: %d", secu.PCODE))
 		return false
 	}
 
 	// Check OID
 	if secu.OID == 0 {
-		GetAppLogger().Println("HealthCheckFail", fmt.Sprintf("OID Error: %d", secu.OID))
+		a.logger.Println("HealthCheckFail", fmt.Sprintf("OID Error: %d", secu.OID))
 		return false
 	}
 
 	return true
 }
 
-// Global variables to store component references for shutdown
-var senderInstance *sender.Sender
-
-// Shutdown gracefully shuts down all components
-func Shutdown() {
-	if !isRun {
-		GetAppLogger().Println("Shutdown", "Agent is not running")
+// Shutdown gracefully stops the agent pipeline. Calling Shutdown on a
+// non-running Agent (or concurrent calls) is a no-op: the isRun flag is
+// flipped to false inside the same lock that gates the entry check, so at
+// most one caller proceeds past it for any given Run cycle.
+//
+// Components are stopped in data-flow-reverse order so that each upstream
+// stage drains into the next before the next stage stops accepting work:
+// Scraper (no new scrapes) -> Processor (drain rawQueue) -> Sender (drain
+// processedQueue) -> ServiceDiscovery (stop target refresh). The whole
+// sequence is bounded by a 30-second timeout to guarantee Shutdown returns
+// even if a component hangs.
+func (a *Agent) Shutdown() {
+	a.mu.Lock()
+	if !a.isRun {
+		a.mu.Unlock()
+		if a.logger != nil {
+			a.logger.Println("Shutdown", "Agent is not running")
+		}
 		return
 	}
+	// Flip state immediately inside the lock so a concurrent Shutdown
+	// caller (e.g. SIGTERM handler racing with leader-election
+	// OnStoppedLeading) returns at the check above and never reaches the
+	// double-close paths in component Stop() implementations.
+	a.isRun = false
+	a.readyHealthCheck = false
+	cancel := a.cancel
+	sm := a.scraperManager
+	p := a.processor
+	s := a.senderInstance
+	sd := a.serviceDiscovery
+	wg := a.wg
+	a.cancel = nil
+	a.scraperManager = nil
+	a.processor = nil
+	a.senderInstance = nil
+	a.serviceDiscovery = nil
+	// Note: a.wg is intentionally not cleared here. Run allocates a fresh
+	// pointer; leaving the field non-nil avoids a brief window where a
+	// goroutine spawned by a hypothetical concurrent Run would observe nil.
+	a.mu.Unlock()
 
-	GetAppLogger().Println("Shutdown", "Initiating graceful shutdown")
+	a.logger.Println("Shutdown", "Initiating graceful shutdown")
 
-	// Stop the sender if it exists
-	if senderInstance != nil {
-		GetAppLogger().Println("Shutdown", "Stopping sender")
-		senderInstance.Stop()
+	// Cancel the per-run context so any ctx-aware code (e.g. ServiceDiscovery
+	// goroutine if it ever consumes ctx) sees Done and exits.
+	if cancel != nil {
+		cancel()
 	}
 
-	// Signal all components to shut down
-	close(shutdownCh)
-
-	// Wait for all components to acknowledge shutdown with a timeout
-	timeout := time.NewTimer(30 * time.Second)
-	defer timeout.Stop()
-
-	// Count how many components we're waiting for
-	componentsToWait := 3
-
-	// Wait for components to signal they're done or timeout
-	for componentsToWait > 0 {
-		select {
-		case <-doneCh:
-			componentsToWait--
-			GetAppLogger().Println("Shutdown", fmt.Sprintf("Component shutdown acknowledged, %d remaining", componentsToWait))
-		case <-timeout.C:
-			GetAppLogger().Println("Shutdown", "Timeout waiting for components to shut down")
-			return
+	done := make(chan struct{})
+	go func() {
+		if sm != nil {
+			a.logger.Println("Shutdown", "Stopping scraper")
+			sm.Stop()
 		}
+		if p != nil {
+			a.logger.Println("Shutdown", "Stopping processor")
+			p.Stop()
+		}
+		if s != nil {
+			a.logger.Println("Shutdown", "Stopping sender")
+			s.Stop()
+		}
+		if sd != nil {
+			a.logger.Println("Shutdown", "Stopping discovery")
+			if err := sd.Stop(); err != nil {
+				a.logger.Println("Shutdown", fmt.Sprintf("Discovery stop error: %v", err))
+			}
+		}
+		// Wait for goroutines owned directly by Run (the discovery
+		// launcher). Use the locally captured wg pointer so this Wait is
+		// pinned to the WaitGroup that Run added to, even if a future Run
+		// has already swapped a.wg out.
+		if wg != nil {
+			wg.Wait()
+		}
+		close(done)
+	}()
+
+	timer := time.NewTimer(30 * time.Second)
+	defer timer.Stop()
+
+	select {
+	case <-done:
+		a.logger.Println("Shutdown", "All components shut down successfully")
+	case <-timer.C:
+		a.logger.Println("Shutdown", "Timeout waiting for components to shut down")
 	}
+}
 
-	// Clean up resources
-	isRun = false
-	readyHealthCheck = false
+// getOrCreateDefaultAgent returns the process-wide default Agent, creating
+// it if necessary.
+func getOrCreateDefaultAgent(version, commitHash, buildTime string, logger *logfile.FileLogger) *Agent {
+	defaultAgentMu.Lock()
+	defer defaultAgentMu.Unlock()
+	if defaultAgent == nil {
+		defaultAgent = NewAgent(version, commitHash, buildTime, logger)
+	}
+	return defaultAgent
+}
 
-	// Shutdown secure communication
-	//secure.StopNet()
+// BootOpenAgent initializes and starts the Prometheus Agent on the
+// process-wide default Agent.
+//
+// Retained for backward compatibility with main.go and existing callers.
+// New code should construct its own Agent via NewAgent and call Run /
+// Shutdown directly.
+func BootOpenAgent(version, commitHash, buildTime string, logger *logfile.FileLogger) {
+	a := getOrCreateDefaultAgent(version, commitHash, buildTime, logger)
+	a.Run(context.Background())
+}
 
-	GetAppLogger().Println("Shutdown", "All components shut down successfully")
+// IsOK reports whether the default Agent is healthy.
+func IsOK() bool {
+	defaultAgentMu.Lock()
+	a := defaultAgent
+	defaultAgentMu.Unlock()
+	if a == nil {
+		return false
+	}
+	return a.IsOK()
+}
+
+// Shutdown gracefully shuts down the default Agent.
+func Shutdown() {
+	defaultAgentMu.Lock()
+	a := defaultAgent
+	defaultAgentMu.Unlock()
+	if a == nil {
+		return
+	}
+	a.Shutdown()
 }
 
 // Debug mode functions

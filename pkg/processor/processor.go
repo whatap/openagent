@@ -5,6 +5,7 @@ import (
 	"open-agent/tools/util/logutil"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/whatap/gointernal/net/secure"
 	"open-agent/pkg/config"
@@ -15,10 +16,20 @@ import (
 // Use the package-level functions provided by the config package
 // instead of creating our own instance of WhatapConfig
 
-// Processor is responsible for processing scraped metrics
+// Processor is responsible for processing scraped metrics.
+//
+// Lifecycle: Start spawns an internal goroutine that drains rawQueue,
+// converts and filters metrics, and pushes results to processedQueue.
+// Stop signals that goroutine to exit and blocks until it has done so.
+// Calling Start a second time without an intervening Stop is a no-op.
 type Processor struct {
 	rawQueue       chan *model.ScrapeRawData
 	processedQueue chan *model.ConversionResult
+
+	mu         sync.Mutex
+	started    bool
+	shutdownCh chan struct{}
+	doneCh     chan struct{}
 }
 
 // NewProcessor creates a new Processor instance
@@ -29,13 +40,60 @@ func NewProcessor(rawQueue chan *model.ScrapeRawData, processedQueue chan *model
 	}
 }
 
+// Start launches the processor goroutine. It is safe to call Start again
+// after Stop, but redundant calls without Stop in between are ignored.
 func (p *Processor) Start() {
+	p.mu.Lock()
+	if p.started {
+		p.mu.Unlock()
+		return
+	}
+	p.shutdownCh = make(chan struct{})
+	p.doneCh = make(chan struct{})
+	p.started = true
+	p.mu.Unlock()
+
 	go p.processLoop()
 }
 
+// Stop signals the processor goroutine to exit and waits for it. Stop is
+// idempotent (calling it on a never-Started or already-Stopped Processor
+// is a no-op).
+func (p *Processor) Stop() {
+	p.mu.Lock()
+	if !p.started {
+		p.mu.Unlock()
+		return
+	}
+	p.started = false
+	shutdownCh := p.shutdownCh
+	doneCh := p.doneCh
+	p.mu.Unlock()
+
+	close(shutdownCh)
+	<-doneCh
+}
+
 func (p *Processor) processLoop() {
-	for rawData := range p.rawQueue {
-		p.processRawData(rawData)
+	defer func() {
+		if r := recover(); r != nil {
+			logutil.Errorf("PROCESSOR", "Recovered from panic in processLoop: %v", r)
+		}
+		close(p.doneCh)
+	}()
+
+	for {
+		select {
+		case <-p.shutdownCh:
+			logutil.Infoln("PROCESSOR", "Shutdown requested, exiting process loop")
+			return
+		case rawData, ok := <-p.rawQueue:
+			if !ok {
+				logutil.Infoln("PROCESSOR", "Raw queue closed, exiting process loop")
+				return
+			}
+			p.processRawData(rawData)
+		}
 	}
 }
 
@@ -158,6 +216,12 @@ func (p *Processor) processRawData(rawData *model.ScrapeRawData) {
 			validMetrics, len(conversionResult.GetOpenMxHelpList()))
 	}
 
-	// Add the processed data to the queue
-	p.processedQueue <- conversionResult
+	// Add the processed data to the queue.
+	// Use a select so a pending shutdown can short-circuit a full queue
+	// instead of pinning the processor goroutine on the channel send.
+	select {
+	case p.processedQueue <- conversionResult:
+	case <-p.shutdownCh:
+		logutil.Infoln("PROCESSOR", "Shutdown during enqueue, dropping last result")
+	}
 }
