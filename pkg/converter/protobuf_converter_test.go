@@ -247,11 +247,40 @@ func TestConvertProtobuf_Summary(t *testing.T) {
 	}
 }
 
-// TestConvertProtobuf_NativeHistogram_FieldsParsedButDeferred verifies that the
-// native histogram fields (step 3) are decoded by the protobuf path, and that
-// OpenMx emission is deferred (step 4, KAZAA-592) — i.e. no flat series for a
-// native-only histogram, and no error.
-func TestConvertProtobuf_NativeHistogram_FieldsParsedButDeferred(t *testing.T) {
+// findHistogram returns OpenMxHistogram records whose metric name matches.
+func findHistogram(list []*model.OpenMxHistogram, metric string) []*model.OpenMxHistogram {
+	var out []*model.OpenMxHistogram
+	for _, h := range list {
+		if h.Metric == metric {
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
+func mustSingleHistogram(t *testing.T, list []*model.OpenMxHistogram, metric string) *model.OpenMxHistogram {
+	t.Helper()
+	got := findHistogram(list, metric)
+	if len(got) != 1 {
+		t.Fatalf("expected exactly 1 histogram for %s, got %d", metric, len(got))
+	}
+	return got[0]
+}
+
+func histogramLabel(h *model.OpenMxHistogram, key string) (string, bool) {
+	for _, l := range h.Labels {
+		if l.Key == key {
+			return l.Value, true
+		}
+	}
+	return "", false
+}
+
+// TestConvertProtobuf_NativeHistogram_IntegerConversion verifies step 4: an
+// integer native (sparse) histogram is converted into an OpenMxHistogram with
+// every field mapped per the KAZAA-592 schema, and that it does NOT leak into
+// the flat OpenMx series list (native-only histogram → no classic series).
+func TestConvertProtobuf_NativeHistogram_IntegerConversion(t *testing.T) {
 	native := &dto.Histogram{
 		SampleCount:   proto.Uint64(30),
 		SampleSum:     proto.Float64(12.5),
@@ -262,47 +291,68 @@ func TestConvertProtobuf_NativeHistogram_FieldsParsedButDeferred(t *testing.T) {
 			{Offset: proto.Int32(0), Length: proto.Uint32(2)},
 		},
 		PositiveDelta: []int64{4, -1},
+		NegativeSpan: []*dto.BucketSpan{
+			{Offset: proto.Int32(-1), Length: proto.Uint32(1)},
+		},
+		NegativeDelta: []int64{3},
 	}
 	mf := &dto.MetricFamily{
 		Name:   proto.String("native_latency_seconds"),
 		Type:   dto.MetricType_HISTOGRAM.Enum(),
-		Metric: []*dto.Metric{{Histogram: native}},
+		Metric: []*dto.Metric{{Label: []*dto.LabelPair{labelPair("path", "/api")}, Histogram: native}},
 	}
 
-	payload := encodeDelimited(t, mf)
-
-	// Step 3 evidence: the native fields survive the protobuf round-trip.
-	dec := expfmt.NewDecoder(bytes.NewReader(payload), expfmt.NewFormat(expfmt.TypeProtoDelim))
-	var decoded dto.MetricFamily
-	if err := dec.Decode(&decoded); err != nil {
-		t.Fatalf("decode error: %v", err)
-	}
-	dh := decoded.GetMetric()[0].GetHistogram()
-	if !isNativeHistogram(dh) {
-		t.Fatal("decoded histogram not detected as native")
-	}
-	if dh.GetSchema() != 3 || dh.GetZeroCount() != 2 || len(dh.GetPositiveSpan()) != 1 {
-		t.Errorf("native fields not preserved: schema=%d zeroCount=%d spans=%d",
-			dh.GetSchema(), dh.GetZeroCount(), len(dh.GetPositiveSpan()))
-	}
-	if len(dh.GetPositiveDelta()) != 2 || dh.GetPositiveDelta()[0] != 4 {
-		t.Errorf("positive deltas not preserved: %v", dh.GetPositiveDelta())
-	}
-
-	// Step 4 deferral: a native-only histogram yields no flat OpenMx series.
-	res, err := ConvertProtobufWithTimestamp(payload, testTS)
+	res, err := ConvertProtobufWithTimestamp(encodeDelimited(t, mf), testTS)
 	if err != nil {
 		t.Fatalf("ConvertProtobuf error: %v", err)
 	}
+
+	// Native-only histogram emits no flat OpenMx series.
 	if got := len(res.GetOpenMxList()); got != 0 {
-		t.Errorf("native-only histogram emitted %d series, want 0 (deferred to step 4)", got)
+		t.Errorf("native-only histogram emitted %d flat series, want 0", got)
+	}
+
+	h := mustSingleHistogram(t, res.GetOpenMxHistogramList(), "native_latency_seconds")
+	if h.Timestamp != testTS {
+		t.Errorf("histogram timestamp = %d, want %d", h.Timestamp, testTS)
+	}
+	if v, _ := histogramLabel(h, "path"); v != "/api" {
+		t.Errorf("histogram missing original label path=/api, got %q", v)
+	}
+	d := h.Data
+	if d.Schema != 3 {
+		t.Errorf("Schema = %d, want 3", d.Schema)
+	}
+	if d.ZeroThreshold != 0.001 {
+		t.Errorf("ZeroThreshold = %v, want 0.001", d.ZeroThreshold)
+	}
+	if d.ZeroCount != 2 {
+		t.Errorf("ZeroCount = %d, want 2", d.ZeroCount)
+	}
+	if d.Count != 30 {
+		t.Errorf("Count = %d, want 30", d.Count)
+	}
+	if d.Sum != 12.5 {
+		t.Errorf("Sum = %v, want 12.5", d.Sum)
+	}
+	if len(d.PositiveSpans) != 1 || d.PositiveSpans[0].Offset != 0 || d.PositiveSpans[0].Length != 2 {
+		t.Errorf("PositiveSpans = %+v, want [{0 2}]", d.PositiveSpans)
+	}
+	if len(d.PositiveBuckets) != 2 || d.PositiveBuckets[0] != 4 || d.PositiveBuckets[1] != -1 {
+		t.Errorf("PositiveBuckets = %v, want [4 -1] (delta-encoded, verbatim)", d.PositiveBuckets)
+	}
+	if len(d.NegativeSpans) != 1 || d.NegativeSpans[0].Offset != -1 || d.NegativeSpans[0].Length != 1 {
+		t.Errorf("NegativeSpans = %+v, want [{-1 1}]", d.NegativeSpans)
+	}
+	if len(d.NegativeBuckets) != 1 || d.NegativeBuckets[0] != 3 {
+		t.Errorf("NegativeBuckets = %v, want [3]", d.NegativeBuckets)
 	}
 }
 
-// TestConvertProtobuf_DualHistogram_EmitsClassic verifies that a histogram
-// exposing BOTH classic buckets and native fields still has its classic buckets
-// collected (no regression), while the native data is deferred.
-func TestConvertProtobuf_DualHistogram_EmitsClassic(t *testing.T) {
+// TestConvertProtobuf_DualHistogram_EmitsBoth verifies that a histogram exposing
+// BOTH classic buckets and native fields yields the classic flat series (no
+// regression) AND an OpenMxHistogram for the native data.
+func TestConvertProtobuf_DualHistogram_EmitsBoth(t *testing.T) {
 	dual := &dto.Histogram{
 		SampleCount:   proto.Uint64(8),
 		SampleSum:     proto.Float64(2.0),
@@ -331,6 +381,51 @@ func TestConvertProtobuf_DualHistogram_EmitsClassic(t *testing.T) {
 	}
 	if mustSingle(t, list, "dual_seconds_count", "", "").Value != 8 {
 		t.Error("dual histogram _count mismatch")
+	}
+
+	// Native data is also emitted as an OpenMxHistogram.
+	h := mustSingleHistogram(t, res.GetOpenMxHistogramList(), "dual_seconds")
+	if h.Data.Schema != 2 || h.Data.Count != 8 {
+		t.Errorf("native part: schema=%d count=%d, want schema=2 count=8", h.Data.Schema, h.Data.Count)
+	}
+	if len(h.Data.PositiveBuckets) != 1 || h.Data.PositiveBuckets[0] != 8 {
+		t.Errorf("native PositiveBuckets = %v, want [8]", h.Data.PositiveBuckets)
+	}
+}
+
+// TestConvertProtobuf_FloatNativeHistogram_Skipped verifies that a float native
+// histogram (absolute float bucket counts) is skipped — not representable by the
+// integer OpenMxHistogram schema (KAZAA-592) — without emitting a histogram or
+// erroring. A target exposing classic buckets alongside still gets those.
+func TestConvertProtobuf_FloatNativeHistogram_Skipped(t *testing.T) {
+	floatNative := &dto.Histogram{
+		SampleCountFloat: proto.Float64(9.0),
+		SampleSum:        proto.Float64(4.0),
+		Schema:           proto.Int32(1),
+		ZeroThreshold:    proto.Float64(0.001),
+		ZeroCountFloat:   proto.Float64(1.0),
+		PositiveSpan:     []*dto.BucketSpan{{Offset: proto.Int32(0), Length: proto.Uint32(2)}},
+		PositiveCount:    []float64{3.0, 5.0}, // absolute float counts → float histogram
+		Bucket: []*dto.Bucket{
+			{CumulativeCount: proto.Uint64(9), UpperBound: proto.Float64(inf())},
+		},
+	}
+	mf := &dto.MetricFamily{
+		Name:   proto.String("float_native_seconds"),
+		Type:   dto.MetricType_GAUGE_HISTOGRAM.Enum(),
+		Metric: []*dto.Metric{{Histogram: floatNative}},
+	}
+
+	res, err := ConvertProtobufWithTimestamp(encodeDelimited(t, mf), testTS)
+	if err != nil {
+		t.Fatalf("ConvertProtobuf error: %v", err)
+	}
+	if got := len(findHistogram(res.GetOpenMxHistogramList(), "float_native_seconds")); got != 0 {
+		t.Errorf("float native histogram emitted %d OpenMxHistogram(s), want 0 (skipped)", got)
+	}
+	// Classic +Inf bucket exposed alongside is still collected.
+	if got := len(findSeries(res.GetOpenMxList(), "float_native_seconds_bucket", "", "")); got != 1 {
+		t.Errorf("classic bucket alongside float native = %d, want 1", got)
 	}
 }
 
