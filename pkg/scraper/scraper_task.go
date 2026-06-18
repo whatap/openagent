@@ -274,10 +274,11 @@ func (st *ScraperTask) Run() (*model.ScrapeRawData, error) {
 
 	// Execute the HTTP request
 	httpClient := client.GetInstance()
-	var response string
+	var responseBytes []byte
+	var contentType string
 	var httpErr error
 
-	response, httpErr = httpClient.ExecuteGetWithAuth(formattedURL, st.TLSConfig, st.BasicAuth, timeout)
+	responseBytes, contentType, httpErr = httpClient.ExecuteGetWithAuthResponse(formattedURL, st.TLSConfig, st.BasicAuth, timeout)
 
 	if httpErr != nil {
 		logutil.Infof("SCRAPER", "Failed to collect from target [%s]: %v", st.TargetName, httpErr)
@@ -287,6 +288,10 @@ func (st *ScraperTask) Run() (*model.ScrapeRawData, error) {
 		return nil, fmt.Errorf("error scraping target %s for target %s: %v", targetURL, st.TargetName, httpErr)
 	}
 
+	// The response body may be binary (protobuf) or text exposition. It is kept
+	// as a string for transport; the processor selects the decoder via ContentType.
+	response := string(responseBytes)
+
 	// Create a ScrapeRawData instance with the response
 	var rawData *model.ScrapeRawData
 	if st.NodeName != "" && st.AddNodeLabel {
@@ -294,6 +299,7 @@ func (st *ScraperTask) Run() (*model.ScrapeRawData, error) {
 	} else {
 		rawData = model.NewScrapeRawData(targetURL, response, st.MetricRelabelConfigs, st.Labels, collectionTime)
 	}
+	rawData.ContentType = contentType
 
 	// Log detailed information
 	duration := time.Since(startTime)
@@ -309,19 +315,28 @@ func (st *ScraperTask) Run() (*model.ScrapeRawData, error) {
 		logutil.Debugf("SCRAPER", "Response preview: %s", preview)
 	}
 
-	// Count the number of metrics in the response (approximate)
+	// Count the number of metrics in the response (approximate). Line counting
+	// only makes sense for the text exposition; protobuf bodies are binary.
+	isProtobuf := strings.HasPrefix(contentType, "application/vnd.google.protobuf")
 	metricCount := 0
-	for _, line := range strings.Split(response, "\n") {
-		// Skip empty lines, comments, and metadata lines
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
+	if !isProtobuf {
+		for _, line := range strings.Split(response, "\n") {
+			// Skip empty lines, comments, and metadata lines
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			metricCount++
 		}
-		metricCount++
 	}
 
 	// Log collection success with essential information at INFO level
-	logutil.Infof("SCRAPER", "Successfully collected from target [%s]: %d metrics, %d bytes, took %v",
-		st.TargetName, metricCount, len(response), duration)
+	if isProtobuf {
+		logutil.Infof("SCRAPER", "Successfully collected from target [%s]: protobuf payload, %d bytes, took %v",
+			st.TargetName, len(response), duration)
+	} else {
+		logutil.Infof("SCRAPER", "Successfully collected from target [%s]: %d metrics, %d bytes, took %v",
+			st.TargetName, metricCount, len(response), duration)
+	}
 
 	// Keep detailed debug information
 	if config.IsDebugEnabled() {
