@@ -61,6 +61,15 @@ OpenAgent를 실행하려면 다음 환경 변수를 설정해야 합니다:
 - `WHATAP_HOST`: 와탭 서버 호스트 주소
 - `WHATAP_PORT`: 와탭 서버 포트 (기본값: 6600)
 
+### 선택 설정 (환경 변수 또는 whatap.conf)
+
+- `openagent_enable_protobuf`: Prometheus protobuf 스크랩(콘텐츠 협상)을 활성화합니다.
+  - 기본값 `false` — 기존 동작과 동일하게 `Accept: application/json` 으로 스크랩합니다.
+  - `true` 로 설정하면 `Accept` 헤더에 protobuf > OpenMetrics > text 우선순위를 광고하고,
+    응답 `Content-Type` 에 따라 protobuf/text 디코더를 자동 선택합니다.
+    classic 메트릭(counter/gauge/summary/classic histogram)은 기존과 동일한 flat 시리즈로 수집되며,
+    native histogram 은 디코딩되지만 OpenMx 변환은 후속 작업(KAZAA-591 step 4)에서 추가됩니다.
+
 ### Docker 이미지 빌드
 
 #### 기본 Docker 빌드

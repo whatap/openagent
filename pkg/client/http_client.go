@@ -20,6 +20,15 @@ const (
 	localServiceAccountToken = "/var/run/secrets/kubernetes.io/serviceaccount/token"
 	kubernetesServiceHost    = "KUBERNETES_SERVICE_HOST"
 	kubernetesServicePort    = "KUBERNETES_SERVICE_PORT"
+
+	// protobufAcceptHeader is the prioritized Accept value advertised when
+	// protobuf scraping is enabled. Native histograms are only available via the
+	// Prometheus protobuf format, so it is preferred, followed by OpenMetrics,
+	// text exposition, and a low-quality wildcard fallback.
+	protobufAcceptHeader = "application/vnd.google.protobuf;proto=io.prometheus.client.MetricFamily;encoding=delimited," +
+		"application/openmetrics-text;version=1.0.0;charset=utf-8," +
+		"text/plain;version=0.0.4;charset=utf-8," +
+		"*/*;q=0.1"
 )
 
 // TLSConfig represents TLS configuration options
@@ -292,7 +301,20 @@ func (c *HTTPClient) ExecuteGetWithTLSConfigAndTimeout(targetURL string, tlsConf
 	return c.ExecuteGetWithAuth(targetURL, tlsConfig, nil, timeout)
 }
 
+// ExecuteGetWithAuth scrapes the target and returns the response body as a
+// string. Retained for callers that do not need the response Content-Type.
 func (c *HTTPClient) ExecuteGetWithAuth(targetURL string, tlsConfig *TLSConfig, basicAuth *configPkg.BasicAuthConfig, timeout time.Duration) (string, error) {
+	body, _, err := c.ExecuteGetWithAuthResponse(targetURL, tlsConfig, basicAuth, timeout)
+	if err != nil {
+		return "", err
+	}
+	return string(body), nil
+}
+
+// ExecuteGetWithAuthResponse scrapes the target and returns the raw response
+// body together with the response Content-Type, allowing callers to perform
+// content negotiation (e.g. Prometheus protobuf vs. text exposition).
+func (c *HTTPClient) ExecuteGetWithAuthResponse(targetURL string, tlsConfig *TLSConfig, basicAuth *configPkg.BasicAuthConfig, timeout time.Duration) ([]byte, string, error) {
 	formattedURL := FormatURL(targetURL)
 	// Log the request
 	if configPkg.IsDebugEnabled() {
@@ -301,7 +323,7 @@ func (c *HTTPClient) ExecuteGetWithAuth(targetURL string, tlsConfig *TLSConfig, 
 
 	req, err := http.NewRequest("GET", formattedURL, nil)
 	if err != nil {
-		return "", fmt.Errorf("error creating request: %v", err)
+		return nil, "", fmt.Errorf("error creating request: %v", err)
 	}
 
 	// Authentication
@@ -359,7 +381,16 @@ func (c *HTTPClient) ExecuteGetWithAuth(targetURL string, tlsConfig *TLSConfig, 
 		}
 	}
 
-	req.Header.Set("Accept", "application/json")
+	// Content negotiation. By default the agent keeps requesting application/json
+	// (legacy behavior). When protobuf scraping is enabled the agent advertises a
+	// prioritized Accept list so native-histogram-capable targets can respond with
+	// the Prometheus protobuf format, while still allowing OpenMetrics/text and a
+	// wildcard fallback for targets that do not support protobuf.
+	if configPkg.GetBoolWithDefault("openagent_enable_protobuf", false) {
+		req.Header.Set("Accept", protobufAcceptHeader)
+	} else {
+		req.Header.Set("Accept", "application/json")
+	}
 
 	// Determine the effective timeout
 	effectiveTimeout := timeout
@@ -376,7 +407,7 @@ func (c *HTTPClient) ExecuteGetWithAuth(targetURL string, tlsConfig *TLSConfig, 
 	if tlsConfig != nil {
 		// Validate TLS configuration
 		if err := tlsConfig.Validate(); err != nil {
-			return "", fmt.Errorf("invalid TLS configuration: %v", err)
+			return nil, "", fmt.Errorf("invalid TLS configuration: %v", err)
 		}
 
 		if configPkg.IsDebugEnabled() {
@@ -535,7 +566,7 @@ func (c *HTTPClient) ExecuteGetWithAuth(targetURL string, tlsConfig *TLSConfig, 
 		if configPkg.IsDebugEnabled() {
 			logutil.Debugf("HTTP_CLIENT", "HTTP request failed: %v", err)
 		}
-		return "", fmt.Errorf("error executing request: %v", err)
+		return nil, "", fmt.Errorf("error executing request: %v", err)
 	}
 	defer resp.Body.Close()
 
@@ -551,7 +582,7 @@ func (c *HTTPClient) ExecuteGetWithAuth(targetURL string, tlsConfig *TLSConfig, 
 		if configPkg.IsDebugEnabled() {
 			logutil.Debugf("HTTP_CLIENT", "Error reading response body: %v", err)
 		}
-		return "", fmt.Errorf("error reading response body: %v", err)
+		return nil, "", fmt.Errorf("error reading response body: %v", err)
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -559,7 +590,7 @@ func (c *HTTPClient) ExecuteGetWithAuth(targetURL string, tlsConfig *TLSConfig, 
 			logutil.Debugf("HTTP_CLIENT", "HTTP error: %d %s", resp.StatusCode, resp.Status)
 			logutil.Debugf("HTTP_CLIENT", "Response body: %s", string(body))
 		}
-		return "", fmt.Errorf("HTTP error: %d %s", resp.StatusCode, resp.Status)
+		return nil, "", fmt.Errorf("HTTP error: %d %s", resp.StatusCode, resp.Status)
 	}
 
 	// Log the response body length if debug is enabled
@@ -573,5 +604,5 @@ func (c *HTTPClient) ExecuteGetWithAuth(targetURL string, tlsConfig *TLSConfig, 
 		logutil.Debugf("HTTP_CLIENT", "Response body preview: %s", preview)
 	}
 
-	return string(body), nil
+	return body, resp.Header.Get("Content-Type"), nil
 }

@@ -4,6 +4,7 @@ package model
 type ScrapeRawData struct {
 	TargetURL            string
 	RawData              string
+	ContentType          string // Response Content-Type, used to select the protobuf vs. text decoder
 	MetricRelabelConfigs RelabelConfigs
 	Labels               map[string]string // Target labels
 	NodeName             string

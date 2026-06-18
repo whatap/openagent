@@ -81,8 +81,10 @@ func (p *Processor) processRawData(rawData *model.ScrapeRawData) {
 		}
 	}
 
-	// Convert the raw data to OpenMx format using the collection timestamp
-	conversionResult, err := converter.ConvertWithTimestamp(rawData.RawData, rawData.CollectionTime)
+	// Convert the raw data to OpenMx format using the collection timestamp.
+	// The decoder (protobuf vs. text) is selected from the response Content-Type;
+	// non-protobuf payloads fall back to the existing text parser.
+	conversionResult, err := converter.ConvertWithContentType([]byte(rawData.RawData), rawData.ContentType, rawData.CollectionTime)
 	if err != nil {
 		logutil.Errorf("PROCESSOR", "Error converting raw data: %v", err)
 		return
