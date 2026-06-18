@@ -4,8 +4,12 @@ package model
 type ConversionResult struct {
 	OpenMxList     []*OpenMx
 	OpenMxHelpList []*OpenMxHelp
-	Target         string
-	CollectionTime int64
+	// OpenMxHistogramList carries Native (sparse) Histogram samples decoded from
+	// the protobuf exposition format. It is nil for text/OpenMetrics scrapes,
+	// which cannot express native histograms (KAZAA-591 step 4 / KAZAA-592).
+	OpenMxHistogramList []*OpenMxHistogram
+	Target              string
+	CollectionTime      int64
 }
 
 // NewConversionResult creates a new ConversionResult instance
@@ -24,6 +28,16 @@ func (cr *ConversionResult) GetOpenMxList() []*OpenMx {
 // GetOpenMxHelpList returns the list of OpenMxHelp instances
 func (cr *ConversionResult) GetOpenMxHelpList() []*OpenMxHelp {
 	return cr.OpenMxHelpList
+}
+
+// GetOpenMxHistogramList returns the list of Native Histogram samples.
+func (cr *ConversionResult) GetOpenMxHistogramList() []*OpenMxHistogram {
+	return cr.OpenMxHistogramList
+}
+
+// SetOpenMxHistogramList sets the list of Native Histogram samples.
+func (cr *ConversionResult) SetOpenMxHistogramList(list []*OpenMxHistogram) {
+	cr.OpenMxHistogramList = list
 }
 
 // GetTarget returns the target

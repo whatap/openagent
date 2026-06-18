@@ -7,7 +7,6 @@ import (
 )
 
 // Pack type constant for OpenMxHistogramPack.
-//
 // 0x1607 is the value agreed with the WhaTap collection-server team (KAZAA-593):
 // the original 0x1605 proposal collides with TAG_META in the server-side
 // PackEnum, so 0x1607 was confirmed against apm-server PackEnum.java.

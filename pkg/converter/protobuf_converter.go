@@ -52,25 +52,31 @@ func ConvertProtobuf(data []byte) (*model.ConversionResult, error) {
 
 // ConvertProtobufWithTimestamp decodes a delimited Prometheus protobuf payload
 // (Content-Type: application/vnd.google.protobuf; encoding=delimited) into the
-// OpenMx flat-series representation.
+// OpenMx representation.
 //
 // Classic metric types (counter, gauge, summary, untyped and classic
 // histograms with explicit buckets) are converted to exactly the same flat
 // series the text parser produces, so switching a target to protobuf does not
 // change collected classic metrics.
 //
-// Native (sparse) histograms are structurally decoded here — the Schema, zero
-// bucket, positive/negative spans and deltas are all parsed by the protobuf
-// decoder — but their conversion into the native OpenMx structure is deferred to
-// KAZAA-591 step 4, which depends on the OpenMx schema design in KAZAA-592. For
-// now native histogram series are skipped (their classic buckets, if the target
-// exposes them alongside, are still collected normally).
+// Native (sparse) histograms are converted into model.OpenMxHistogram records
+// (the schema confirmed in KAZAA-592 — Option B, a sibling type that leaves the
+// scalar OpenMx wire format untouched) and returned on the result's
+// OpenMxHistogramList. The confirmed schema carries integer, delta-encoded
+// buckets and uint64 counts, so standard (counter-derived) integer native
+// histograms convert losslessly. Float native histograms (gauge histograms and
+// values produced by float operations, which carry absolute float bucket
+// counts) cannot be represented by that schema and are skipped with a count
+// (see the summary log below). If a target exposes classic buckets alongside a
+// native histogram, those classic series are still collected normally.
 func ConvertProtobufWithTimestamp(data []byte, collectionTime int64) (*model.ConversionResult, error) {
 	openMxList := make([]*model.OpenMx, 0)
+	histogramList := make([]*model.OpenMxHistogram, 0)
 	helpMap := make(map[string]*model.OpenMxHelp)
 
 	dec := expfmt.NewDecoder(bytes.NewReader(data), expfmt.NewFormat(expfmt.TypeProtoDelim))
 	nativeHistogramCount := 0
+	floatNativeSkipped := 0
 
 	for {
 		var mf dto.MetricFamily
@@ -81,8 +87,9 @@ func ConvertProtobufWithTimestamp(data []byte, collectionTime int64) (*model.Con
 		if err != nil {
 			// Surface the error but keep the families decoded so far: a malformed
 			// tail should not silently discard valid leading metrics.
-			return model.NewConversionResult(openMxList, helpMapToSlice(helpMap)),
-				fmt.Errorf("error decoding protobuf metric family: %v", err)
+			partial := model.NewConversionResult(openMxList, helpMapToSlice(helpMap))
+			partial.SetOpenMxHistogramList(histogramList)
+			return partial, fmt.Errorf("error decoding protobuf metric family: %v", err)
 		}
 
 		name := mf.GetName()
@@ -132,29 +139,44 @@ func ConvertProtobufWithTimestamp(data []byte, collectionTime int64) (*model.Con
 					continue
 				}
 				// Classic buckets first — preserves exact flat-series behavior.
-				series, classicEmitted := convertClassicHistogram(name, ts, h, labels)
+				series, _ := convertClassicHistogram(name, ts, h, labels)
 				openMxList = append(openMxList, series...)
 
-				// Native histogram: decoded but emission deferred (see doc comment).
+				// Native histogram: convert into the dedicated OpenMxHistogram
+				// structure (KAZAA-592 schema). Classic buckets (above) and the
+				// native histogram are independent representations of the same
+				// metric, so a target exposing both yields both forms.
 				if isNativeHistogram(h) {
 					nativeHistogramCount++
-					if !classicEmitted && configPkg.IsDebugEnabled() {
-						logutil.Debugf("CONVERTER",
-							"[CONVERTER] Native histogram %q decoded (schema=%d) but OpenMx emission deferred (KAZAA-591 step 4)",
-							name, h.GetSchema())
+					if omh, ok := convertNativeHistogram(name, ts, h, labels); ok {
+						histogramList = append(histogramList, omh)
+					} else {
+						// Float native histogram: outside the confirmed integer
+						// schema. Skipped, but counted and surfaced below.
+						floatNativeSkipped++
+						if configPkg.IsDebugEnabled() {
+							logutil.Debugf("CONVERTER",
+								"[CONVERTER] Float native histogram %q (schema=%d) skipped: not representable by the integer OpenMxHistogram schema (KAZAA-592)",
+								name, h.GetSchema())
+						}
 					}
 				}
 			}
 		}
 	}
 
-	if nativeHistogramCount > 0 {
+	if floatNativeSkipped > 0 {
 		logutil.Infof("CONVERTER",
-			"Decoded %d native histogram metric(s) from protobuf; native OpenMx conversion is pending (KAZAA-591 step 4 / KAZAA-592). Classic buckets, where exposed alongside, were collected normally.",
-			nativeHistogramCount)
+			"Converted %d native histogram metric(s) to OpenMxHistogram; %d float native histogram(s) skipped (not representable by the integer OpenMxHistogram schema, KAZAA-592). Classic buckets, where exposed alongside, were collected normally.",
+			nativeHistogramCount-floatNativeSkipped, floatNativeSkipped)
+	} else if nativeHistogramCount > 0 {
+		logutil.Debugf("CONVERTER",
+			"Converted %d native histogram metric(s) to OpenMxHistogram.", nativeHistogramCount)
 	}
 
-	return model.NewConversionResult(openMxList, helpMapToSlice(helpMap)), nil
+	result := model.NewConversionResult(openMxList, helpMapToSlice(helpMap))
+	result.SetOpenMxHistogramList(histogramList)
+	return result, nil
 }
 
 // convertSummary expands a summary into its flat series: one series per quantile
@@ -219,6 +241,77 @@ func convertClassicHistogram(name string, ts int64, h *dto.Histogram, labels []*
 // (sparse, exponential) histogram data.
 func isNativeHistogram(h *dto.Histogram) bool {
 	return h.Schema != nil || len(h.GetPositiveSpan()) > 0 || len(h.GetNegativeSpan()) > 0
+}
+
+// isFloatNativeHistogram reports whether the native histogram carries absolute
+// float bucket counts (PositiveCount/NegativeCount, *Float counts) instead of
+// integer, delta-encoded buckets. These arise from gauge histograms and float
+// operations and cannot be represented by the integer OpenMxHistogram schema
+// (KAZAA-592), so the converter skips them rather than emitting lossy data.
+func isFloatNativeHistogram(h *dto.Histogram) bool {
+	return len(h.GetPositiveCount()) > 0 || len(h.GetNegativeCount()) > 0 ||
+		h.SampleCountFloat != nil || h.ZeroCountFloat != nil
+}
+
+// convertNativeHistogram converts a protobuf native (sparse) histogram into the
+// OpenMxHistogram structure confirmed in KAZAA-592. It returns ok=false for
+// float native histograms, which the integer schema cannot represent.
+//
+// Bucket counts are carried verbatim as the protobuf delta encoding (the first
+// entry of each span list is an absolute count, each subsequent entry is the
+// delta from its predecessor); the schema and OpenMxHistogram both preserve
+// this encoding, so no decode/re-encode of the bucket deltas is performed here.
+func convertNativeHistogram(name string, ts int64, h *dto.Histogram, labels []*dto.LabelPair) (*model.OpenMxHistogram, bool) {
+	if isFloatNativeHistogram(h) {
+		return nil, false
+	}
+
+	omh := model.NewOpenMxHistogram(name, ts)
+	for _, l := range labels {
+		if l == nil {
+			continue
+		}
+		omh.AddLabel(l.GetName(), l.GetValue())
+	}
+
+	omh.Data = model.NativeHistogramData{
+		Schema:          h.GetSchema(),
+		ZeroThreshold:   h.GetZeroThreshold(),
+		ZeroCount:       h.GetZeroCount(),
+		Count:           h.GetSampleCount(),
+		Sum:             h.GetSampleSum(),
+		PositiveSpans:   convertBucketSpans(h.GetPositiveSpan()),
+		PositiveBuckets: copyInt64Slice(h.GetPositiveDelta()),
+		NegativeSpans:   convertBucketSpans(h.GetNegativeSpan()),
+		NegativeBuckets: copyInt64Slice(h.GetNegativeDelta()),
+	}
+	return omh, true
+}
+
+// convertBucketSpans maps protobuf BucketSpans to the model representation.
+func convertBucketSpans(spans []*dto.BucketSpan) []model.BucketSpan {
+	if len(spans) == 0 {
+		return nil
+	}
+	out := make([]model.BucketSpan, 0, len(spans))
+	for _, s := range spans {
+		if s == nil {
+			continue
+		}
+		out = append(out, model.BucketSpan{Offset: s.GetOffset(), Length: s.GetLength()})
+	}
+	return out
+}
+
+// copyInt64Slice returns a defensive copy so the OpenMxHistogram does not alias
+// memory owned by the protobuf decoder.
+func copyInt64Slice(in []int64) []int64 {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]int64, len(in))
+	copy(out, in)
+	return out
 }
 
 // histogramSampleCount returns the total sample count, preferring the float
