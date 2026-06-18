@@ -8,12 +8,11 @@ import (
 
 // Pack type constant for OpenMxHistogramPack.
 //
-// NOTE: 0x1605 is the next free value after OPEN_MX_PACK (0x1603) and
-// OPEN_MX_HELP_PACK (0x1604). The final number MUST be confirmed with the
-// WhaTap collection-server team so it does not collide with any pack type
-// already registered server-side (see KAZAA-592 design doc, server coordination).
+// 0x1605 was initially proposed but is already used server-side as TAG_META.
+// 0x1606 is OPEN_MX_ENDPOINT_PACK.
+// 0x1607 is the confirmed next available value (coordinated via KAZAA-593).
 const (
-	OPEN_MX_HISTOGRAM_PACK = 0x1605
+	OPEN_MX_HISTOGRAM_PACK = 0x1607
 )
 
 // OpenMxHistogramPack represents a pack of OpenMxHistogram records for sending
