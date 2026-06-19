@@ -7,7 +7,7 @@ toolchain go1.24.3
 require (
 	github.com/cakturk/go-netstat v0.0.0-20200220111822-e5b49efee7a5
 	github.com/containerd/containerd v1.7.27
-	github.com/docker/docker v28.2.2+incompatible
+	github.com/docker/docker v28.3.3+incompatible
 	github.com/google/gopacket v1.1.19
 	github.com/prometheus/client_model v0.6.1
 	github.com/prometheus/common v0.55.0
