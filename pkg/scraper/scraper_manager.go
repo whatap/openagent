@@ -978,18 +978,13 @@ func (sm *ScraperManager) createScraperTaskFromTarget(target *discovery.Target) 
 		}
 	}
 
-	// Create TLS config if present
+	// Create TLS config if present.
+	// Parse the full TLS configuration (insecureSkipVerify plus CA/client
+	// certificate and serverName settings) so that certificate-based
+	// verification works, not just insecureSkipVerify. See parseTLSConfig.
 	var tlsConfig *client.TLSConfig
 	if endpoint, ok := target.Metadata["endpoint"].(discovery.EndpointConfig); ok {
-		if endpoint.TLSConfig != nil {
-			tlsConfig = &client.TLSConfig{}
-			if insecureSkipVerify, ok := endpoint.TLSConfig["insecureSkipVerify"].(bool); ok {
-				tlsConfig.InsecureSkipVerify = insecureSkipVerify
-				if config.IsDebugEnabled() {
-					logutil.Printf("DEBUG", "[SCRAPER] TLS config: insecureSkipVerify=%v", insecureSkipVerify)
-				}
-			}
-		}
+		tlsConfig = parseTLSConfig(endpoint.TLSConfig)
 	}
 
 	// Extract node information for proper node label handling
@@ -1766,3 +1761,80 @@ func (sm *ScraperManager) handleStaticEndpointsTarget(targetName string, targetC
 	}
 }
 */
+
+// parseTLSConfig converts a raw tlsConfig map (as parsed from the scrape config
+// YAML) into a *client.TLSConfig, preserving every TLS field. Previously only
+// insecureSkipVerify was read, which silently dropped any certificate the user
+// applied (caFile/caSecret, certFile/certSecret, keyFile/keySecret, serverName);
+// an https target with a CA certificate then failed the TLS handshake
+// ("x509: certificate signed by unknown authority"), forcing users to fall back
+// to insecureSkipVerify: true. The http client (client.ExecuteGetWithAuthResponse)
+// already loads all of these fields, so honoring them here lets certificate-based
+// verification work end to end.
+//
+// A nil map yields a nil config (no custom transport); a present-but-empty map
+// yields an empty config, matching the previous behavior.
+func parseTLSConfig(tlsConfigMap map[string]interface{}) *client.TLSConfig {
+	if tlsConfigMap == nil {
+		return nil
+	}
+
+	tlsConfig := &client.TLSConfig{}
+
+	if insecureSkipVerify, ok := tlsConfigMap["insecureSkipVerify"].(bool); ok {
+		tlsConfig.InsecureSkipVerify = insecureSkipVerify
+	}
+	if caFile, ok := tlsConfigMap["caFile"].(string); ok {
+		tlsConfig.CAFile = caFile
+	}
+	if certFile, ok := tlsConfigMap["certFile"].(string); ok {
+		tlsConfig.CertFile = certFile
+	}
+	if keyFile, ok := tlsConfigMap["keyFile"].(string); ok {
+		tlsConfig.KeyFile = keyFile
+	}
+	if serverName, ok := tlsConfigMap["serverName"].(string); ok {
+		tlsConfig.ServerName = serverName
+	}
+	if caSecret := parseSecretKeySelector(tlsConfigMap["caSecret"]); caSecret != nil {
+		tlsConfig.CASecret = caSecret
+	}
+	if certSecret := parseSecretKeySelector(tlsConfigMap["certSecret"]); certSecret != nil {
+		tlsConfig.CertSecret = certSecret
+	}
+	if keySecret := parseSecretKeySelector(tlsConfigMap["keySecret"]); keySecret != nil {
+		tlsConfig.KeySecret = keySecret
+	}
+
+	if config.IsDebugEnabled() {
+		logutil.Printf("DEBUG", "[SCRAPER] TLS config: insecureSkipVerify=%v caFile=%q certFile=%q keyFile=%q serverName=%q caSecret=%v certSecret=%v keySecret=%v",
+			tlsConfig.InsecureSkipVerify, tlsConfig.CAFile, tlsConfig.CertFile, tlsConfig.KeyFile, tlsConfig.ServerName,
+			tlsConfig.CASecret != nil, tlsConfig.CertSecret != nil, tlsConfig.KeySecret != nil)
+	}
+
+	return tlsConfig
+}
+
+// parseSecretKeySelector converts a raw map (name/key/namespace) from the scrape
+// config YAML into a *config.SecretKeySelector. It returns nil when the value is
+// absent or not a map. The config loader normalizes nested maps to string keys
+// (see config_manager.convertToStringMap), so a map[string]interface{} assertion
+// is safe here.
+func parseSecretKeySelector(raw interface{}) *config.SecretKeySelector {
+	m, ok := raw.(map[string]interface{})
+	if !ok {
+		return nil
+	}
+
+	selector := &config.SecretKeySelector{}
+	if name, ok := m["name"].(string); ok {
+		selector.Name = name
+	}
+	if key, ok := m["key"].(string); ok {
+		selector.Key = key
+	}
+	if namespace, ok := m["namespace"].(string); ok {
+		selector.Namespace = namespace
+	}
+	return selector
+}

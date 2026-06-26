@@ -345,7 +345,49 @@ endpoints:
 - 개발 또는 테스트 환경에서 인증서 검증이 필요하지 않을 때
 - 내부 네트워크에서 신뢰할 수 있는 서버에 연결할 때
 
-**주의**: 프로덕션 환경에서는 보안상의 이유로 `insecureSkipVerify: false`를 사용하는 것이 좋습니다. 자체 서명된 인증서를 사용하는 경우, 인증서를 신뢰할 수 있는 인증 기관(CA)으로 추가하는 것이 더 안전한 방법입니다.
+**주의**: 프로덕션 환경에서는 보안상의 이유로 `insecureSkipVerify: false`를 사용하는 것이 좋습니다. 자체 서명된 인증서를 사용하는 경우, 인증서를 신뢰할 수 있는 인증 기관(CA)으로 추가하는 것이 더 안전한 방법입니다(아래 참고).
+
+#### 인증서로 검증 (CA / 클라이언트 인증서)
+
+`insecureSkipVerify: false`(기본값)인 상태에서 다음 필드로 인증서를 적용해 서버를 검증할 수 있습니다. 파일 경로 또는 Kubernetes Secret 참조 중 하나를 사용합니다.
+
+| 필드 | 설명 |
+|------|------|
+| `caFile` | 서버 인증서를 검증할 CA 인증서 파일 경로 |
+| `caSecret` | CA 인증서를 담은 Secret 참조 (`name`/`key`/`namespace`) |
+| `certFile` | mTLS 클라이언트 인증서 파일 경로 |
+| `certSecret` | 클라이언트 인증서 Secret 참조 |
+| `keyFile` | mTLS 클라이언트 개인키 파일 경로 |
+| `keySecret` | 클라이언트 개인키 Secret 참조 |
+| `serverName` | TLS 핸드셰이크에 사용할 SNI 서버 이름 (인증서 CN/SAN과 호스트가 다를 때) |
+
+CA 인증서를 추가해 검증하는 예시:
+
+```yaml
+endpoints:
+  - port: "https"
+    path: "/metrics"
+    scheme: "https"
+    tlsConfig:
+      insecureSkipVerify: false        # 인증서로 정상 검증
+      caSecret:                        # CA 인증서 (또는 caFile 사용)
+        name: "etcd-tls-secret"
+        key: "ca.pem"
+      # mTLS가 필요하면 클라이언트 인증서/키도 함께 지정
+      certSecret:
+        name: "etcd-tls-secret"
+        key: "cert.pem"
+      keySecret:
+        name: "etcd-tls-secret"
+        key: "key.pem"
+      # serverName: "etcd.kube-system.svc"   # 필요 시 SNI 지정
+```
+
+> whatap-operator를 통해 설치하는 경우, `WhatapAgent` CR의 동일한 `tlsConfig` 필드(`caSecret` 등)를 사용하면 오퍼레이터가 Secret을 `/etc/ssl/certs/<secret>/<key>` 경로로 마운트하고 `caFile` 경로로 변환해 전달합니다.
+
+규칙:
+- `caFile`와 `caSecret`는 동시에 지정할 수 없습니다(인증서/키도 동일).
+- 클라이언트 인증서(`certFile`/`certSecret`)를 지정하면 키(`keyFile`/`keySecret`)도 함께 지정해야 하며, 둘은 같은 방식(파일 또는 Secret)으로 맞춰야 합니다.
 
 ### 설정 예제
 
