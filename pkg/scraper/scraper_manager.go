@@ -17,6 +17,38 @@ import (
 	"open-agent/tools/util/logutil"
 )
 
+// buildTLSConfig converts a tlsConfig map from the scrape configuration into a
+// *client.TLSConfig. It parses all supported fields (not only insecureSkipVerify):
+// the operator renders caSecret/certSecret/keySecret into the caFile/certFile/keyFile
+// paths that are mounted into the agent pod, so those file paths must be read here for
+// server CA validation and mTLS client authentication to work. Returns nil when m is nil.
+func buildTLSConfig(m map[string]interface{}) *client.TLSConfig {
+	if m == nil {
+		return nil
+	}
+	tlsConfig := &client.TLSConfig{}
+	if v, ok := m["insecureSkipVerify"].(bool); ok {
+		tlsConfig.InsecureSkipVerify = v
+	}
+	if v, ok := m["serverName"].(string); ok {
+		tlsConfig.ServerName = v
+	}
+	if v, ok := m["caFile"].(string); ok {
+		tlsConfig.CAFile = v
+	}
+	if v, ok := m["certFile"].(string); ok {
+		tlsConfig.CertFile = v
+	}
+	if v, ok := m["keyFile"].(string); ok {
+		tlsConfig.KeyFile = v
+	}
+	if config.IsDebugEnabled() {
+		logutil.Printf("DEBUG", "[SCRAPER] TLS config: insecureSkipVerify=%v, serverName=%s, caFile=%s, certFile=%s, keyFile=%s",
+			tlsConfig.InsecureSkipVerify, tlsConfig.ServerName, tlsConfig.CAFile, tlsConfig.CertFile, tlsConfig.KeyFile)
+	}
+	return tlsConfig
+}
+
 // TargetScheduler manages individual target scraping with its own goroutine and ticker
 type TargetScheduler struct {
 	target     *discovery.Target
@@ -981,15 +1013,7 @@ func (sm *ScraperManager) createScraperTaskFromTarget(target *discovery.Target) 
 	// Create TLS config if present
 	var tlsConfig *client.TLSConfig
 	if endpoint, ok := target.Metadata["endpoint"].(discovery.EndpointConfig); ok {
-		if endpoint.TLSConfig != nil {
-			tlsConfig = &client.TLSConfig{}
-			if insecureSkipVerify, ok := endpoint.TLSConfig["insecureSkipVerify"].(bool); ok {
-				tlsConfig.InsecureSkipVerify = insecureSkipVerify
-				if config.IsDebugEnabled() {
-					logutil.Printf("DEBUG", "[SCRAPER] TLS config: insecureSkipVerify=%v", insecureSkipVerify)
-				}
-			}
-		}
+		tlsConfig = buildTLSConfig(endpoint.TLSConfig)
 	}
 
 	// Extract node information for proper node label handling
@@ -1268,10 +1292,7 @@ func (sm *ScraperManager) handlePodMonitorTarget(targetName string, targetConfig
 				// Extract TLS configuration
 				var tlsConfig *client.TLSConfig
 				if tlsConfigMap, ok := endpointMap["tlsConfig"].(map[string]interface{}); ok {
-					tlsConfig = &client.TLSConfig{}
-					if insecureSkipVerify, ok := tlsConfigMap["insecureSkipVerify"].(bool); ok {
-						tlsConfig.InsecureSkipVerify = insecureSkipVerify
-					}
+					tlsConfig = buildTLSConfig(tlsConfigMap)
 				}
 
 				// Extract metricRelabelConfigs from metricSelectorConfig
@@ -1369,10 +1390,7 @@ func (sm *ScraperManager) handlePodMonitorTargetWithDummyTarget(targetName strin
 		// Extract TLS configuration
 		var tlsConfig *client.TLSConfig
 		if tlsConfigMap, ok := endpointMap["tlsConfig"].(map[string]interface{}); ok {
-			tlsConfig = &client.TLSConfig{}
-			if insecureSkipVerify, ok := tlsConfigMap["insecureSkipVerify"].(bool); ok {
-				tlsConfig.InsecureSkipVerify = insecureSkipVerify
-			}
+			tlsConfig = buildTLSConfig(tlsConfigMap)
 		}
 
 		// Create a dummy target URL
@@ -1544,10 +1562,7 @@ func (sm *ScraperManager) handleServiceMonitorTarget(targetName string, targetCo
 				// Extract TLS configuration
 				var tlsConfig *client.TLSConfig
 				if tlsConfigMap, ok := endpointMap["tlsConfig"].(map[string]interface{}); ok {
-					tlsConfig = &client.TLSConfig{}
-					if insecureSkipVerify, ok := tlsConfigMap["insecureSkipVerify"].(bool); ok {
-						tlsConfig.InsecureSkipVerify = insecureSkipVerify
-					}
+					tlsConfig = buildTLSConfig(tlsConfigMap)
 				}
 
 				// Extract metricRelabelConfigs from metricSelectorConfig
@@ -1647,10 +1662,7 @@ func (sm *ScraperManager) handleServiceMonitorTargetWithDummyTarget(targetName s
 		// Extract TLS configuration
 		var tlsConfig *client.TLSConfig
 		if tlsConfigMap, ok := endpointMap["tlsConfig"].(map[string]interface{}); ok {
-			tlsConfig = &client.TLSConfig{}
-			if insecureSkipVerify, ok := tlsConfigMap["insecureSkipVerify"].(bool); ok {
-				tlsConfig.InsecureSkipVerify = insecureSkipVerify
-			}
+			tlsConfig = buildTLSConfig(tlsConfigMap)
 		}
 
 		// Extract metricRelabelConfigs
@@ -1721,10 +1733,7 @@ func (sm *ScraperManager) handleStaticEndpointsTarget(targetName string, targetC
 	// Extract TLS configuration
 	var tlsConfig *client.TLSConfig
 	if tlsConfigMap, ok := targetConfig["tlsConfig"].(map[string]interface{}); ok {
-		tlsConfig = &client.TLSConfig{}
-		if insecureSkipVerify, ok := tlsConfigMap["insecureSkipVerify"].(bool); ok {
-			tlsConfig.InsecureSkipVerify = insecureSkipVerify
-		}
+		tlsConfig = buildTLSConfig(tlsConfigMap)
 	}
 
 	// Create a metric selector config
