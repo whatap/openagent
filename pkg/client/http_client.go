@@ -466,44 +466,48 @@ func (c *HTTPClient) ExecuteGetWithAuth(targetURL string, tlsConfig *TLSConfig, 
 			}
 
 			customTLSConfig.RootCAs = rootCAs
+		}
 
-			// Configure client certificate authentication
-			if (tlsConfig.CertFile != "" && tlsConfig.KeyFile != "") || (tlsConfig.CertSecret != nil && tlsConfig.KeySecret != nil) {
-				var certData, keyData []byte
-				var certErr, keyErr error
+		// Configure client certificate authentication (mTLS).
+		// This is independent of InsecureSkipVerify: presenting our client
+		// certificate to the server is unrelated to whether we verify the
+		// server's certificate. Targets such as etcd require a client cert
+		// even when server verification is skipped.
+		if (tlsConfig.CertFile != "" && tlsConfig.KeyFile != "") || (tlsConfig.CertSecret != nil && tlsConfig.KeySecret != nil) {
+			var certData, keyData []byte
+			var certErr, keyErr error
 
-				if tlsConfig.CertFile != "" && tlsConfig.KeyFile != "" {
-					// Load client cert and key from files
-					certData, certErr = loadCertificateFromFile(tlsConfig.CertFile)
-					keyData, keyErr = loadCertificateFromFile(tlsConfig.KeyFile)
-					if configPkg.IsDebugEnabled() {
-						logutil.Debugf("HTTP_CLIENT", "Loading client certificate from files: cert=%s, key=%s", tlsConfig.CertFile, tlsConfig.KeyFile)
-					}
-				} else if tlsConfig.CertSecret != nil && tlsConfig.KeySecret != nil {
-					// Load client cert and key from secrets
-					certData, certErr = loadCertificateFromSecret(tlsConfig.CertSecret)
-					keyData, keyErr = loadCertificateFromSecret(tlsConfig.KeySecret)
-					if configPkg.IsDebugEnabled() {
-						logutil.Debugf("HTTP_CLIENT", "Loading client certificate from secrets: cert=%s/%s, key=%s/%s",
-							tlsConfig.CertSecret.Name, tlsConfig.CertSecret.Key, tlsConfig.KeySecret.Name, tlsConfig.KeySecret.Key)
-					}
+			if tlsConfig.CertFile != "" && tlsConfig.KeyFile != "" {
+				// Load client cert and key from files
+				certData, certErr = loadCertificateFromFile(tlsConfig.CertFile)
+				keyData, keyErr = loadCertificateFromFile(tlsConfig.KeyFile)
+				if configPkg.IsDebugEnabled() {
+					logutil.Debugf("HTTP_CLIENT", "Loading client certificate from files: cert=%s, key=%s", tlsConfig.CertFile, tlsConfig.KeyFile)
 				}
+			} else if tlsConfig.CertSecret != nil && tlsConfig.KeySecret != nil {
+				// Load client cert and key from secrets
+				certData, certErr = loadCertificateFromSecret(tlsConfig.CertSecret)
+				keyData, keyErr = loadCertificateFromSecret(tlsConfig.KeySecret)
+				if configPkg.IsDebugEnabled() {
+					logutil.Debugf("HTTP_CLIENT", "Loading client certificate from secrets: cert=%s/%s, key=%s/%s",
+						tlsConfig.CertSecret.Name, tlsConfig.CertSecret.Key, tlsConfig.KeySecret.Name, tlsConfig.KeySecret.Key)
+				}
+			}
 
-				if certErr == nil && keyErr == nil && len(certData) > 0 && len(keyData) > 0 {
-					if clientCert, err := tls.X509KeyPair(certData, keyData); err == nil {
-						customTLSConfig.Certificates = []tls.Certificate{clientCert}
-						if configPkg.IsDebugEnabled() {
-							logutil.Debugf("HTTP_CLIENT", "Successfully configured client certificate authentication")
-						}
-					} else {
-						if configPkg.IsDebugEnabled() {
-							logutil.Debugf("HTTP_CLIENT", "Failed to create client certificate pair: %v", err)
-						}
+			if certErr == nil && keyErr == nil && len(certData) > 0 && len(keyData) > 0 {
+				if clientCert, err := tls.X509KeyPair(certData, keyData); err == nil {
+					customTLSConfig.Certificates = []tls.Certificate{clientCert}
+					if configPkg.IsDebugEnabled() {
+						logutil.Debugf("HTTP_CLIENT", "Successfully configured client certificate authentication")
 					}
 				} else {
 					if configPkg.IsDebugEnabled() {
-						logutil.Debugf("HTTP_CLIENT", "Failed to load client certificate or key: certErr=%v, keyErr=%v", certErr, keyErr)
+						logutil.Debugf("HTTP_CLIENT", "Failed to create client certificate pair: %v", err)
 					}
+				}
+			} else {
+				if configPkg.IsDebugEnabled() {
+					logutil.Debugf("HTTP_CLIENT", "Failed to load client certificate or key: certErr=%v, keyErr=%v", certErr, keyErr)
 				}
 			}
 		}
