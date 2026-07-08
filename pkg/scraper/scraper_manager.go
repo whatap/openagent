@@ -1064,6 +1064,14 @@ func (sm *ScraperManager) createScraperTaskFromTarget(target *discovery.Target) 
 			}
 		}
 
+		// Set Authorization if provided
+		if endpoint.Authorization != nil {
+			scraperTask.Authorization = endpoint.Authorization
+			if config.IsDebugEnabled() {
+				logutil.Printf("DEBUG", "[SCRAPER] Set Authorization for target %s", targetName)
+			}
+		}
+
 		if endpoint.Params != nil {
 			// Convert params from interface{} to map[string][]string
 			params := make(map[string][]string)

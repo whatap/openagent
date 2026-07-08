@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -284,27 +285,61 @@ func resolveSecretString(selector *configPkg.SecretKeySelector) (string, error) 
 	return strings.TrimSpace(string(data)), nil
 }
 
+// resolveCredential resolves a credential value from a local file or a
+// Kubernetes Secret. File takes precedence over Secret, following the same
+// convention as TLSConfig (caFile vs caSecret), so standalone deployments
+// without a Kubernetes API can rely on file paths.
+func resolveCredential(file string, secret *configPkg.SecretKeySelector) (string, error) {
+	if file != "" {
+		data, err := ioutil.ReadFile(file)
+		if err != nil {
+			return "", fmt.Errorf("error reading credential file %s: %v", file, err)
+		}
+		return strings.TrimSpace(string(data)), nil
+	}
+	if secret != nil {
+		return resolveSecretString(secret)
+	}
+	return "", nil
+}
+
+// resolveAuthorizationCredentials resolves the credential for an explicit
+// Authorization header configuration. Sources are tried in order of
+// precedence: inline credentials, environment variable, local file, then
+// Kubernetes Secret. The environment variable is read on every scrape but is
+// process-static (fixed at launch); use CredentialsFile for tokens that must
+// rotate at runtime.
+func resolveAuthorizationCredentials(auth *configPkg.AuthorizationConfig) (string, error) {
+	if auth.Credentials != "" {
+		return strings.TrimSpace(auth.Credentials), nil
+	}
+	if auth.CredentialsEnv != "" {
+		return strings.TrimSpace(os.Getenv(auth.CredentialsEnv)), nil
+	}
+	return resolveCredential(auth.CredentialsFile, auth.CredentialsSecret)
+}
+
 func (c *HTTPClient) ExecuteGet(targetURL string) (string, error) {
-	return c.ExecuteGetWithAuth(targetURL, nil, nil, 0)
+	return c.ExecuteGetWithAuth(targetURL, nil, nil, nil, 0)
 }
 
 func (c *HTTPClient) ExecuteGetWithTimeout(targetURL string, timeout time.Duration) (string, error) {
-	return c.ExecuteGetWithAuth(targetURL, nil, nil, timeout)
+	return c.ExecuteGetWithAuth(targetURL, nil, nil, nil, timeout)
 }
 
 func (c *HTTPClient) ExecuteGetWithTLSConfig(targetURL string, tlsConfig *TLSConfig) (string, error) {
-	return c.ExecuteGetWithAuth(targetURL, tlsConfig, nil, 0)
+	return c.ExecuteGetWithAuth(targetURL, tlsConfig, nil, nil, 0)
 }
 
 // Deprecated: Use ExecuteGetWithAuth instead
 func (c *HTTPClient) ExecuteGetWithTLSConfigAndTimeout(targetURL string, tlsConfig *TLSConfig, timeout time.Duration) (string, error) {
-	return c.ExecuteGetWithAuth(targetURL, tlsConfig, nil, timeout)
+	return c.ExecuteGetWithAuth(targetURL, tlsConfig, nil, nil, timeout)
 }
 
 // ExecuteGetWithAuth scrapes the target and returns the response body as a
 // string. Retained for callers that do not need the response Content-Type.
-func (c *HTTPClient) ExecuteGetWithAuth(targetURL string, tlsConfig *TLSConfig, basicAuth *configPkg.BasicAuthConfig, timeout time.Duration) (string, error) {
-	body, _, err := c.ExecuteGetWithAuthResponse(targetURL, tlsConfig, basicAuth, timeout)
+func (c *HTTPClient) ExecuteGetWithAuth(targetURL string, tlsConfig *TLSConfig, basicAuth *configPkg.BasicAuthConfig, authorization *configPkg.AuthorizationConfig, timeout time.Duration) (string, error) {
+	body, _, err := c.ExecuteGetWithAuthResponse(targetURL, tlsConfig, basicAuth, authorization, timeout)
 	if err != nil {
 		return "", err
 	}
@@ -314,7 +349,7 @@ func (c *HTTPClient) ExecuteGetWithAuth(targetURL string, tlsConfig *TLSConfig, 
 // ExecuteGetWithAuthResponse scrapes the target and returns the raw response
 // body together with the response Content-Type, allowing callers to perform
 // content negotiation (e.g. Prometheus protobuf vs. text exposition).
-func (c *HTTPClient) ExecuteGetWithAuthResponse(targetURL string, tlsConfig *TLSConfig, basicAuth *configPkg.BasicAuthConfig, timeout time.Duration) ([]byte, string, error) {
+func (c *HTTPClient) ExecuteGetWithAuthResponse(targetURL string, tlsConfig *TLSConfig, basicAuth *configPkg.BasicAuthConfig, authorization *configPkg.AuthorizationConfig, timeout time.Duration) ([]byte, string, error) {
 	formattedURL := FormatURL(targetURL)
 	// Log the request
 	if configPkg.IsDebugEnabled() {
@@ -329,24 +364,37 @@ func (c *HTTPClient) ExecuteGetWithAuthResponse(targetURL string, tlsConfig *TLS
 	// Authentication
 	authSet := false
 
-	// 1. Basic Auth
-	if basicAuth != nil {
-		username := ""
-		password := ""
-
-		if basicAuth.Username != nil {
-			var err error
-			username, err = resolveSecretString(basicAuth.Username)
-			if err != nil {
-				logutil.Printf("WARN", "Failed to resolve username for Basic Auth: %v", err)
+	// 1. Explicit Authorization header (e.g. Bearer API token required by the
+	//    target exporter). Takes precedence over Basic Auth. When authorization
+	//    is configured, the service-account token fallback is always suppressed
+	//    (even if credential resolution fails) so the cluster credential is
+	//    never sent to a target the user configured a dedicated token for.
+	if authorization != nil {
+		credentials, err := resolveAuthorizationCredentials(authorization)
+		if err != nil {
+			logutil.Printf("WARN", "Failed to resolve authorization credentials: %v", err)
+		} else if credentials != "" {
+			scheme := authorization.Type
+			if scheme == "" {
+				scheme = "Bearer"
+			}
+			req.Header.Set("Authorization", scheme+" "+credentials)
+			if configPkg.IsDebugEnabled() {
+				logutil.Debugf("HTTP_CLIENT", "Added Authorization header (%s)", scheme)
 			}
 		}
-		if basicAuth.Password != nil {
-			var err error
-			password, err = resolveSecretString(basicAuth.Password)
-			if err != nil {
-				logutil.Printf("WARN", "Failed to resolve password for Basic Auth: %v", err)
-			}
+		authSet = true
+	}
+
+	// 2. Basic Auth
+	if !authSet && basicAuth != nil {
+		username, err := resolveCredential(basicAuth.UsernameFile, basicAuth.Username)
+		if err != nil {
+			logutil.Printf("WARN", "Failed to resolve username for Basic Auth: %v", err)
+		}
+		password, err := resolveCredential(basicAuth.PasswordFile, basicAuth.Password)
+		if err != nil {
+			logutil.Printf("WARN", "Failed to resolve password for Basic Auth: %v", err)
 		}
 
 		if username != "" || password != "" {
@@ -358,7 +406,7 @@ func (c *HTTPClient) ExecuteGetWithAuthResponse(targetURL string, tlsConfig *TLS
 		}
 	}
 
-	// 2. Service Account Token (Bearer Token) - only if Basic Auth is not set
+	// 3. Service Account Token (Bearer Token) - only if no auth is set
 	if !authSet {
 		// Try to add service account token for authentication in K8s environment only
 		k8sClient := k8s.GetInstance()
