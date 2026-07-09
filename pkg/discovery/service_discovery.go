@@ -944,7 +944,33 @@ func (sd *ServiceDiscoveryImpl) parseEndpointConfig(endpointMap map[string]inter
 		if password, ok := basicAuth["password"].(map[string]interface{}); ok {
 			authConfig.Password = parseSecretKeySelector(password)
 		}
+		if usernameFile, ok := basicAuth["usernameFile"].(string); ok {
+			authConfig.UsernameFile = usernameFile
+		}
+		if passwordFile, ok := basicAuth["passwordFile"].(string); ok {
+			authConfig.PasswordFile = passwordFile
+		}
 		endpointConfig.BasicAuth = authConfig
+	}
+
+	if authorization, ok := endpointMap["authorization"].(map[string]interface{}); ok {
+		authConfig := &configPkg.AuthorizationConfig{}
+		if authType, ok := authorization["type"].(string); ok {
+			authConfig.Type = authType
+		}
+		if credentials, ok := authorization["credentials"].(string); ok {
+			authConfig.Credentials = credentials
+		}
+		if credentialsEnv, ok := authorization["credentialsEnv"].(string); ok {
+			authConfig.CredentialsEnv = credentialsEnv
+		}
+		if credentialsFile, ok := authorization["credentialsFile"].(string); ok {
+			authConfig.CredentialsFile = credentialsFile
+		}
+		if credentialsSecret, ok := authorization["credentialsSecret"].(map[string]interface{}); ok {
+			authConfig.CredentialsSecret = parseSecretKeySelector(credentialsSecret)
+		}
+		endpointConfig.Authorization = authConfig
 	}
 
 	if metricRelabelConfigs, ok := endpointMap["metricRelabelConfigs"].([]interface{}); ok {

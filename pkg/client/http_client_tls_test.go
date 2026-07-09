@@ -139,7 +139,7 @@ func TestMTLS_InsecureSkipVerifyTrue_PresentsClientCert(t *testing.T) {
 		InsecureSkipVerify: true, // skip server verification, but client cert MUST still be sent
 		CertFile:           certFile,
 		KeyFile:            keyFile,
-	}, nil, 5*time.Second)
+	}, nil, nil, 5*time.Second)
 	if err != nil {
 		t.Fatalf("expected mTLS request to succeed with insecureSkipVerify=true, got error: %v", err)
 	}
@@ -169,7 +169,7 @@ func TestMTLS_InsecureSkipVerifyFalse_WithCAFile(t *testing.T) {
 		CAFile:             caFile,
 		CertFile:           certFile,
 		KeyFile:            keyFile,
-	}, nil, 5*time.Second)
+	}, nil, nil, 5*time.Second)
 	if err != nil {
 		t.Fatalf("expected full-mTLS request to succeed, got error: %v", err)
 	}
@@ -189,7 +189,7 @@ func TestMTLS_NoClientCert_Fails(t *testing.T) {
 	c := GetInstance()
 	_, err := c.ExecuteGetWithAuth(srv.URL+"/metrics", &TLSConfig{
 		InsecureSkipVerify: true, // skip server verify, but provide NO client cert
-	}, nil, 5*time.Second)
+	}, nil, nil, 5*time.Second)
 	if err == nil {
 		t.Fatalf("expected request to fail without client certificate, but it succeeded")
 	}

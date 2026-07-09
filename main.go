@@ -127,6 +127,21 @@ func exitOnStdinClose(logger *logfile.FileLogger) {
 
 func main() {
 
+	// Print only the version and exit (e.g. `./openagent version`). Handled
+	// before the banner/startup so the output is a bare version string usable
+	// in scripts.
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "version", "-v", "--version":
+			v := version
+			if v == "" {
+				v = "dev"
+			}
+			fmt.Println(v)
+			return
+		}
+	}
+
 	// Set version to environment variable for use by other packages
 	if version != "" {
 		os.Setenv("WHATAP_VERSION", version)

@@ -73,9 +73,26 @@ func NewLogger() *Logger {
 	whatapLogger.Level = LOG_LEVEL_INFO
 
 	// 로거 파일 생성 밍 log에 파일로그 설정.
-	go whatapLogger.run()
+	// 단, `openagent version` 같은 경량 CLI 명령에서는 파일 로거/부팅 배너 출력을
+	// 건너뛰어 stdout 출력이 오염되지 않도록 한다. (os.Args 는 패키지 init 이전에 채워짐)
+	if !isBareInfoCommand() {
+		go whatapLogger.run()
+	}
 
 	return whatapLogger
+}
+
+// isBareInfoCommand reports whether the process was invoked as a lightweight
+// info command (e.g. `openagent version`) that must produce clean stdout.
+func isBareInfoCommand() bool {
+	if len(os.Args) < 2 {
+		return false
+	}
+	switch os.Args[1] {
+	case "version", "-v", "--version":
+		return true
+	}
+	return false
 }
 
 var logger *Logger = NewLogger()

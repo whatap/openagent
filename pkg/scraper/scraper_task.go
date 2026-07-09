@@ -47,6 +47,7 @@ type ScraperTask struct {
 	Labels               map[string]string // Target labels
 	TLSConfig            *client.TLSConfig
 	BasicAuth            *config.BasicAuthConfig
+	Authorization        *config.AuthorizationConfig
 	Params               map[string][]string // HTTP URL parameters for the endpoint
 	NodeName             string              // Used to store the node name for PodMonitor targets
 	AddNodeLabel         bool                // Controls whether to add node label to metrics
@@ -278,7 +279,7 @@ func (st *ScraperTask) Run() (*model.ScrapeRawData, error) {
 	var contentType string
 	var httpErr error
 
-	responseBytes, contentType, httpErr = httpClient.ExecuteGetWithAuthResponse(formattedURL, st.TLSConfig, st.BasicAuth, timeout)
+	responseBytes, contentType, httpErr = httpClient.ExecuteGetWithAuthResponse(formattedURL, st.TLSConfig, st.BasicAuth, st.Authorization, timeout)
 
 	if httpErr != nil {
 		logutil.Infof("SCRAPER", "Failed to collect from target [%s]: %v", st.TargetName, httpErr)
