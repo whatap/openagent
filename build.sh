@@ -167,7 +167,7 @@ ARG VERSION=dev
 ARG BUILD_TIME=unknown
 
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} \
-    go build -ldflags "-X main.version=${VERSION} -X main.commitHash=${BUILD_TIME}" \
+    go build -ldflags "-X main.version=${VERSION} -X main.commitHash=${BUILD_TIME} -X main.buildTime=${BUILD_TIME}" \
     -o openagent main.go
 
 # Use alpine as base image to package the openagent binary

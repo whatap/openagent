@@ -21,6 +21,7 @@ import (
 	"runtime"
 	"runtime/pprof"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -137,7 +138,15 @@ func main() {
 			if v == "" {
 				v = "dev"
 			}
-			fmt.Println(v)
+			// build date: buildTime is injected at build time (RFC3339, e.g.
+			// 2026-07-10T08:00:00Z); show only the date portion.
+			bd := buildTime
+			if bd == "" {
+				bd = "unknown"
+			} else if i := strings.Index(bd, "T"); i > 0 {
+				bd = bd[:i]
+			}
+			fmt.Printf("version: %s\nbuild date: %s\n", v, bd)
 			return
 		}
 	}
