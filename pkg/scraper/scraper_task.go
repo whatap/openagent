@@ -81,11 +81,29 @@ func (st *ScraperTask) appendParams(baseURL string) (string, error) {
 	query := u.Query()
 	for key, values := range st.Params {
 		for _, value := range values {
+			// Avoid duplicating params that are already present in the URL.
+			// ServiceDiscovery may have already baked these params into the
+			// target URL via buildURLWithParams; re-adding them here would
+			// produce duplicates like ?target=x&target=x, which strict
+			// targets/proxies can reject.
+			if paramValueExists(query[key], value) {
+				continue
+			}
 			query.Add(key, value)
 		}
 	}
 	u.RawQuery = query.Encode()
 	return u.String(), nil
+}
+
+// paramValueExists reports whether value is already present among existing values.
+func paramValueExists(existing []string, value string) bool {
+	for _, e := range existing {
+		if e == value {
+			return true
+		}
+	}
+	return false
 }
 
 // ResolveEndpoint resolves the endpoint URL based on the target information
