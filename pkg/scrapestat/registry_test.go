@@ -2,6 +2,7 @@ package scrapestat
 
 import (
 	"errors"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -114,6 +115,55 @@ func TestRemove(t *testing.T) {
 
 	if stats := Snapshot(); len(stats) != 0 {
 		t.Fatalf("expected empty snapshot, got %+v", stats)
+	}
+}
+
+// TestDisabledDoesNotCollect is the memory-leak guard: without a reader
+// draining the registry, recording would grow the map without bound because
+// stale eviction only runs inside Snapshot.
+func TestDisabledDoesNotCollect(t *testing.T) {
+	Reset()
+	t.Cleanup(Reset)
+
+	SetEnabled(false)
+	if Enabled() {
+		t.Fatal("Enabled() = true after SetEnabled(false)")
+	}
+
+	for i := 0; i < 100; i++ {
+		Record("t/pod-"+strconv.Itoa(i), "app", "PodMonitor", "default", true, 10, 100, ErrNone)
+	}
+
+	if stats := Snapshot(); len(stats) != 0 {
+		t.Fatalf("expected nothing collected while disabled, got %+v", stats)
+	}
+}
+
+// TestSetEnabledFalseClears makes sure flipping collection off releases what
+// was already held rather than freezing it in memory.
+func TestSetEnabledFalseClears(t *testing.T) {
+	Reset()
+	t.Cleanup(Reset)
+
+	Record("t/a", "app", "PodMonitor", "default", true, 10, 100, ErrNone)
+	SetEnabled(false)
+
+	if stats := Snapshot(); len(stats) != 0 {
+		t.Fatalf("expected cleared registry, got %+v", stats)
+	}
+}
+
+// TestRecordEmptyTargetNameUsesSentinel keeps an unnamed target visible while
+// bounding the tag cardinality to a single value.
+func TestRecordEmptyTargetNameUsesSentinel(t *testing.T) {
+	Reset()
+	t.Cleanup(Reset)
+
+	Record("t/a", "", "PodMonitor", "default", true, 10, 100, ErrNone)
+
+	s := findStat(t, Snapshot(), unknownTarget)
+	if s.EndpointsTotal != 1 {
+		t.Fatalf("EndpointsTotal = %d, want 1", s.EndpointsTotal)
 	}
 }
 

@@ -796,6 +796,9 @@ func (sm *ScraperManager) stopTargetScheduler(targetID string) {
 	if scheduler, exists := sm.targetSchedulers[targetID]; exists {
 		close(scheduler.stopCh)
 		delete(sm.targetSchedulers, targetID)
+		// Drop the stat entry now that we know the target is gone, instead of
+		// waiting for it to age out of the registry.
+		scrapestat.Remove(targetID)
 	}
 }
 

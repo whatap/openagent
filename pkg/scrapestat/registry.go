@@ -59,24 +59,58 @@ type TargetStat struct {
 	ErrorCode      int32 // representative failure; ErrNone when every endpoint is up
 }
 
+// unknownTarget stands in when a target carries no name, keeping the tag
+// cardinality bounded instead of dropping the endpoint from the report.
+const unknownTarget = "unknown"
+
 var (
 	mu      sync.Mutex
 	entries = map[string]*entry{} // keyed by target ID (one entry per endpoint)
+	enabled bool                  // off until the counter manager opts in
 	nowFn   = time.Now            // swapped in tests
 )
 
+// SetEnabled turns collection on or off. It must be off whenever the counter
+// manager will not publish the data: stale entries are only evicted during
+// Snapshot, so recording without a reader would grow the map without bound as
+// pod rollouts mint new target IDs. Turning it off also clears what was
+// already collected.
+func SetEnabled(v bool) {
+	mu.Lock()
+	defer mu.Unlock()
+
+	enabled = v
+	if !v {
+		entries = map[string]*entry{}
+	}
+}
+
+// Enabled reports whether collection is currently on.
+func Enabled() bool {
+	mu.Lock()
+	defer mu.Unlock()
+	return enabled
+}
+
 // Record stores the outcome of one scrape. targetID identifies a single
 // endpoint; targetName groups endpoints that came from the same configuration
-// entry.
+// entry. It is a no-op while collection is disabled.
 func Record(targetID, targetName, targetType, namespace string,
 	ok bool, durationMs int64, bytes int64, errorCode int32) {
 
 	if targetID == "" {
 		return
 	}
+	if targetName == "" {
+		targetName = unknownTarget
+	}
 
 	mu.Lock()
 	defer mu.Unlock()
+
+	if !enabled {
+		return
+	}
 
 	entries[targetID] = &entry{
 		targetName: targetName,
@@ -145,11 +179,12 @@ func Snapshot() []TargetStat {
 	return out
 }
 
-// Reset clears all state. Intended for tests.
+// Reset clears all state and enables collection. Intended for tests.
 func Reset() {
 	mu.Lock()
 	defer mu.Unlock()
 	entries = map[string]*entry{}
+	enabled = true
 }
 
 // ClassifyError maps a scrape error onto one of the closed error codes.

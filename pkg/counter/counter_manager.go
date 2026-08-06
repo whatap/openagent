@@ -44,6 +44,13 @@ func StartCounterManager(tagCounterFlag bool, endpointMeteringFlag bool) {
 	tagCounterEnabled = tagCounterFlag
 	endpointMeteringEnabled = endpointMeteringFlag
 	agentStartTime = dateutil.Now()
+
+	// Scrape target stats are only published under tag_counter_enabled, so the
+	// scraper must not collect them otherwise - nothing would ever drain the
+	// registry. It defaults to off, which also covers the case where this
+	// function is never called because both feature flags are false.
+	scrapestat.SetEnabled(tagCounterFlag)
+
 	go runCounter()
 }
 
@@ -347,7 +354,7 @@ func sendScrapeTargetStatus(now int64) {
 		return
 	}
 
-	for _, s := range stats {
+	for i, s := range stats {
 		p := pack.NewTagCountPack()
 
 		p.Pcode = secu.PCODE
@@ -361,7 +368,11 @@ func sendScrapeTargetStatus(now int64) {
 		// series count stays proportional to the configuration, not the cluster.
 		p.PutTag("targetName", s.TargetName)
 		p.PutTag("targetType", s.TargetType)
-		p.PutTag("namespace", s.Namespace)
+		// StaticEndpoints targets have no namespace; omit rather than emit an
+		// empty dimension value.
+		if s.Namespace != "" {
+			p.PutTag("namespace", s.Namespace)
+		}
 
 		// Fields: measurements
 		up := int32(0)
@@ -375,7 +386,9 @@ func sendScrapeTargetStatus(now int64) {
 		p.Put("bytes", s.TotalBytes)
 		p.Put("errorCode", s.ErrorCode)
 
-		secure.Send(secure.NET_SECURE_HIDE, p, true)
+		// One pack per target, so flush once at the end of the batch instead of
+		// forcing a socket flush per target.
+		secure.Send(secure.NET_SECURE_HIDE, p, i == len(stats)-1)
 	}
 
 	if config.IsDebugEnabled() {
