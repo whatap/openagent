@@ -81,6 +81,18 @@ func process(p *pack.ParamPack) {
 		}
 		processSetConfig(p)
 
+	case secure.SCRAPE_CONFIG_GET:
+		if debugEnabled {
+			logutil.Infoln("CONTROL", "SCRAPE_CONFIG_GET")
+		}
+		processScrapeConfigGet(p)
+
+	case secure.SCRAPE_CONFIG_SET:
+		if debugEnabled {
+			logutil.Infoln("CONTROL", "SCRAPE_CONFIG_SET")
+		}
+		processScrapeConfigSet(p)
+
 	case secure.AGENT_LOG_LIST:
 		if debugEnabled {
 			logutil.Infoln("CONTROL", "AGENT_LOG_LIST")
@@ -244,6 +256,74 @@ func mergeWriteConfig(newValues map[string]string) {
 	}
 	defer wf.Close()
 	wf.WriteString(result)
+}
+
+// processScrapeConfigGet handles SCRAPE_CONFIG_GET command - returns the
+// raw scrape_config.yaml contents.
+//
+// The YAML is sent as a single text blob rather than a key/value map: a flat
+// map would drop comments and cannot represent the nested targets and
+// metricRelabelConfigs arrays.
+//
+// Response fields:
+//
+//	status   "ok" | "error"
+//	source   "configmap" | "file" - where the configuration was read from
+//	contents raw YAML text (null on error)
+//	error    failure reason, only when status is "error"
+func processScrapeConfigGet(p *pack.ParamPack) {
+	contents, source, err := config.ReadScrapeConfigRaw()
+	p.PutString("source", source)
+
+	if err != nil {
+		logutil.Println("WA811-08", "SCRAPE_CONFIG_GET error: ", err)
+		p.PutString("status", "error")
+		p.PutString("error", err.Error())
+		p.Put("contents", value.NewNullValue())
+		return
+	}
+
+	p.PutString("status", "ok")
+	p.Put("contents", value.NewTextValue(contents))
+}
+
+// processScrapeConfigSet handles SCRAPE_CONFIG_SET command - replaces the
+// scrape_config.yaml contents.
+//
+// The contents are validated before anything is written, because an unparsable
+// scrape configuration makes ConfigManager.LoadConfig fail and drops every
+// scrape target. Writing is rejected when the ConfigMap is the active source;
+// see config.WriteScrapeConfigRaw.
+//
+// Request fields:
+//
+//	contents raw YAML text
+//
+// Response fields:
+//
+//	status "ok" | "error"
+//	source "configmap" | "file" - the source that was targeted
+//	error  failure reason, only when status is "error"
+func processScrapeConfigSet(p *pack.ParamPack) {
+	contents := p.GetString("contents")
+	if strings.TrimSpace(contents) == "" {
+		logutil.Println("WA811-09", "SCRAPE_CONFIG_SET empty contents")
+		p.PutString("status", "error")
+		p.PutString("error", "empty contents")
+		return
+	}
+
+	source, err := config.WriteScrapeConfigRaw(contents)
+	p.PutString("source", source)
+
+	if err != nil {
+		logutil.Println("WA811-09", "SCRAPE_CONFIG_SET error: ", err)
+		p.PutString("status", "error")
+		p.PutString("error", err.Error())
+		return
+	}
+
+	p.PutString("status", "ok")
 }
 
 // processAgentLogList handles AGENT_LOG_LIST command - returns log file list

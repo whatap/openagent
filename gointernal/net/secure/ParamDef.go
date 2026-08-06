@@ -69,4 +69,10 @@ const (
 	CW_STATISTICS                 = 407
 	CW_UNITS                      = 408
 	CW_METRICS                    = 409
+
+	// OpenAgent specific commands (500~).
+	// NOTE: these IDs are provisional and must be agreed with the collection
+	// server before release - the server is the side that issues them.
+	SCRAPE_CONFIG_GET = 501
+	SCRAPE_CONFIG_SET = 502
 )

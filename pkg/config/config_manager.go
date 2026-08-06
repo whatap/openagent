@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -63,7 +62,7 @@ func NewConfigManager() *ConfigManager {
 	namespace := getPodNamespace()
 	if namespace == "" {
 		// Fallback to default namespace
-		namespace = "whatap-monitoring"
+		namespace = DefaultConfigMapNamespace
 		logutil.Infof("CONFIG", "Could not detect pod namespace, using default: %s", namespace)
 	} else {
 		logutil.Infof("CONFIG", "Detected pod namespace: %s", namespace)
@@ -71,7 +70,7 @@ func NewConfigManager() *ConfigManager {
 
 	cm := &ConfigManager{
 		configMapNamespace: namespace,
-		configMapName:      "whatap-open-agent-config",
+		configMapName:      DefaultConfigMapName,
 	}
 
 	// Check force standalone mode first
@@ -129,9 +128,9 @@ func (cm *ConfigManager) LoadConfig() error {
 			return fmt.Errorf("ConfigMap %s/%s not found: %v", cm.configMapNamespace, cm.configMapName, err)
 		}
 
-		configData, ok := configMap.Data["scrape_config.yaml"]
+		configData, ok := configMap.Data[ScrapeConfigKey]
 		if !ok {
-			return fmt.Errorf("scrape_config.yaml not found in ConfigMap")
+			return fmt.Errorf("%s not found in ConfigMap", ScrapeConfigKey)
 		}
 
 		var config map[string]interface{}
@@ -150,11 +149,7 @@ func (cm *ConfigManager) LoadConfig() error {
 	}
 
 	// Fall back to local file
-	homeDir := os.Getenv("WHATAP_OPEN_HOME")
-	if homeDir == "" {
-		homeDir = "."
-	}
-	configFile := filepath.Join(homeDir, "scrape_config.yaml")
+	configFile := ScrapeConfigFilePath()
 	cm.configFile = configFile
 
 	data, err := ioutil.ReadFile(configFile)
