@@ -392,6 +392,7 @@ func (sd *ServiceDiscoveryImpl) processPodTarget(pod *corev1.Pod, config Discove
 			Metadata: map[string]interface{}{
 				"targetName":           config.TargetName,
 				"type":                 config.Type,
+				"namespace":            pod.Namespace,
 				"endpoint":             endpoint,
 				"metricRelabelConfigs": endpoint.MetricRelabelConfigs,
 				"addNodeLabel":         endpoint.AddNodeLabel,
@@ -692,6 +693,7 @@ func (sd *ServiceDiscoveryImpl) processServiceTarget(service *corev1.Service, co
 						Metadata: map[string]interface{}{
 							"targetName":           config.TargetName,
 							"type":                 config.Type,
+							"namespace":            service.Namespace,
 							"endpoint":             endpointConfig,
 							"metricRelabelConfigs": endpointConfig.MetricRelabelConfigs,
 						},
@@ -765,6 +767,7 @@ func (sd *ServiceDiscoveryImpl) processServiceTarget(service *corev1.Service, co
 						Metadata: map[string]interface{}{
 							"targetName":           config.TargetName,
 							"type":                 config.Type,
+							"namespace":            service.Namespace,
 							"endpoint":             endpointConfig,
 							"metricRelabelConfigs": endpointConfig.MetricRelabelConfigs,
 						},

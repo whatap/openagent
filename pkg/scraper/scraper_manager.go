@@ -14,6 +14,7 @@ import (
 	"open-agent/pkg/discovery"
 	"open-agent/pkg/k8s"
 	"open-agent/pkg/model"
+	"open-agent/pkg/scrapestat"
 	"open-agent/tools/util/logutil"
 )
 
@@ -860,7 +861,9 @@ func (sm *ScraperManager) scrapeTarget(target *discovery.Target) {
 	scraperTask.Timeout = currentTimeout.String()
 
 	// Run the scraper task
+	started := time.Now()
 	rawData, err := scraperTask.Run()
+	elapsedMs := time.Since(started).Milliseconds()
 	if err != nil {
 		// Check if it's a timeout error
 		if strings.Contains(err.Error(), "context deadline exceeded") ||
@@ -874,6 +877,8 @@ func (sm *ScraperManager) scrapeTarget(target *discovery.Target) {
 			logutil.Errorf("ERROR", "Error scraping target %s: %v\n", target.ID, err)
 		}
 
+		sm.recordScrapeStat(target, false, elapsedMs, 0, scrapestat.ClassifyError(err))
+
 		// Still update last scrape time for tracking
 		sm.updateLastScrapingTime(target)
 		return
@@ -881,6 +886,8 @@ func (sm *ScraperManager) scrapeTarget(target *discovery.Target) {
 
 	// Success - reset timeout to base value
 	scheduler.resetTimeout()
+
+	sm.recordScrapeStat(target, true, elapsedMs, int64(len(rawData.RawData)), scrapestat.ErrNone)
 
 	// Add the raw data to the queue
 	sm.rawQueue <- rawData
@@ -890,6 +897,17 @@ func (sm *ScraperManager) scrapeTarget(target *discovery.Target) {
 	if config.IsDebugEnabled() {
 		logutil.Printf("DEBUG", "Successfully scraped target: %s", target.ID)
 	}
+}
+
+// recordScrapeStat reports the outcome of one scrape to the stat registry so
+// the counter manager can publish it as a time series. Metadata lookups are
+// best effort - a missing key only costs a label, never a scrape.
+func (sm *ScraperManager) recordScrapeStat(target *discovery.Target, ok bool, durationMs, bytes int64, errorCode int32) {
+	targetName, _ := target.Metadata["targetName"].(string)
+	targetType, _ := target.Metadata["type"].(string)
+	namespace, _ := target.Metadata["namespace"].(string)
+
+	scrapestat.Record(target.ID, targetName, targetType, namespace, ok, durationMs, bytes, errorCode)
 }
 
 // getTargetInterval gets the scraping interval for a target

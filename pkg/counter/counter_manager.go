@@ -12,14 +12,17 @@ import (
 	"github.com/whatap/golib/lang/value"
 	"github.com/whatap/golib/util/dateutil"
 
+	"open-agent/pkg/config"
 	"open-agent/pkg/endpoint"
 	"open-agent/pkg/model"
+	"open-agent/pkg/scrapestat"
 	"open-agent/tools/util/logutil"
 )
 
 const (
 	counterInterval    = 5000  // 5 seconds in milliseconds
 	endpointInterval   = 60000 // 60 seconds in milliseconds
+	scrapeStatInterval = 60000 // 60 seconds in milliseconds
 	AGENT_BOOT_ENV     = 2
 	OTYPE_INTEGRATIONS = 0x0016
 )
@@ -81,6 +84,9 @@ func runCounter() {
 	// Next time to send EndpointPack (every 60 seconds)
 	nextEndpointTime := now/int64(endpointInterval)*int64(endpointInterval) + int64(endpointInterval)
 
+	// Next time to send scrape target status (every 60 seconds)
+	nextScrapeStatTime := now/int64(scrapeStatInterval)*int64(scrapeStatInterval) + int64(scrapeStatInterval)
+
 	for {
 		sleepUntil(next)
 		now = dateutil.Now()
@@ -97,6 +103,13 @@ func runCounter() {
 			if now >= nextBootInfoTime {
 				resendAgentBootInfo(now)
 				nextBootInfoTime = now/dateutil.MILLIS_PER_HOUR*dateutil.MILLIS_PER_HOUR + dateutil.MILLIS_PER_HOUR
+			}
+
+			// One pack per scrape target, so this runs on its own slower cycle
+			// instead of every counter tick.
+			if now >= nextScrapeStatTime {
+				sendScrapeTargetStatus(now)
+				nextScrapeStatTime = now/int64(scrapeStatInterval)*int64(scrapeStatInterval) + int64(scrapeStatInterval)
 			}
 		}
 
@@ -308,6 +321,66 @@ func sendIntegrationsCounter(now int64) {
 	p.Category = "integrations_counter"
 
 	secure.Send(secure.NET_SECURE_HIDE, p, true)
+}
+
+// sendScrapeTargetStatus sends one TagCountPack per scrape target with
+// category "openagent_scrape_target".
+//
+// Endpoints are aggregated per target by the scrapestat registry rather than
+// reported individually: a PodMonitor target can back dozens of pods, and one
+// series per pod would churn on every rollout. The raw error text is never sent
+// as a tag - only the closed errorCode set - for the same cardinality reason.
+func sendScrapeTargetStatus(now int64) {
+	defer func() {
+		if r := recover(); r != nil {
+			logutil.Errorln("CounterManager", "Recovered from panic in sendScrapeTargetStatus:", r)
+		}
+	}()
+
+	secu := secure.GetSecurityMaster()
+	if secu == nil || secu.PCODE == 0 {
+		return
+	}
+
+	stats := scrapestat.Snapshot()
+	if len(stats) == 0 {
+		return
+	}
+
+	for _, s := range stats {
+		p := pack.NewTagCountPack()
+
+		p.Pcode = secu.PCODE
+		p.Oid = secu.OID
+		p.Okind = secu.OKIND
+		p.Onode = secu.ONODE
+		p.Time = now
+		p.Category = "openagent_scrape_target"
+
+		// Tags: dimensions. Kept to the configured target identity so the
+		// series count stays proportional to the configuration, not the cluster.
+		p.PutTag("targetName", s.TargetName)
+		p.PutTag("targetType", s.TargetType)
+		p.PutTag("namespace", s.Namespace)
+
+		// Fields: measurements
+		up := int32(0)
+		if s.EndpointsUp > 0 {
+			up = 1
+		}
+		p.Put("up", up)
+		p.Put("endpointsUp", s.EndpointsUp)
+		p.Put("endpointsTotal", s.EndpointsTotal)
+		p.Put("maxDurationMs", s.MaxDurationMs)
+		p.Put("bytes", s.TotalBytes)
+		p.Put("errorCode", s.ErrorCode)
+
+		secure.Send(secure.NET_SECURE_HIDE, p, true)
+	}
+
+	if config.IsDebugEnabled() {
+		logutil.Debugf("CounterManager", "Sent %d scrape target status packs", len(stats))
+	}
 }
 
 // sendEndpointPack sends OpenMxEndpointPack with collected endpoints
