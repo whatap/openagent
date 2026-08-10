@@ -70,9 +70,9 @@ const (
 	CW_UNITS                      = 408
 	CW_METRICS                    = 409
 
-	// OpenAgent specific commands (500~).
-	// NOTE: these IDs are provisional and must be agreed with the collection
-	// server before release - the server is the side that issues them.
-	SCRAPE_CONFIG_GET = 501
-	SCRAPE_CONFIG_SET = 502
+	// OpenAgent (OpenMx) specific commands.
+	// Assigned by the collection server: the early 500s are already taken
+	// (501 is INTEGRATIONS_META_INFO), so these start at 580.
+	OPENMX_SCRAPE_CONFIG_GET = 580
+	OPENMX_SCRAPE_CONFIG_SET = 581
 )

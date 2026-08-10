@@ -59,6 +59,16 @@ func activeScrapeConfigSource() string {
 	return ScrapeConfigSourceFile
 }
 
+// ScrapeConfigWritable reports whether WriteScrapeConfigRaw can replace the
+// configuration for the currently active source.
+//
+// Reported to the server alongside the contents so the caller can tell upfront
+// whether an edit is possible, instead of inferring it from the source name or
+// discovering it only after a rejected write.
+func ScrapeConfigWritable() bool {
+	return activeScrapeConfigSource() == ScrapeConfigSourceFile
+}
+
 // ReadScrapeConfigRaw returns the scrape configuration as raw YAML text along
 // with the source it was read from.
 //
@@ -106,7 +116,9 @@ func WriteScrapeConfigRaw(contents string) (source string, err error) {
 
 	// The error is surfaced to the user through the control response, so it has
 	// to say what to do instead - not just that the write was refused.
-	if source == ScrapeConfigSourceConfigMap {
+	// Kept in sync with ScrapeConfigWritable so the advertised capability and the
+	// actual refusal can never disagree.
+	if !ScrapeConfigWritable() {
 		return source, fmt.Errorf(
 			"the scrape configuration is read from ConfigMap %s/%s in a Kubernetes environment "+
 				"and cannot be updated by the agent. Edit spec.features.openAgent in the WhatapAgent CR "+

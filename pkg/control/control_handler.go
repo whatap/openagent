@@ -81,15 +81,15 @@ func process(p *pack.ParamPack) {
 		}
 		processSetConfig(p)
 
-	case secure.SCRAPE_CONFIG_GET:
+	case secure.OPENMX_SCRAPE_CONFIG_GET:
 		if debugEnabled {
-			logutil.Infoln("CONTROL", "SCRAPE_CONFIG_GET")
+			logutil.Infoln("CONTROL", "OPENMX_SCRAPE_CONFIG_GET")
 		}
 		processScrapeConfigGet(p)
 
-	case secure.SCRAPE_CONFIG_SET:
+	case secure.OPENMX_SCRAPE_CONFIG_SET:
 		if debugEnabled {
-			logutil.Infoln("CONTROL", "SCRAPE_CONFIG_SET")
+			logutil.Infoln("CONTROL", "OPENMX_SCRAPE_CONFIG_SET")
 		}
 		processScrapeConfigSet(p)
 
@@ -258,7 +258,7 @@ func mergeWriteConfig(newValues map[string]string) {
 	wf.WriteString(result)
 }
 
-// processScrapeConfigGet handles SCRAPE_CONFIG_GET command - returns the
+// processScrapeConfigGet handles OPENMX_SCRAPE_CONFIG_GET command - returns the
 // raw scrape_config.yaml contents.
 //
 // The YAML is sent as a single text blob rather than a key/value map: a flat
@@ -269,14 +269,19 @@ func mergeWriteConfig(newValues map[string]string) {
 //
 //	status   "ok" | "error"
 //	source   "configmap" | "file" - where the configuration was read from
+//	writable whether OPENMX_SCRAPE_CONFIG_SET would be accepted for this source
 //	contents raw YAML text (null on error)
 //	error    failure reason, only when status is "error"
+//
+// writable is reported so the caller does not have to derive it from the source
+// name, and does not have to attempt a write to find out it is refused.
 func processScrapeConfigGet(p *pack.ParamPack) {
 	contents, source, err := config.ReadScrapeConfigRaw()
 	p.PutString("source", source)
+	p.Put("writable", value.NewBoolValue(config.ScrapeConfigWritable()))
 
 	if err != nil {
-		logutil.Println("WA811-08", "SCRAPE_CONFIG_GET error: ", err)
+		logutil.Println("WA811-08", "OPENMX_SCRAPE_CONFIG_GET error: ", err)
 		p.PutString("status", "error")
 		p.PutString("error", err.Error())
 		p.Put("contents", value.NewNullValue())
@@ -287,7 +292,7 @@ func processScrapeConfigGet(p *pack.ParamPack) {
 	p.Put("contents", value.NewTextValue(contents))
 }
 
-// processScrapeConfigSet handles SCRAPE_CONFIG_SET command - replaces the
+// processScrapeConfigSet handles OPENMX_SCRAPE_CONFIG_SET command - replaces the
 // scrape_config.yaml contents.
 //
 // The contents are validated before anything is written, because an unparsable
@@ -307,7 +312,7 @@ func processScrapeConfigGet(p *pack.ParamPack) {
 func processScrapeConfigSet(p *pack.ParamPack) {
 	contents := p.GetString("contents")
 	if strings.TrimSpace(contents) == "" {
-		logutil.Println("WA811-09", "SCRAPE_CONFIG_SET empty contents")
+		logutil.Println("WA811-09", "OPENMX_SCRAPE_CONFIG_SET empty contents")
 		p.PutString("status", "error")
 		p.PutString("error", "empty contents")
 		return
@@ -316,8 +321,12 @@ func processScrapeConfigSet(p *pack.ParamPack) {
 	source, err := config.WriteScrapeConfigRaw(contents)
 	p.PutString("source", source)
 
+	// The response is the request pack with fields added, so the submitted YAML
+	// would otherwise be echoed back in full. Drop it - the caller already has it.
+	p.Remove("contents")
+
 	if err != nil {
-		logutil.Println("WA811-09", "SCRAPE_CONFIG_SET error: ", err)
+		logutil.Println("WA811-09", "OPENMX_SCRAPE_CONFIG_SET error: ", err)
 		p.PutString("status", "error")
 		p.PutString("error", err.Error())
 		return
