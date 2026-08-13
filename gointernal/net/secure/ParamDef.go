@@ -71,8 +71,8 @@ const (
 	CW_METRICS                    = 409
 
 	// OpenAgent (OpenMx) specific commands.
-	// Assigned by the collection server: the early 500s are already taken
-	// (501 is INTEGRATIONS_META_INFO), so these start at 580.
-	OPENMX_SCRAPE_CONFIG_GET = 580
-	OPENMX_SCRAPE_CONFIG_SET = 581
+	// Assigned by the collection server. The 500s are crowded (501 is
+	// INTEGRATIONS_META_INFO), so OpenMx commands get their own 1000 block.
+	OPENMX_SCRAPE_CONFIG_GET = 1000
+	OPENMX_SCRAPE_CONFIG_SET = 1001
 )
