@@ -594,6 +594,9 @@ func (c *HTTPClient) ExecuteGetWithAuthResponse(targetURL string, tlsConfig *TLS
 		transport := &http.Transport{
 			TLSClientConfig: customTLSConfig,
 		}
+		// This transport belongs to this request and will never be reused.
+		// Register cleanup before Body.Close so the body is closed first.
+		defer transport.CloseIdleConnections()
 
 		// Create a new client with the custom transport and timeout
 		client = &http.Client{
