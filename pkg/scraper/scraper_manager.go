@@ -596,15 +596,24 @@ func (sm *ScraperManager) calculateEndpointHash(endpoint interface{}) string {
 	return hex.EncodeToString(hash[:])
 }
 
-// hasEndpointChanged checks if endpoint configuration has changed
-func (sm *ScraperManager) hasEndpointChanged(oldTarget, newTarget *discovery.Target) bool {
+// hasTargetChanged checks whether an existing scheduler must use refreshed
+// discovery data. A PodMonitor target keeps the same ID when a recreated Pod
+// receives a new IP, so comparing only endpoint configuration leaves the
+// scheduler scraping the old URL indefinitely.
+func (sm *ScraperManager) hasTargetChanged(oldTarget, newTarget *discovery.Target) bool {
+	if oldTarget.URL != newTarget.URL {
+		logutil.Infof("hasTargetChanged", "Target URL changed for %s: %s -> %s",
+			newTarget.ID, oldTarget.URL, newTarget.URL)
+		return true
+	}
+
 	oldHash := sm.calculateEndpointHash(oldTarget.Metadata["endpoint"])
 	newHash := sm.calculateEndpointHash(newTarget.Metadata["endpoint"])
 
 	changed := oldHash != newHash
 
 	if changed {
-		logutil.Infof("hasEndpointChanged", "Endpoint changed for target %s: hash %s -> %s",
+		logutil.Infof("hasTargetChanged", "Endpoint changed for target %s: hash %s -> %s",
 			newTarget.ID, oldHash[:8], newHash[:8])
 	}
 
@@ -640,9 +649,9 @@ func (sm *ScraperManager) updateTargetSchedulers() {
 					target.ID, existingScheduler.interval, newInterval)
 				sm.stopTargetScheduler(target.ID)
 				sm.startTargetScheduler(target)
-			} else if sm.hasEndpointChanged(existingScheduler.getTarget(), target) {
-				// Endpoint changed but interval unchanged - graceful update without restart
-				logutil.Printf("INFO", "Target %s endpoint configuration changed, applying from next scrape cycle", target.ID)
+			} else if sm.hasTargetChanged(existingScheduler.getTarget(), target) {
+				// Discovery data changed but interval is unchanged - gracefully update without restart.
+				logutil.Printf("INFO", "Target %s discovery data changed, applying from next scrape cycle", target.ID)
 				existingScheduler.updateTarget(target)
 
 				if config.IsDebugEnabled() {
