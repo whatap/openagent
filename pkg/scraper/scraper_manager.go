@@ -129,7 +129,7 @@ func (ts *TargetScheduler) increaseTimeout() time.Duration {
 
 		if newTimeout != ts.currentTimeout {
 			logutil.Printf("WARN", "[SCRAPER] Target %s: Increasing timeout from %v to %v after %d consecutive timeouts",
-				ts.target.ID, ts.currentTimeout, newTimeout, ts.consecutiveTimeouts)
+				ts.getTarget().ID, ts.currentTimeout, newTimeout, ts.consecutiveTimeouts)
 			ts.currentTimeout = newTimeout
 		}
 
@@ -148,7 +148,7 @@ func (ts *TargetScheduler) resetTimeout() {
 	// 타임아웃이 증가된 상태였다면
 	if ts.currentTimeout != ts.baseTimeout {
 		logutil.Printf("INFO", "[SCRAPER] Target %s: Resetting timeout to base value %v (was %v) after successful scrape",
-			ts.target.ID, ts.baseTimeout, ts.currentTimeout)
+			ts.getTarget().ID, ts.baseTimeout, ts.currentTimeout)
 		ts.currentTimeout = ts.baseTimeout
 	}
 
@@ -596,10 +596,8 @@ func (sm *ScraperManager) calculateEndpointHash(endpoint interface{}) string {
 	return hex.EncodeToString(hash[:])
 }
 
-// hasTargetChanged checks whether an existing scheduler must use refreshed
-// discovery data. A PodMonitor target keeps the same ID when a recreated Pod
-// receives a new IP, so comparing only endpoint configuration leaves the
-// scheduler scraping the old URL indefinitely.
+// hasTargetChanged detects URL or endpoint changes for diagnostic logging.
+// Other discovery changes are always refreshed by updateTargetSchedulers.
 func (sm *ScraperManager) hasTargetChanged(oldTarget, newTarget *discovery.Target) bool {
 	if oldTarget.URL != newTarget.URL {
 		logutil.Infof("hasTargetChanged", "Target URL changed for %s: %s -> %s",
@@ -649,15 +647,19 @@ func (sm *ScraperManager) updateTargetSchedulers() {
 					target.ID, existingScheduler.interval, newInterval)
 				sm.stopTargetScheduler(target.ID)
 				sm.startTargetScheduler(target)
-			} else if sm.hasTargetChanged(existingScheduler.getTarget(), target) {
-				// Discovery data changed but interval is unchanged - gracefully update without restart.
-				logutil.Printf("INFO", "Target %s discovery data changed, applying from next scrape cycle", target.ID)
-				existingScheduler.updateTarget(target)
-
-				if config.IsDebugEnabled() {
-					logutil.Printf("DEBUG", "Updated target reference for %s, new endpoint hash: %s",
-						target.ID, sm.calculateEndpointHash(target.Metadata["endpoint"])[:8])
+			} else {
+				if sm.hasTargetChanged(existingScheduler.getTarget(), target) {
+					logutil.Printf("INFO", "Target %s discovery data changed, applying from next scrape cycle", target.ID)
+					if config.IsDebugEnabled() {
+						logutil.Printf("DEBUG", "Updated target reference for %s, new endpoint hash: %s",
+							target.ID, sm.calculateEndpointHash(target.Metadata["endpoint"])[:8])
+					}
 				}
+
+				// Discovery replaces targets even when the endpoint config is unchanged.
+				// Refresh the whole snapshot so Pod IP and label changes reach the next
+				// scrape without restarting the ticker or overlapping an in-flight scrape.
+				existingScheduler.updateTarget(target)
 			}
 		}
 	}
