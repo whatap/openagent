@@ -67,8 +67,10 @@ OpenAgent를 실행하려면 다음 환경 변수를 설정해야 합니다:
   - 기본값 `false` — 기존 동작과 동일하게 `Accept: application/json` 으로 스크랩합니다.
   - `true` 로 설정하면 `Accept` 헤더에 protobuf > OpenMetrics > text 우선순위를 광고하고,
     응답 `Content-Type` 에 따라 protobuf/text 디코더를 자동 선택합니다.
-    classic 메트릭(counter/gauge/summary/classic histogram)은 기존과 동일한 flat 시리즈로 수집되며,
-    native histogram 은 디코딩되지만 OpenMx 변환은 후속 작업(KAZAA-591 step 4)에서 추가됩니다.
+    classic 메트릭(counter/gauge/summary/classic histogram)은 기존과 동일한 flat 시리즈로 수집됩니다.
+    integer native histogram은 전용 `OpenMxHistogramPack`으로 변환·전송하지만, 수집 서버의 저장·쿼리
+    지원이 완료되기 전까지는 E2E 지원 대상이 아닙니다. float native histogram은 현재 지원하지 않으며,
+    classic/native가 함께 노출되는 환경에서는 기본값 `false`를 유지해 classic 경로를 사용하세요.
 
 ### Docker 이미지 빌드
 
