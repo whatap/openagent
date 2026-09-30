@@ -8,14 +8,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/prometheus/common/expfmt"
+	prommodel "github.com/prometheus/common/model"
+
 	configPkg "open-agent/pkg/config"
 	"open-agent/pkg/model"
 	"open-agent/tools/util/logutil"
-)
-
-const (
-	helpText = "# HELP"
-	typeText = "# TYPE"
 )
 
 // Convert converts Prometheus metrics to OpenMx format
@@ -27,6 +25,8 @@ func Convert(prometheusData string) (*model.ConversionResult, error) {
 func ConvertWithTimestamp(prometheusData string, collectionTime int64) (*model.ConversionResult, error) {
 	openMxList := make([]*model.OpenMx, 0)
 	helpMap := make(map[string]*model.OpenMxHelp)
+	sampleNames := make(map[string]struct{})
+	var sampleParser expfmt.TextParser
 
 	lines := strings.Split(prometheusData, "\n")
 	for _, line := range lines {
@@ -35,38 +35,33 @@ func ConvertWithTimestamp(prometheusData string, collectionTime int64) (*model.C
 			continue
 		}
 
-		if strings.HasPrefix(line, helpText) {
-			content := strings.TrimSpace(line[len(helpText):])
-			firstSpace := strings.Index(content, " ")
-			if firstSpace < 0 {
-				continue
-			}
-			metricName := content[:firstSpace]
-			helpText := strings.TrimSpace(content[firstSpace+1:])
-
-			omh := model.NewOpenMxHelp(metricName)
-			omh.Put("help", helpText)
-			helpMap[metricName] = omh
-		} else if strings.HasPrefix(line, typeText) {
-			content := strings.TrimSpace(line[len(typeText):])
-			firstSpace := strings.Index(content, " ")
-			if firstSpace < 0 {
-				continue
-			}
-			metricName := content[:firstSpace]
-			typeText := strings.TrimSpace(content[firstSpace+1:])
-
-			if omh, ok := helpMap[metricName]; ok {
-				omh.Put("type", typeText)
-			}
-		} else {
-			om, err := parseRecordLine(line, collectionTime)
-			if err != nil {
-				continue
-			}
-
-			openMxList = append(openMxList, om)
+		if strings.HasPrefix(line, "#") {
+			mergeTextMetadata(helpMap, line)
+			continue
 		}
+		om, err := parseRecordLine(line, collectionTime)
+		if err != nil {
+			continue
+		}
+		openMxList = append(openMxList, om)
+
+		// Validate only the first usable sample for an undeclared metric name.
+		// Keep the legacy value/label/timestamp parser unchanged, but do not
+		// manufacture metadata from malformed lines it happens to accept.
+		if _, ok := helpMap[textMetricFamily(helpMap, om.Metric)]; ok {
+			continue
+		}
+		if _, ok := sampleNames[om.Metric]; ok {
+			continue
+		}
+		if _, err := sampleParser.TextToMetricFamilies(strings.NewReader(line + "\n")); err == nil {
+			sampleNames[om.Metric] = struct{}{}
+		}
+	}
+
+	// Resolve after all declarations, so explicit metadata always wins.
+	for name := range sampleNames {
+		ensureTextMetadata(helpMap, textMetricFamily(helpMap, name))
 	}
 
 	// Convert helpMap to a slice
@@ -76,6 +71,68 @@ func ConvertWithTimestamp(prometheusData string, collectionTime int64) (*model.C
 	}
 
 	return model.NewConversionResult(openMxList, openMxHelpList), nil
+}
+
+// mergeTextMetadata ignores ordinary comments and malformed declarations.
+func mergeTextMetadata(helpMap map[string]*model.OpenMxHelp, line string) {
+	content := strings.TrimSpace(line[1:])
+	firstSpace := strings.IndexAny(content, " \t")
+	if firstSpace < 0 {
+		return
+	}
+	directive := content[:firstSpace]
+	if directive != "HELP" && directive != "TYPE" {
+		return
+	}
+	content = strings.TrimSpace(content[firstSpace+1:])
+	name, value := content, ""
+	if firstSpace = strings.IndexAny(content, " \t"); firstSpace >= 0 {
+		name = content[:firstSpace]
+		value = strings.TrimSpace(content[firstSpace+1:])
+	}
+	if !prommodel.IsValidLegacyMetricName(prommodel.LabelValue(name)) {
+		return
+	}
+	if directive == "HELP" {
+		ensureTextMetadata(helpMap, name).Put("help", value)
+		return
+	}
+	switch value {
+	case "counter", "gauge", "histogram", "summary", "untyped":
+		ensureTextMetadata(helpMap, name).Put("type", value)
+	}
+}
+
+// ensureTextMetadata merges optional HELP and TYPE without overwriting either.
+func ensureTextMetadata(helpMap map[string]*model.OpenMxHelp, name string) *model.OpenMxHelp {
+	if omh, ok := helpMap[name]; ok {
+		return omh
+	}
+	omh := model.NewOpenMxHelp(name)
+	omh.Put("type", "untyped")
+	helpMap[name] = omh
+	return omh
+}
+
+// textMetricFamily resolves suffixes only for explicitly typed compound families.
+// An exact metadata declaration takes precedence over a possible parent family.
+func textMetricFamily(helpMap map[string]*model.OpenMxHelp, name string) string {
+	if _, ok := helpMap[name]; ok {
+		return name
+	}
+	for _, suffix := range []string{"_bucket", "_count", "_sum"} {
+		if !strings.HasSuffix(name, suffix) {
+			continue
+		}
+		family := strings.TrimSuffix(name, suffix)
+		if omh, ok := helpMap[family]; ok {
+			typeName := omh.Get("type")
+			if typeName == "histogram" || (typeName == "summary" && suffix != "_bucket") {
+				return family
+			}
+		}
+	}
+	return name
 }
 
 // matchMultipleWildcards checks if a string matches a pattern with multiple wildcards
