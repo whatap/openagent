@@ -176,6 +176,9 @@ fabric.properties
 logs/
 whatap_openagent.sock
 docs
+!/docs/
+/docs/*
+!/docs/ec2-instance-state.md
 istio/
 openagent/
 s3_upload.sh

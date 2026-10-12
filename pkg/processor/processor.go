@@ -9,6 +9,7 @@ import (
 	"github.com/whatap/gointernal/net/secure"
 	"open-agent/pkg/config"
 	"open-agent/pkg/converter"
+	"open-agent/pkg/ec2state"
 	"open-agent/pkg/model"
 )
 
@@ -17,15 +18,22 @@ import (
 
 // Processor is responsible for processing scraped metrics
 type Processor struct {
-	rawQueue       chan *model.ScrapeRawData
-	processedQueue chan *model.ConversionResult
+	rawQueue          chan *model.ScrapeRawData
+	processedQueue    chan *model.ConversionResult
+	ec2StateSettings  func() map[string]string
+	enqueueEC2State   ec2state.Enqueue
+	ec2StateForwarder ec2state.Forwarder
+	securityMaster    func() *secure.SecurityMaster
 }
 
 // NewProcessor creates a new Processor instance
 func NewProcessor(rawQueue chan *model.ScrapeRawData, processedQueue chan *model.ConversionResult) *Processor {
 	return &Processor{
-		rawQueue:       rawQueue,
-		processedQueue: processedQueue,
+		rawQueue:         rawQueue,
+		processedQueue:   processedQueue,
+		securityMaster:   secure.GetSecurityMaster,
+		ec2StateSettings: config.GetConfigMap,
+		enqueueEC2State:  secure.SendOneway,
 	}
 }
 
@@ -81,6 +89,17 @@ func (p *Processor) processRawData(rawData *model.ScrapeRawData) {
 		}
 	}
 
+	// Forward the original exporter observation before metric relabeling. Target
+	// labels are display metadata, not authoritative EC2 identity/state. A failed
+	// optional forward must not interrupt the ordinary metric pipeline.
+	security := p.securityMaster()
+	accepted, forwardErr := p.ec2StateForwarder.Forward(p.ec2StateSettings(), rawData, security.OID, p.enqueueEC2State)
+	if forwardErr != nil {
+		logutil.Errorf("EC2_STATE_FORWARD", "%s: locally queued=%d; %v", ec2state.CommandName, accepted, forwardErr)
+	} else if accepted > 0 {
+		logutil.Debugf("EC2_STATE_FORWARD", "%s: locally queued=%d (not a Yard acknowledgement)", ec2state.CommandName, accepted)
+	}
+
 	// Convert the raw data to OpenMx format using the collection timestamp.
 	// The decoder (protobuf vs. text) is selected from the response Content-Type;
 	// non-protobuf payloads fall back to the existing text parser.
@@ -106,7 +125,7 @@ func (p *Processor) processRawData(rawData *model.ScrapeRawData) {
 	totalValidMetrics := 0
 
 	// Get PCODE from SecurityMaster
-	pcode := secure.GetSecurityMaster().PCODE
+	pcode := security.PCODE
 	var pcodeStr string
 	if pcode > 0 {
 		pcodeStr = strconv.FormatInt(pcode, 10)

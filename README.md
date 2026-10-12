@@ -70,6 +70,10 @@ OpenAgent를 실행하려면 다음 환경 변수를 설정해야 합니다:
     classic 메트릭(counter/gauge/summary/classic histogram)은 기존과 동일한 flat 시리즈로 수집되며,
     native histogram 은 디코딩되지만 OpenMx 변환은 후속 작업(KAZAA-591 step 4)에서 추가됩니다.
 
+### EC2 상태의 다중 프로젝트 전달
+
+`INFRA_EC2_INSTANCE_STATE` 명령의 `ParamPack(oneway)`으로 Exporter의 EC2 상태를 여러 Server 프로젝트에 전달할 수 있습니다. 기능은 기본 OFF이며 Yard가 할당한 명령 ID 56을 기본으로 사용합니다. 지원 Yard 배포와 실제 Exporter 연동 검증 후 활성화해야 합니다. 최초 관측·상태 변경 때 전송하고, 같은 상태도 `ec2_state_resend_interval` 경과 후 재전송합니다. 재전송 주기는 기본 5분이며, 설정을 생략하거나 빈 값으로 두어도 최초·변경 전송은 정상 동작합니다. 설정·payload·검증 범위는 [EC2 상태 전달 명세](docs/ec2-instance-state.md)를 참고하세요.
+
 ### Docker 이미지 빌드
 
 #### 기본 Docker 빌드

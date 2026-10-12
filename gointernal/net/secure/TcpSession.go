@@ -297,6 +297,14 @@ func (this *TcpSession) SendFailover() bool {
 				continue
 			}
 			temp := v.(*TcpSend)
+			if temp.oneway != nil {
+				if err := this.writeOneway(temp.oneway); err != nil {
+					// Never log oneway routing credentials or payload on retry.
+					conf.Log.Println("WA174-03", "Oneway retry write failed")
+					return false
+				}
+				continue
+			}
 			secu := GetSecurityMaster()
 			secuSession := GetSecuritySession()
 			if n, b, err := this.getEncryptData(temp); err == nil {

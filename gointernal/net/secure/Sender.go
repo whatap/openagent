@@ -17,9 +17,10 @@ import (
 )
 
 type TcpSend struct {
-	flag  byte
-	pack  pack.Pack
-	flush bool
+	flag   byte
+	pack   pack.Pack
+	flush  bool
+	oneway *onewaySend
 }
 
 var lock = sync.Mutex{}
@@ -33,7 +34,7 @@ var TcpQueue *queue.RequestDoubleQueue
 func Send(f byte, p pack.Pack, flush bool) {
 	InitSender()
 	if TcpQueue != nil {
-		TcpQueue.Put1(TcpSend{f, p, flush})
+		TcpQueue.Put1(TcpSend{flag: f, pack: p, flush: flush})
 	}
 }
 
@@ -42,7 +43,7 @@ func SendProfile(f byte, p pack.Pack, flush bool) {
 	// DEBUG Queue
 	if TcpQueue != nil {
 		// profile 우선순위 낮게 처리
-		TcpQueue.Put2(TcpSend{f, p, flush})
+		TcpQueue.Put2(TcpSend{flag: f, pack: p, flush: flush})
 	}
 }
 func InitSender() {
@@ -157,6 +158,10 @@ func runSend() {
 				session.Send(NET_TIME_SYNC, io.ToBytesLong(now), true)
 			}
 
+			if p.oneway != nil {
+				session.sendQueuedOneway(&p)
+				return
+			}
 			if conf.CypherLevel == 0 {
 				b := pack.ToBytesPack(p.pack)
 				if conf.DebugTcpSendEnabled && stringutil.InArray(pack.GetPackTypeString((p.pack).GetPackType()), conf.DebugTcpSendPacks) {
