@@ -41,6 +41,7 @@ const (
 	KUBERNETES                    = 39
 	GET_ACTIVE_STATS              = 40
 	GET_DBCONN_POOL               = 41
+	INFRA_EC2_INSTANCE_STATE      = 56
 	MODULE_DEPENDENCY             = 101
 	DBX_INFO                      = 201
 	DBX_SETTINGS                  = 202
