@@ -88,6 +88,12 @@ func GetConfigMap() map[string]string {
 	return instance.GetConfigMap()
 }
 
+// GetConfigMapWithEnvPrefix returns whatap.conf values plus same-named
+// environment variables that start with prefix, from the singleton instance.
+func GetConfigMapWithEnvPrefix(prefix string) map[string]string {
+	return instance.GetConfigMapWithEnvPrefix(prefix)
+}
+
 // Cleanup stops the configuration watcher of the singleton instance.
 // This function should be called when the application is shutting down to clean up resources.
 func Cleanup() {
@@ -309,6 +315,26 @@ func (wc *WhatapConfig) GetConfigMap() map[string]string {
 	}
 
 	return configCopy
+}
+
+// GetConfigMapWithEnvPrefix returns the whatap.conf snapshot plus same-named
+// environment variables whose names start with prefix. As with Get, a non-empty
+// whatap.conf value takes precedence, so container ENV (for example from the
+// WhaTap Operator) only fills absent or empty keys. An empty prefix adds nothing,
+// keeping unrelated process environment out of the settings map.
+func (wc *WhatapConfig) GetConfigMapWithEnvPrefix(prefix string) map[string]string {
+	settings := wc.GetConfigMap()
+	if prefix == "" {
+		return settings
+	}
+	for _, entry := range os.Environ() {
+		key, value, found := strings.Cut(entry, "=")
+		if !found || !strings.HasPrefix(key, prefix) || settings[key] != "" {
+			continue
+		}
+		settings[key] = value
+	}
+	return settings
 }
 
 // GetIntWithDefault returns the integer value for the given key, or the default value if the key is not found or cannot be converted to an integer.

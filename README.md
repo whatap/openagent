@@ -72,7 +72,15 @@ OpenAgent를 실행하려면 다음 환경 변수를 설정해야 합니다:
 
 ### EC2 상태의 다중 프로젝트 전달
 
-`INFRA_EC2_INSTANCE_STATE` 명령의 `ParamPack(oneway)`으로 Exporter의 EC2 상태를 여러 Server 프로젝트에 전달할 수 있습니다. 기능은 기본 OFF이며 Yard가 할당한 명령 ID 56을 기본으로 사용합니다. 지원 Yard 배포와 실제 Exporter 연동 검증 후 활성화해야 합니다. 최초 관측·상태 변경 때 전송하고, 같은 상태도 `ec2_state_resend_interval` 경과 후 재전송합니다. 재전송 주기는 기본 5분이며, 설정을 생략하거나 빈 값으로 두어도 최초·변경 전송은 정상 동작합니다. 설정·payload·검증 범위는 [EC2 상태 전달 명세](docs/ec2-instance-state.md)를 참고하세요.
+[EC2 상태 설정 매뉴얼](docs/ec2-instance-state-setup.md): Exporter 실행, 설정 파일 위치, 최소 설정, 자동 기본값 및 동작 확인 절차.
+
+**OpenAgent 1.8.11 이상**이 필요합니다. 별도 저장소 `whatap/exporters`의 `ec2/` 상태 Exporter(공식 바이너리 `https://repo.whatap.io/exporter/ec2_state_exporter/<version>/{amd64,arm64}/ec2_state_exporter`, 0.1.0 이상, 기본 `127.0.0.1:9107`)를 기존 `scrape_config.yaml` target에 한 번 등록합니다. 기존 CloudWatch 성능 Exporter와는 별도 컴포넌트·포트입니다. 대상 수집서버가 1002를 지원하면(3.1.10 이상) `whatap.conf`에 `ec2_state_forwarding_enabled=true`와 `ec2_state_licenses=<SERVER_LICENSE_A>,<SERVER_LICENSE_B>` 두 키만 설정하면 됩니다.
+
+메트릭 기본 계약은 `aws_ec2_instance_state{instance_id="...",state_name="...",region="..."} <EC2 State.Code>`입니다. 메트릭명·레이블명·URL을 중복 설정할 필요가 없으며, 이미 수집한 원본만 사용하고 추가 URL probe나 AWS 직접 조회를 하지 않습니다. URL allowlist와 custom metric/label/source override도 계속 지원합니다.
+
+상태는 `INFRA_EC2_INSTANCE_STATE` 명령 ID **1002**(Open Agent 할당 범위 `1000~1099`), `ParamPack(oneway)`으로 각 Server 프로젝트에 전달합니다. 기존 `ec2_state_param_id=56` 설정이 있다면 제거해 기본값을 사용하거나 `1002`로 변경해야 합니다. 최초·변경 때 전송하고 같은 상태는 기본 **5분** 후의 성공한 scrape에서 재전송합니다. 기능 기본값은 **OFF**이며 수집 실패나 목록 소실을 terminated로 합성하지 않습니다. 로그의 `locally queued`는 로컬 큐 수락이며 Yard 수신·해지 완료를 뜻하지 않습니다. 최소 설정과 호환성은 [EC2 상태 전달 명세](docs/ec2-instance-state.md)를 참고하세요. Kubernetes Operator 환경에서는 같은 `ec2_state_*` 키를 `spec.features.openAgent.envs`로 지정합니다(값 직접 입력 또는 Secret 참조).
+
+Yard의 최신 계약은 종료 관측의 pcode에서 `meta:instance-id`가 일치하는 Server 등록을 **모두 해지**하는 방식입니다. OpenAgent는 인스턴스 1건당 각 프로젝트에 ParamPack 1개를 보내며, 등록 서버 수를 검사하거나 대상 oid를 지정하지 않습니다.
 
 ### Docker 이미지 빌드
 
@@ -112,7 +120,7 @@ docker build -t openagent:1.0.0 --build-arg VERSION="1.0.0" --build-arg COMMIT_H
 
 ## 설정
 
-에이전트는 `$WHATAP_HOME/scrape_config.yaml` 위치의 YAML 파일을 통해 설정됩니다. 
+일반 호스트 실행에서 scrape 설정은 `$WHATAP_OPEN_HOME/scrape_config.yaml`에서 읽습니다. `WHATAP_OPEN_HOME`이 없으면 프로세스 작업 디렉터리의 파일을 사용합니다. `whatap.conf`의 기준 경로는 별도로 `$WHATAP_HOME`입니다.
 
 1. **PodMonitor**: Pod 레이블 셀렉터를 이용한 동적 디스커버리 (Prometheus Operator의 PodMonitor와 유사)
 2. **ServiceMonitor**: Service 레이블 셀렉터를 이용한 동적 디스커버리 (Prometheus Operator의 ServiceMonitor와 유사)

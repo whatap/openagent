@@ -16,6 +16,15 @@ import (
 // Use the package-level functions provided by the config package
 // instead of creating our own instance of WhatapConfig
 
+// ec2StateSettingPrefix selects EC2 settings that may also come from container
+// ENV: the WhaTap Operator configures OpenAgent through
+// spec.features.openAgent.envs and does not render whatap.conf.
+const ec2StateSettingPrefix = "ec2_state_"
+
+func loadEC2StateSettings() map[string]string {
+	return config.GetConfigMapWithEnvPrefix(ec2StateSettingPrefix)
+}
+
 // Processor is responsible for processing scraped metrics
 type Processor struct {
 	rawQueue          chan *model.ScrapeRawData
@@ -24,6 +33,7 @@ type Processor struct {
 	enqueueEC2State   ec2state.Enqueue
 	ec2StateForwarder ec2state.Forwarder
 	securityMaster    func() *secure.SecurityMaster
+	infof             func(id, format string, v ...interface{})
 }
 
 // NewProcessor creates a new Processor instance
@@ -32,8 +42,9 @@ func NewProcessor(rawQueue chan *model.ScrapeRawData, processedQueue chan *model
 		rawQueue:         rawQueue,
 		processedQueue:   processedQueue,
 		securityMaster:   secure.GetSecurityMaster,
-		ec2StateSettings: config.GetConfigMap,
+		ec2StateSettings: loadEC2StateSettings,
 		enqueueEC2State:  secure.SendOneway,
+		infof:            logutil.Infof,
 	}
 }
 
@@ -97,7 +108,8 @@ func (p *Processor) processRawData(rawData *model.ScrapeRawData) {
 	if forwardErr != nil {
 		logutil.Errorf("EC2_STATE_FORWARD", "%s: locally queued=%d; %v", ec2state.CommandName, accepted, forwardErr)
 	} else if accepted > 0 {
-		logutil.Debugf("EC2_STATE_FORWARD", "%s: locally queued=%d (not a Yard acknowledgement)", ec2state.CommandName, accepted)
+		// INFO so operators can confirm forwarding; scrapes that queue nothing stay silent.
+		p.infof("EC2_STATE_FORWARD", "%s: locally queued=%d from %s (not a Yard acknowledgement)", ec2state.CommandName, accepted, rawData.TargetURL)
 	}
 
 	// Convert the raw data to OpenMx format using the collection timestamp.

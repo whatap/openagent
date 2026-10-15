@@ -39,7 +39,8 @@ func (f *Forwarder) prune(sources map[string]bool, destinations []destination, s
 		present[observation.instanceID] = true
 	}
 	for key := range f.sent {
-		removedRoute := !sources[key.sourceURL] || activeDestinations[key.pcode] != key.licenseHash || key.senderOID != senderOID || key.commandID != commandID
+		removedSource := sources != nil && !sources[key.sourceURL]
+		removedRoute := removedSource || activeDestinations[key.pcode] != key.licenseHash || key.senderOID != senderOID || key.commandID != commandID
 		absentObservation := key.sourceURL == sourceURL && !present[key.instanceID]
 		if removedRoute || absentObservation {
 			f.forget(key)

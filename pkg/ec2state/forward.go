@@ -17,7 +17,7 @@ import (
 type Enqueue func(pcode, licenseHash int64, observation *pack.ParamPack) error
 
 // CommandName identifies the observation contract. Its default numeric command
-// is allocated by the Yard owner in SERVER-2139 (comment 85923).
+// is 1002, allocated from the Open Agent range (1000-1099) by the Yard owner.
 const CommandName = "INFRA_EC2_INSTANCE_STATE"
 
 const (
@@ -27,8 +27,8 @@ const (
 
 // Forward queues first, changed, or refresh-due observations per destination.
 // Only locally accepted observations update history; no receiver ACK is implied.
-// The input metric name must match the exporter. The command defaults to the
-// owner-allocated ID; an explicit override must match the destination collector.
+// The input defaults to the canonical EC2 exporter contract. The command defaults
+// to the owner-allocated ID; an explicit override must match the collector.
 func (f *Forwarder) Forward(settings map[string]string, raw *model.ScrapeRawData, senderOID int32, enqueue Enqueue) (int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -55,15 +55,21 @@ func (f *Forwarder) Forward(settings map[string]string, raw *model.ScrapeRawData
 	if raw == nil || enqueue == nil || senderOID == 0 || raw.CollectionTime <= 0 {
 		return 0, errors.New("EC2_STATE_INPUT: missing scrape, sender, time, or queue")
 	}
-	if settings["ec2_state_exporter_urls"] == "" || settings["ec2_state_metric_name"] == "" {
-		return 0, errors.New("EC2_STATE_CONFIG: exporter URL and metric name are required")
-	}
-	sources := make(map[string]bool)
-	for _, targetURL := range strings.Split(settings["ec2_state_exporter_urls"], ",") {
-		sources[strings.TrimSpace(targetURL)] = true
-	}
-	if !sources[raw.TargetURL] {
-		return 0, nil
+	// A nil allowlist uses only raw sources already collected by the scraper.
+	// It never discovers targets or starts another HTTP request.
+	var sources map[string]bool
+	if configured := strings.TrimSpace(settings["ec2_state_exporter_urls"]); configured != "" {
+		sources = make(map[string]bool)
+		for _, targetURL := range strings.Split(configured, ",") {
+			targetURL = strings.TrimSpace(targetURL)
+			if targetURL == "" {
+				return 0, errors.New("EC2_STATE_CONFIG: exporter URL list contains an empty entry")
+			}
+			sources[targetURL] = true
+		}
+		if !sources[raw.TargetURL] {
+			return 0, nil
+		}
 	}
 	resendInterval := defaultResendInterval
 	if configured := strings.TrimSpace(settings["ec2_state_resend_interval"]); configured != "" {
