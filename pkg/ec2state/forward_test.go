@@ -92,8 +92,8 @@ func TestForwardGatesUnconfiguredAndUnselectedSources(t *testing.T) {
 		{"negative command", "ec2_state_param_id", "-1", true},
 		{"command overflow", "ec2_state_param_id", "2147483648", true},
 		{"different exporter", "ec2_state_exporter_urls", "http://127.0.0.1:9107/metrics", false},
-		{"missing exporter", "ec2_state_exporter_urls", "", true},
-		{"missing metric", "ec2_state_metric_name", "", true},
+		{"empty allowlist entries", "ec2_state_exporter_urls", ",", true},
+		{"default metric ignores custom family", "ec2_state_metric_name", "", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

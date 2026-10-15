@@ -13,10 +13,10 @@ func TestForwarderDefaultsToOwnerAllocatedCommand(t *testing.T) {
 		omit  bool
 		want  int32
 	}{
-		{"missing", "", true, 56},
-		{"empty", "", false, 56},
-		{"whitespace", " \t ", false, 56},
-		{"explicit allocated ID", "56", false, 56},
+		{"missing", "", true, 1002},
+		{"empty", "", false, 1002},
+		{"whitespace", " 	 ", false, 1002},
+		{"explicit allocated ID", "1002", false, 1002},
 		{"explicit fixture override", "190001", false, 190001},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

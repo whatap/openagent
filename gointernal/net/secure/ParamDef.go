@@ -41,7 +41,6 @@ const (
 	KUBERNETES                    = 39
 	GET_ACTIVE_STATS              = 40
 	GET_DBCONN_POOL               = 41
-	INFRA_EC2_INSTANCE_STATE      = 56
 	MODULE_DEPENDENCY             = 101
 	DBX_INFO                      = 201
 	DBX_SETTINGS                  = 202
@@ -70,4 +69,7 @@ const (
 	CW_STATISTICS                 = 407
 	CW_UNITS                      = 408
 	CW_METRICS                    = 409
+
+	// Open Agent ParamPack IDs are allocated in the 1000-1099 range.
+	INFRA_EC2_INSTANCE_STATE = 1002
 )

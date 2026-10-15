@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	dto "github.com/prometheus/client_model/go"
@@ -14,6 +15,7 @@ import (
 )
 
 const (
+	defaultMetricName        = "aws_ec2_instance_state"
 	maxObservationAge        = 5 * time.Minute
 	maxObservationsPerScrape = 4096
 )
@@ -44,7 +46,11 @@ func parseObservations(settings map[string]string, raw *model.ScrapeRawData) ([]
 	if err != nil {
 		return nil, err
 	}
-	family := families[settings["ec2_state_metric_name"]]
+	metricName := strings.TrimSpace(settings["ec2_state_metric_name"])
+	if metricName == "" {
+		metricName = defaultMetricName
+	}
+	family := families[metricName]
 	if family == nil {
 		return nil, nil
 	}
@@ -54,10 +60,14 @@ func parseObservations(settings map[string]string, raw *model.ScrapeRawData) ([]
 	if family.GetType() != dto.MetricType_GAUGE && family.GetType() != dto.MetricType_UNTYPED {
 		return nil, errors.New("EC2_STATE_INPUT: state metric must be gauge or untyped")
 	}
-	instanceLabel := settingOr(settings, "ec2_state_instance_id_label", "instanceId")
+	instanceDefault, nameDefault, sourceDefault := "instanceId", "stateName", "label"
+	if metricName == defaultMetricName {
+		instanceDefault, nameDefault, sourceDefault = "instance_id", "state_name", "value"
+	}
+	instanceLabel := settingOr(settings, "ec2_state_instance_id_label", instanceDefault)
 	codeLabel := settingOr(settings, "ec2_state_state_code_label", "stateCode")
-	nameLabel := settingOr(settings, "ec2_state_state_name_label", "stateName")
-	codeSource := settingOr(settings, "ec2_state_state_code_source", "label")
+	nameLabel := settingOr(settings, "ec2_state_state_name_label", nameDefault)
+	codeSource := settingOr(settings, "ec2_state_state_code_source", sourceDefault)
 	if codeSource != "label" && codeSource != "value" {
 		return nil, errors.New("EC2_STATE_CONFIG: state code source must be label or value")
 	}
