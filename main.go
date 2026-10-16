@@ -32,6 +32,10 @@ var (
 	buildTime  string // Build timestamp
 )
 
+// bootAgent starts the collector session, scrapers and senders. It is a
+// variable so the process-level shutdown tests can replace the network boot.
+var bootAgent = open.BootOpenAgent
+
 // startPprofServer starts the pprof HTTP server for performance profiling
 func startPprofServer(logger *logfile.FileLogger) {
 	// Get pprof port from environment variable, default to 6060
@@ -108,11 +112,14 @@ func run(home string, logger *logfile.FileLogger) {
 		os.Exit(1)
 	}()
 
-	// Start the agent
-	open.BootOpenAgent(version, commitHash, buildTime, logger)
+	// Start the agent. BootOpenAgent blocks in secure.StartNet until the first
+	// collector connection opens, so it runs in the background and a
+	// termination signal is honored at any point of the boot.
+	go bootAgent(version, commitHash, buildTime, logger)
 
-	logger.Infoln("run", "Received termination signal, shutting down")
-	<-stopper
+	sig := <-stopper
+	// Println is not level-gated; FileLogger drops Infoln at its default WARN level.
+	logger.Println("run", "Received termination signal, shutting down:", sig)
 }
 
 func exitOnStdinClose(logger *logfile.FileLogger) {
@@ -190,6 +197,7 @@ func main() {
 			logger := logfile.NewFileLogger(logfile.WithOnameLogID("open", "OPEN-AGENT"), logfile.WithHomePath(openHome))
 			go exitOnStdinClose(logger)
 			run(openHome, logger)
+			return
 		} else if arg1 == "standalone" {
 			if config.IsDebugEnabled() {
 				fmt.Println("Standalone mode: enabled")
