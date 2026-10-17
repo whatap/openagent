@@ -33,6 +33,7 @@ type Sender struct {
 	lastSendTime            map[string]int64
 	mu                      sync.Mutex
 	endpointMeteringEnabled bool
+	sendToServerFn          func(pack.Pack) error
 }
 
 // NewSender creates a new Sender instance
@@ -42,7 +43,7 @@ func NewSender(processedQueue chan *model.ConversionResult, logger *logfile.File
 		logger = logfile.NewFileLogger()
 	}
 
-	return &Sender{
+	sender := &Sender{
 		processedQueue:          processedQueue,
 		logger:                  logger,
 		shutdownCh:              make(chan struct{}),
@@ -50,6 +51,8 @@ func NewSender(processedQueue chan *model.ConversionResult, logger *logfile.File
 		lastSendTime:            make(map[string]int64),
 		endpointMeteringEnabled: endpointMeteringEnabled,
 	}
+	sender.sendToServerFn = sender.sendToServer
+	return sender
 }
 
 // Start starts the sender
@@ -130,6 +133,29 @@ func (s *Sender) sendResult(result *model.ConversionResult) {
 	if len(openMxList) > 0 {
 		s.sendMetrics(openMxList, target)
 	}
+
+	// Send Native Histogram data in its dedicated wire pack. Keeping this
+	// separate from OpenMx preserves the scalar wire format and server path.
+	openMxHistogramList := result.GetOpenMxHistogramList()
+	if len(openMxHistogramList) > 0 {
+		s.sendHistograms(openMxHistogramList)
+	}
+}
+
+// sendHistograms sends Native Histogram data in chunks.
+func (s *Sender) sendHistograms(histograms []*model.OpenMxHistogram) {
+	total := len(histograms)
+	for i := 0; i < total; i += ChunkSize {
+		end := i + ChunkSize
+		if end > total {
+			end = total
+		}
+		chunk := histograms[i:end]
+
+		s.logger.Println("Sender", fmt.Sprintf("Sending %d OpenMxHistogram records", len(chunk)))
+		histogramPack := createHistogramPack(chunk)
+		s.sendToServerWithRetry(histogramPack)
+	}
 }
 
 // sendHelp sends OpenMxHelp data in chunks
@@ -189,6 +215,13 @@ func createMetricsPack(metrics []*model.OpenMx, endpointMeteringEnabled bool, ta
 	return p
 }
 
+// createHistogramPack creates a pack of Native Histogram records for sending.
+func createHistogramPack(histograms []*model.OpenMxHistogram) pack.Pack {
+	p := model.NewOpenMxHistogramPack()
+	p.SetRecords(histograms)
+	return p
+}
+
 // sendToServerWithRetry sends a pack to the server with retry logic
 func (s *Sender) sendToServerWithRetry(p pack.Pack) {
 	var err error
@@ -199,7 +232,7 @@ func (s *Sender) sendToServerWithRetry(p pack.Pack) {
 			time.Sleep(RetryDelay)
 		}
 
-		err = s.sendToServer(p)
+		err = s.sendToServerFn(p)
 		if err == nil {
 			return
 		}
