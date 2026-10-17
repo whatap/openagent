@@ -12,7 +12,7 @@ func TestDuplicateDetection(t *testing.T) {
 	// Pass nil logger, NewSender will create a default one.
 	// This might create log files in current directory, which we should clean up or accept.
 	// For this test, it's fine.
-	s := NewSender(processedQueue, nil)
+	s := NewSender(processedQueue, nil, false)
 
 	// Create a result with empty lists so it doesn't try to send to network
 	res1 := &model.ConversionResult{

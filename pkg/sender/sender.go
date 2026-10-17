@@ -33,6 +33,7 @@ type Sender struct {
 	lastSendTime            map[string]int64
 	mu                      sync.Mutex
 	endpointMeteringEnabled bool
+	sendPack                func(pack.Pack)
 }
 
 // NewSender creates a new Sender instance
@@ -42,7 +43,7 @@ func NewSender(processedQueue chan *model.ConversionResult, logger *logfile.File
 		logger = logfile.NewFileLogger()
 	}
 
-	return &Sender{
+	sender := &Sender{
 		processedQueue:          processedQueue,
 		logger:                  logger,
 		shutdownCh:              make(chan struct{}),
@@ -50,6 +51,8 @@ func NewSender(processedQueue chan *model.ConversionResult, logger *logfile.File
 		lastSendTime:            make(map[string]int64),
 		endpointMeteringEnabled: endpointMeteringEnabled,
 	}
+	sender.sendPack = sender.sendToServerWithRetry
+	return sender
 }
 
 // Start starts the sender
@@ -130,6 +133,13 @@ func (s *Sender) sendResult(result *model.ConversionResult) {
 	if len(openMxList) > 0 {
 		s.sendMetrics(openMxList, target)
 	}
+
+	// Send native histogram data through its dedicated pack type. Classic
+	// histogram series remain in OpenMxList and continue to use OpenMxPack.
+	openMxHistogramList := result.GetOpenMxHistogramList()
+	if len(openMxHistogramList) > 0 {
+		s.sendHistograms(openMxHistogramList)
+	}
 }
 
 // sendHelp sends OpenMxHelp data in chunks
@@ -146,7 +156,7 @@ func (s *Sender) sendHelp(helpList []*model.OpenMxHelp) {
 
 		// Create a pack and send it
 		helpPack := createHelpPack(chunk)
-		s.sendToServerWithRetry(helpPack)
+		s.sendPack(helpPack)
 	}
 }
 
@@ -164,7 +174,22 @@ func (s *Sender) sendMetrics(metrics []*model.OpenMx, target string) {
 
 		// Create a pack and send it
 		metricsPack := createMetricsPack(chunk, s.endpointMeteringEnabled, target)
-		s.sendToServerWithRetry(metricsPack)
+		s.sendPack(metricsPack)
+	}
+}
+
+// sendHistograms sends native histogram data in chunks.
+func (s *Sender) sendHistograms(histograms []*model.OpenMxHistogram) {
+	total := len(histograms)
+	for i := 0; i < total; i += ChunkSize {
+		end := i + ChunkSize
+		if end > total {
+			end = total
+		}
+		chunk := histograms[i:end]
+
+		s.logger.Println("Sender", fmt.Sprintf("Sending %d OpenMxHistogram records", len(chunk)))
+		s.sendPack(createHistogramPack(chunk))
 	}
 }
 
@@ -186,6 +211,13 @@ func createMetricsPack(metrics []*model.OpenMx, endpointMeteringEnabled bool, ta
 		p.Endpoint = target
 	}
 
+	return p
+}
+
+// createHistogramPack creates a pack of native histogram records for sending.
+func createHistogramPack(histograms []*model.OpenMxHistogram) pack.Pack {
+	p := model.NewOpenMxHistogramPack()
+	p.SetRecords(histograms)
 	return p
 }
 
