@@ -137,7 +137,7 @@ echo "🚀 Building and pushing both tags: ${IMG} and ${IMG_LATEST}"
 # Create a temporary Dockerfile.cross for multi-platform build
 cat > Dockerfile.cross << 'EOF'
 # Build the openagent binary
-FROM --platform=${BUILDPLATFORM} golang:1.24.3 AS builder
+FROM --platform=${BUILDPLATFORM} golang:1.26.10 AS builder
 ARG TARGETOS
 ARG TARGETARCH
 
