@@ -9,6 +9,7 @@ import (
 	"github.com/whatap/gointernal/net/secure"
 	"open-agent/pkg/config"
 	"open-agent/pkg/converter"
+	"open-agent/pkg/dcgm"
 	"open-agent/pkg/ec2state"
 	"open-agent/pkg/model"
 )
@@ -25,6 +26,14 @@ func loadEC2StateSettings() map[string]string {
 	return config.GetConfigMapWithEnvPrefix(ec2StateSettingPrefix)
 }
 
+// dcgmWeightedGPUUtilKey switches off deriving DCGM_FI_DEV_WEIGHTED_GPU_UTIL
+// from dcgm-exporter scrapes (whatap.conf or container ENV, default on).
+const dcgmWeightedGPUUtilKey = "dcgm_weighted_gpu_util_enabled"
+
+func loadDCGMWeightedGPUUtilEnabled() bool {
+	return config.GetBoolWithDefault(dcgmWeightedGPUUtilKey, true)
+}
+
 // Processor is responsible for processing scraped metrics
 type Processor struct {
 	rawQueue          chan *model.ScrapeRawData
@@ -34,6 +43,8 @@ type Processor struct {
 	ec2StateForwarder ec2state.Forwarder
 	securityMaster    func() *secure.SecurityMaster
 	infof             func(id, format string, v ...interface{})
+	weightedGPUUtil   func() bool
+	weightedLogged    bool
 }
 
 // NewProcessor creates a new Processor instance
@@ -45,6 +56,7 @@ func NewProcessor(rawQueue chan *model.ScrapeRawData, processedQueue chan *model
 		ec2StateSettings: loadEC2StateSettings,
 		enqueueEC2State:  secure.SendOneway,
 		infof:            logutil.Infof,
+		weightedGPUUtil:  loadDCGMWeightedGPUUtilEnabled,
 	}
 }
 
@@ -124,6 +136,21 @@ func (p *Processor) processRawData(rawData *model.ScrapeRawData) {
 	// Set target and timestamp info
 	conversionResult.SetTarget(rawData.TargetURL)
 	conversionResult.SetCollectionTime(rawData.CollectionTime)
+
+	// The official dcgm-exporter does not publish WhaTap's per-GPU weighted
+	// utilization. Derive it before relabeling so the rows follow the same
+	// pipeline as rows a WhaTap exporter build publishes; those take precedence.
+	if p.weightedGPUUtil() {
+		if added := dcgm.AppendWeightedGPUUtil(conversionResult); added > 0 {
+			if !p.weightedLogged {
+				p.weightedLogged = true
+				p.infof("PROCESSOR", "Derived %d %s rows from %s; exporter-published rows take precedence (%s=false disables)",
+					added, dcgm.WeightedGPUUtilMetric, rawData.TargetURL, dcgmWeightedGPUUtilKey)
+			} else if config.IsDebugEnabled() {
+				logutil.Debugf("PROCESSOR", "Derived %d %s rows from %s", added, dcgm.WeightedGPUUtilMetric, rawData.TargetURL)
+			}
+		}
+	}
 
 	// Apply metric relabeling if configured
 	if len(rawData.MetricRelabelConfigs) > 0 {

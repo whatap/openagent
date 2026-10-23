@@ -69,6 +69,21 @@ OpenAgent를 실행하려면 다음 환경 변수를 설정해야 합니다:
     응답 `Content-Type` 에 따라 protobuf/text 디코더를 자동 선택합니다.
     classic 메트릭(counter/gauge/summary/classic histogram)은 기존과 동일한 flat 시리즈로 수집되며,
     native histogram 은 디코딩되지만 OpenMx 변환은 후속 작업(KAZAA-591 step 4)에서 추가됩니다.
+- `dcgm_weighted_gpu_util_enabled`: dcgm-exporter 스크랩에서 `DCGM_FI_DEV_WEIGHTED_GPU_UTIL`을 계산해 추가합니다.
+  - 기본값 `true`. `false`로 설정하면 계산하지 않습니다.
+  - 자세한 동작은 아래 [DCGM 가중 GPU 사용률](#dcgm-가중-gpu-사용률)을 참고하세요.
+
+### DCGM 가중 GPU 사용률
+
+**OpenAgent 1.8.13 이상**은 NVIDIA 공식 dcgm-exporter 스크랩으로도 WhaTap GPU 화면이 쓰는 `DCGM_FI_DEV_WEIGHTED_GPU_UTIL`(물리 GPU 1장의 사용률, 0~1)을 만듭니다. WhaTap dcgm-exporter 이미지처럼 스크랩에 이 지표가 이미 있으면 exporter 값을 그대로 쓰고 계산하지 않습니다.
+
+| GPU | 계산 | `calculation_method` |
+|---|---|---|
+| 일반 GPU | `DCGM_FI_DEV_GPU_UTIL / 100` (100% 초과는 100%) | `direct` |
+| MIG GPU | 인스턴스별 `DCGM_FI_PROF_GR_ENGINE_ACTIVE × (인스턴스 slice 수 / DCGM_FI_DEV_MIG_MAX_SLICES)`의 합. max slices 레이블이 없으면 7 | `weighted_sum` |
+| 일반 H100·H200·H800·H20 | `DCGM_FI_PROF_GR_ENGINE_ACTIVE` (없으면 `GPU_UTIL / 100`) | `prof_gr_engine_active` |
+
+레이블은 WhaTap exporter 출력과 같습니다. MIG GPU 행에는 장치 레이블과 `DCGM_FI_*` 레이블만 남기고 인스턴스·Pod 레이블(`GPU_I_*`, `pod`, `namespace`, `container`, Pod 레이블)은 붙이지 않습니다. 계산은 metric relabeling 전에 하므로 `metricRelabelConfigs`와 target 레이블이 exporter 지표와 똑같이 적용됩니다.
 
 ### EC2 상태의 다중 프로젝트 전달
 
