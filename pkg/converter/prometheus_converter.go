@@ -70,7 +70,9 @@ func ConvertWithTimestamp(prometheusData string, collectionTime int64) (*model.C
 		openMxHelpList = append(openMxHelpList, omh)
 	}
 
-	return model.NewConversionResult(openMxList, openMxHelpList), nil
+	result := model.NewConversionResult(openMxList, openMxHelpList)
+	addDCGMWeightedUtil(result, dcgmTextSamples(prometheusData, collectionTime))
+	return result, nil
 }
 
 // mergeTextMetadata ignores ordinary comments and malformed declarations.

@@ -77,6 +77,8 @@ func ConvertProtobufWithTimestamp(data []byte, collectionTime int64) (*model.Con
 	dec := expfmt.NewDecoder(bytes.NewReader(data), expfmt.NewFormat(expfmt.TypeProtoDelim))
 	nativeHistogramCount := 0
 	floatNativeSkipped := 0
+	var dcgmSamples []*model.OpenMx
+	dcgmValid := true
 
 	for {
 		var mf dto.MetricFamily
@@ -96,6 +98,9 @@ func ConvertProtobufWithTimestamp(data []byte, collectionTime int64) (*model.Con
 		if name == "" {
 			continue
 		}
+		rows, valid := dcgmFamilySamples(&mf, collectionTime)
+		dcgmSamples = append(dcgmSamples, rows...)
+		dcgmValid = dcgmValid && valid
 
 		// HELP / TYPE metadata, mirroring the text parser's helpMap.
 		omh := model.NewOpenMxHelp(name)
@@ -176,6 +181,9 @@ func ConvertProtobufWithTimestamp(data []byte, collectionTime int64) (*model.Con
 
 	result := model.NewConversionResult(openMxList, helpMapToSlice(helpMap))
 	result.SetOpenMxHistogramList(histogramList)
+	if dcgmValid {
+		addDCGMWeightedUtil(result, dcgmSamples)
+	}
 	return result, nil
 }
 
