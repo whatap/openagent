@@ -453,6 +453,26 @@ OpenAgent는 프로메테우스의 metric_relabel_configs와 유사한 메트릭
 
 - **__name__**: 메트릭 이름을 나타내는 특수 레이블
 
+### 대상 레이블 (job, instance)
+
+1.8.14부터 재라벨링은 OpenAgent가 붙이는 대상 레이블 `job`(targetName)과 `instance`(수집 주소)가 붙은 뒤에 적용됩니다(프로메테우스와 같은 순서). 그래서 `source_labels`로 읽거나 `replace`로 값을 바꿀 수 있습니다. 1.8.13까지는 재라벨링 뒤에 대상 레이블이 붙어 두 레이블을 바꿀 수 없었습니다. `pcode`와 `node`는 지금도 재라벨링 뒤에 붙으므로 바꿀 수 없습니다.
+
+```yaml
+metricRelabelConfigs:
+  # instance를 서버 이름으로 바꾸기
+  - target_label: instance
+    replacement: "web-01"
+    action: replace
+  # 또는 instance에서 포트만 떼기
+  - source_labels: [instance]
+    regex: '(.*):\d+'
+    target_label: instance
+    replacement: '${1}'
+    action: replace
+```
+
+instance 값이 바뀌면 새 시계열로 저장됩니다. 기존 instance 값으로 만든 필터와 알림은 새 값으로 다시 지정해야 합니다.
+
 ### 예제
 
 #### 1. 특정 메트릭만 유지
