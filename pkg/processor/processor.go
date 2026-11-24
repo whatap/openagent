@@ -3,6 +3,7 @@ package processor
 import (
 	"math"
 	"open-agent/tools/util/logutil"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -152,6 +153,17 @@ func (p *Processor) processRawData(rawData *model.ScrapeRawData) {
 		}
 	}
 
+	// Attach target labels (job, instance and discovery labels) before metric
+	// relabeling, in Prometheus order, so metricRelabelConfigs can read and
+	// override them (e.g. replace instance with a server name). pcode and node
+	// stay agent-owned and are attached after relabeling.
+	targetLabels := targetLabelsOf(rawData)
+	for _, openMx := range conversionResult.GetOpenMxList() {
+		for _, label := range targetLabels {
+			openMx.AddLabel(label.Key, label.Value)
+		}
+	}
+
 	// Apply metric relabeling if configured
 	if len(rawData.MetricRelabelConfigs) > 0 {
 		logutil.Infof("PROCESSOR", "Applying %d metric relabel configs", len(rawData.MetricRelabelConfigs))
@@ -174,19 +186,9 @@ func (p *Processor) processRawData(rawData *model.ScrapeRawData) {
 		if !math.IsNaN(openMx.Value) && !math.IsInf(openMx.Value, 0) {
 			totalValidMetrics++
 
-			// Add target labels (including job and instance)
-			for k, v := range rawData.Labels {
-				openMx.AddLabel(k, v)
-			}
-
 			// Add pcode label
 			if pcodeStr != "" {
 				openMx.AddLabel("pcode", pcodeStr)
-			}
-
-			// Add instance label if missing (fallback for backward compatibility)
-			if _, exists := rawData.Labels["instance"]; !exists {
-				openMx.AddLabel("instance", rawData.TargetURL)
 			}
 
 			// Add node label if available and enabled
@@ -220,4 +222,18 @@ func (p *Processor) processRawData(rawData *model.ScrapeRawData) {
 
 	// Add the processed data to the queue
 	p.processedQueue <- conversionResult
+}
+
+// targetLabelsOf returns the scrape target's labels in key order. When discovery
+// set no instance, the target URL stands in (backward compatibility).
+func targetLabelsOf(rawData *model.ScrapeRawData) []model.Label {
+	labels := make([]model.Label, 0, len(rawData.Labels)+1)
+	for k, v := range rawData.Labels {
+		labels = append(labels, model.Label{Key: k, Value: v})
+	}
+	if _, exists := rawData.Labels["instance"]; !exists {
+		labels = append(labels, model.Label{Key: "instance", Value: rawData.TargetURL})
+	}
+	sort.Slice(labels, func(i, j int) bool { return labels[i].Key < labels[j].Key })
+	return labels
 }
