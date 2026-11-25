@@ -16,6 +16,7 @@ import (
 	_ "net/http/pprof"
 	"open-agent/open"
 	"open-agent/pkg/config"
+	"open-agent/pkg/rdsevent"
 	"os"
 	"os/signal"
 	"runtime"
@@ -155,6 +156,9 @@ func main() {
 			}
 			fmt.Printf("version: %s\nbuild date: %s\n", v, bd)
 			return
+		case rdsevent.DryRunCommand:
+			// One RDS DescribeEvents round printed as JSON; nothing is sent.
+			os.Exit(rdsevent.DryRunMain(os.Args[2:], os.Stdout, os.Stderr))
 		}
 	}
 

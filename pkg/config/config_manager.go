@@ -338,6 +338,35 @@ func (cm *ConfigManager) Close() {
 	}
 }
 
+// GetOpenAgentSection returns features.openAgent.<name> with string keys, or nil
+// when the section is absent. Unlike GetScrapeConfigs it does not depend on
+// openAgent.enabled: a feature section carries its own enabled flag. In
+// Kubernetes mode the ConfigMap is reloaded from the informer cache first; in
+// file mode the file watcher keeps the configuration current.
+func (cm *ConfigManager) GetOpenAgentSection(name string) map[string]interface{} {
+	if cm.k8sClient != nil && cm.k8sClient.IsInitialized() && !forceStandaloneMode {
+		if err := cm.LoadConfig(); err != nil && IsDebugEnabled() {
+			logutil.Debugf("CONFIG", "GetOpenAgentSection(%s): reload from informer cache failed: %v", name, err)
+		}
+	}
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+	features, ok := cm.config["features"].(map[interface{}]interface{})
+	if !ok {
+		return nil
+	}
+	openAgent, ok := features["openAgent"].(map[interface{}]interface{})
+	if !ok {
+		return nil
+	}
+	section, ok := openAgent[name].(map[interface{}]interface{})
+	if !ok {
+		return nil
+	}
+	converted, _ := convertToStringMap(section).(map[string]interface{})
+	return converted
+}
+
 // GetScrapingInterval returns the scraping loop interval from openAgent configuration
 func (cm *ConfigManager) GetScrapingInterval() string {
 	if cm.config != nil {

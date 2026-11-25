@@ -11,6 +11,7 @@ import (
 	"open-agent/pkg/k8s"
 	"open-agent/pkg/model"
 	"open-agent/pkg/processor"
+	"open-agent/pkg/rdsevent"
 	"open-agent/pkg/scraper"
 	"open-agent/pkg/sender"
 	"open-agent/tools/util/logutil"
@@ -254,6 +255,13 @@ func BootOpenAgent(version, commitHash, buildTime string, logger *logfile.FileLo
 		logutil.Infoln("BootOpenAgent", "Failed to create configuration manager. Please ensure scrape_config.yaml exists.")
 		return
 	}
+
+	// AWS RDS events (features.openAgent.awsRdsEvents) in the agency's
+	// aws_rds_event format. Off unless the section says enabled: true; the
+	// section is re-read before every round.
+	rdsevent.Start(func() map[string]interface{} {
+		return configManager.GetOpenAgentSection(rdsevent.SectionName)
+	}, os.Getenv("WHATAP_OPEN_HOME"))
 
 	// Create service discovery
 	serviceDiscovery := discovery.NewServiceDiscovery(configManager)
