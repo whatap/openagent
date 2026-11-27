@@ -144,6 +144,8 @@ func TestParseConfigRejectsInvalidSettings(t *testing.T) {
 		{"bad duration", "overlap", "five minutes", "overlap"},
 		{"overlap too long", "overlap", "2h", "overlap"},
 		{"lookback beyond retention", "initialLookback", "400h", "initialLookback"},
+		{"lookback at the 14-day boundary", "initialLookback", "336h", "initialLookback"},
+		{"catch-up at the 14-day boundary", "maxCatchUp", "336h", "maxCatchUp"},
 		{"catch-up below interval", "maxCatchUp", "30s", "maxCatchUp"},
 		{"empty agency", "agencyName", " ", "agencyName"},
 		{"unknown key", "regoins", "ap-northeast-2", "unknown keys regoins"},

@@ -41,6 +41,12 @@ const (
 	maxOverlap  = time.Hour
 	// rdsEventRetention is how far back DescribeEvents can return events.
 	rdsEventRetention = 14 * 24 * time.Hour
+	// maxLookback is the oldest window start the collector asks for. DescribeEvents
+	// rejects a start exactly 14 days back (InvalidParameterCombination: "Events
+	// occurring more than 14 days in the past cannot be retrieved"), because the
+	// request reaches AWS a moment later; a failed window is kept and retried, so
+	// a 336h setting would fail on every round. One hour of margin avoids that.
+	maxLookback = rdsEventRetention - time.Hour
 )
 
 // Config is the parsed features.openAgent.awsRdsEvents section.
@@ -213,11 +219,11 @@ func (c Config) Validate() error {
 	if c.Overlap < 0 || c.Overlap > maxOverlap {
 		return fmt.Errorf("overlap: must be between 0s and %s", maxOverlap)
 	}
-	if c.InitialLookback <= 0 || c.InitialLookback > rdsEventRetention {
-		return fmt.Errorf("initialLookback: must be greater than 0s and at most 336h (RDS keeps events for 14 days)")
+	if c.InitialLookback <= 0 || c.InitialLookback > maxLookback {
+		return fmt.Errorf("initialLookback: must be greater than 0s and at most 335h (RDS keeps events for 14 days and rejects a window starting exactly 14 days back)")
 	}
-	if c.MaxCatchUp < c.Interval || c.MaxCatchUp > rdsEventRetention {
-		return fmt.Errorf("maxCatchUp: must be between interval and 336h (RDS keeps events for 14 days)")
+	if c.MaxCatchUp < c.Interval || c.MaxCatchUp > maxLookback {
+		return fmt.Errorf("maxCatchUp: must be between interval and 335h (RDS keeps events for 14 days and rejects a window starting exactly 14 days back)")
 	}
 	if strings.TrimSpace(c.AgencyName) == "" {
 		return fmt.Errorf("agencyName: must not be empty")

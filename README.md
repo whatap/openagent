@@ -380,8 +380,8 @@ features:
 | `interval` | `60s` | 조회 주기. 10초 이상. |
 | `agencyName` | `openagent` | `agency` 태그 값. 에이전시는 여기에 서비스 id를 넣었습니다. 기존 알림 규칙이나 화면이 `agency` 값으로 거른다면 기존 데이터에 찍힌 값을 그대로 넣으세요. |
 | `overlap` | `5m` | 직전 구간 끝에서 이만큼 겹쳐 다시 읽습니다. 0~1h. |
-| `initialLookback` | `10m` | 상태 파일이 없을 때(처음 켤 때) 거슬러 보는 범위. 최대 336h. |
-| `maxCatchUp` | `24h` | 재시작 뒤 따라잡는 구간의 상한. `interval` 이상, 최대 336h(RDS가 이벤트를 14일 보관). |
+| `initialLookback` | `10m` | 상태 파일이 없을 때(처음 켤 때) 거슬러 보는 범위. 최대 335h. |
+| `maxCatchUp` | `24h` | 재시작 뒤 따라잡는 구간의 상한. `interval` 이상, 최대 335h. RDS는 이벤트를 14일 보관하지만 정확히 14일(336h) 전에서 시작하는 조회는 `InvalidParameterCombination`으로 거부합니다. |
 | `stateFile` | `$WHATAP_OPEN_HOME/rds_events_state.json` | 마지막 조회 끝 시각과 중복 제거 키를 저장하는 파일. 상대 경로는 `$WHATAP_OPEN_HOME` 기준입니다. |
 
 설정 값이 잘못되면(리전 이름 오류, 모르는 키 등) 수집만 멈추고 `RDS_EVENTS` 로그에 이유를 한 번 남깁니다. 에이전트의 다른 기능은 그대로 동작합니다.
