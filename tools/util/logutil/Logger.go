@@ -84,12 +84,14 @@ func NewLogger() *Logger {
 
 // isBareInfoCommand reports whether the process was invoked as a lightweight
 // info command (e.g. `openagent version`) that must produce clean stdout.
+// "rds-events-dryrun" (rdsevent.DryRunCommand) prints JSON on stdout, so its
+// log lines must stay on stderr as well.
 func isBareInfoCommand() bool {
 	if len(os.Args) < 2 {
 		return false
 	}
 	switch os.Args[1] {
-	case "version", "-v", "--version":
+	case "version", "-v", "--version", "rds-events-dryrun":
 		return true
 	}
 	return false

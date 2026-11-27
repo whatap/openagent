@@ -34,6 +34,7 @@ openagent/
 │   ├── k8s/              # 쿠버네티스 클라이언트 및 인포머
 │   ├── model/            # 데이터 모델 (OpenMx, OpenMxHelp 등)
 │   ├── processor/        # 수집된 메트릭 처리기
+│   ├── rdsevent/         # AWS RDS 이벤트 수집 (에이전시 aws_rds_event 호환)
 │   ├── scraper/          # 메트릭 스크래퍼
 │   └── sender/           # 처리된 메트릭 전송기
 ├── scrape_config.yaml    # 스크래핑 설정 파일
@@ -331,6 +332,157 @@ PodMonitor 타입에서는 `addNodeLabel` 옵션을 사용하여 대상 파드�
   - `metricRelabelConfigs`: 스크래핑 후 메트릭 재라벨링 설정
 
 StaticEndpoints는 이제 PodMonitor 및 ServiceMonitor와 동일한 `endpoints` 배열 구조를 사용하여 일관된 설정 방식을 제공합니다.
+
+## AWS RDS 이벤트 수집 (에이전시 `aws_rds_event` 호환)
+
+**OpenAgent 1.8.15 이상**에서 쓸 수 있습니다. 기본값은 **꺼짐**입니다.
+
+AWS RDS `DescribeEvents`를 리전마다 주기적으로 조회해, RDS 이벤트(재시작, 페일오버, 백업 등) 하나를 태그카운트 팩(TagCountPack) 하나로 이 OpenAgent의 프로젝트에 보냅니다. 팩 형식은 클라우드 모니터링 에이전시가 보내던 RDS 이벤트와 같으므로, 에이전시 데이터로 만든 알림 규칙을 고치지 않고 씁니다.
+
+| 항목 | 값 |
+|---|---|
+| category | `aws_rds_event` |
+| time | 이벤트 발생 시각(`Date`, ms) |
+| tags (이 순서) | `category0`, `category1`, … (이벤트 범주 순서대로), `sourceArn`, `sourceIdentifier`, `sourceType`(예: `db-instance`), `agency` |
+| fields | `message` |
+
+값이 없는 태그는 빈 문자열로 보냅니다. 한 주기에 모은 이벤트는 모든 리전을 합쳐 시각순으로 정렬한 뒤 보냅니다.
+
+### 설정
+
+`scrape_config.yaml`의 `features.openAgent` 아래에 `awsRdsEvents` 섹션을 둡니다. 이 섹션은 자체 `enabled`로 켜고 끄며 `openAgent.enabled`, `targets`와는 따로 동작합니다. 주기마다 다시 읽으므로 켜기·끄기·변경에 재시작이 필요 없습니다.
+
+```yaml
+features:
+  openAgent:
+    enabled: true
+    targets: []
+    awsRdsEvents:
+      enabled: true                  # 기본 false
+      regions: [ap-northeast-2, us-east-1]
+      # 다른 계정의 역할을 맡을 때만 (없으면 서버의 기본 자격 증명으로 조회)
+      roleArn: "arn:aws:iam::<조회 대상 계정>:role/WhatapRdsEventsReadOnly"
+      externalId: "<외부 ID>"         # 선택, roleArn과 함께
+      interval: 60s
+      agencyName: openagent
+      overlap: 5m
+      initialLookback: 10m
+      maxCatchUp: 24h
+      stateFile: rds_events_state.json
+```
+
+| 키 | 기본값 | 설명 |
+|---|---|---|
+| `enabled` | `false` | `true`일 때만 AWS를 호출합니다. |
+| `regions` | (필수) | 조회할 리전 목록. YAML 목록 또는 쉼표로 구분한 문자열. |
+| `roleArn` | 없음 | 있으면 기본 자격 증명으로 이 역할을 맡아(`sts:AssumeRole`) 조회합니다. 세션 이름은 `whatap-openagent-rds-events`입니다. |
+| `externalId` | 없음 | AssumeRole에 넣는 외부 ID. `roleArn`이 있어야 합니다. |
+| `interval` | `60s` | 조회 주기. 10초 이상. |
+| `agencyName` | `openagent` | `agency` 태그 값. 에이전시는 여기에 서비스 id를 넣었습니다. 기존 알림 규칙이나 화면이 `agency` 값으로 거른다면 기존 데이터에 찍힌 값을 그대로 넣으세요. |
+| `overlap` | `5m` | 직전 구간 끝에서 이만큼 겹쳐 다시 읽습니다. 0~1h. |
+| `initialLookback` | `10m` | 상태 파일이 없을 때(처음 켤 때) 거슬러 보는 범위. 최대 335h. |
+| `maxCatchUp` | `24h` | 재시작 뒤 따라잡는 구간의 상한. `interval` 이상, 최대 335h. RDS는 이벤트를 14일 보관하지만 정확히 14일(336h) 전에서 시작하는 조회는 `InvalidParameterCombination`으로 거부합니다. |
+| `stateFile` | `$WHATAP_OPEN_HOME/rds_events_state.json` | 마지막 조회 끝 시각과 중복 제거 키를 저장하는 파일. 상대 경로는 `$WHATAP_OPEN_HOME` 기준입니다. |
+
+설정 값이 잘못되면(리전 이름 오류, 모르는 키 등) 수집만 멈추고 `RDS_EVENTS` 로그에 이유를 한 번 남깁니다. 에이전트의 다른 기능은 그대로 동작합니다.
+
+**지원 범위**: 호스트에 직접 설치해 `scrape_config.yaml` 파일을 읽는 **파일 모드**만 지원합니다. Kubernetes 설치(Operator, Helm)는 ConfigMap의 `scrape_config.yaml`을 `enabled`, `targets` 등 정해진 키로만 만들기 때문에 `awsRdsEvents` 섹션이 전달되지 않습니다. ConfigMap을 직접 관리하면 OpenAgent가 섹션을 읽기는 하지만 검증하지 않았고, Pod가 다시 뜨면 상태 파일이 사라지므로 `stateFile`을 영구 볼륨에 두어야 합니다.
+
+### 자격 증명과 IAM 권한
+
+자격 증명은 AWS SDK 기본 체인에서 얻습니다(환경 변수, `~/.aws`, ECS·EKS 태스크 역할, EC2 인스턴스 역할 순). EC2에서는 인스턴스 역할을 쓰면 키를 서버에 두지 않아도 됩니다. `roleArn`을 주면 그 자격으로 역할을 맡고, 임시 자격은 만료 전에 자동으로 갱신합니다. 서버에서 `rds.<리전>.amazonaws.com`, `sts.<리전>.amazonaws.com`(HTTPS 443)으로 나갈 수 있어야 합니다.
+
+이벤트를 조회하는 쪽(역할을 쓰면 그 역할, 아니면 서버의 자격)에 필요한 권한:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    { "Effect": "Allow", "Action": "rds:DescribeEvents", "Resource": "*" }
+  ]
+}
+```
+
+`rds:DescribeEvents`는 리소스 단위 권한을 지원하지 않아 `Resource`가 `*`입니다. `roleArn`을 쓰면 추가로 두 가지가 필요합니다.
+
+1. 서버의 자격(예: 인스턴스 역할)에 역할을 맡을 권한:
+
+   ```json
+   { "Effect": "Allow", "Action": "sts:AssumeRole", "Resource": "arn:aws:iam::<조회 대상 계정>:role/WhatapRdsEventsReadOnly" }
+   ```
+
+2. 조회 대상 역할의 신뢰 관계(trust policy):
+
+   ```json
+   {
+     "Version": "2012-10-17",
+     "Statement": [
+       {
+         "Effect": "Allow",
+         "Principal": { "AWS": "arn:aws:iam::<서버 계정>:role/<서버 인스턴스 역할>" },
+         "Action": "sts:AssumeRole",
+         "Condition": { "StringEquals": { "sts:ExternalId": "<외부 ID>" } }
+       }
+     ]
+   }
+   ```
+
+   `externalId`를 쓰지 않으면 `Condition`을 뺍니다.
+
+### 동작
+
+- **조회**: 주기마다 리전별로 `DescribeEvents(StartTime=구간 시작, EndTime=지금, MaxRecords=100)`을 호출하고 `Marker`가 없을 때까지 다음 페이지를 읽습니다.
+- **구간**: 구간 시작은 `마지막 끝 시각 - overlap`입니다. RDS가 이벤트를 발생 시각보다 조금 늦게 보여 주는 경우를 위해 겹쳐 읽고, 겹친 구간에서 다시 나온 이벤트는 `sourceArn`·`sourceType`·`sourceIdentifier`·발생 시각·`message`·범주로 만든 키로 걸러 한 번만 보냅니다. 키는 다음 구간에 다시 나올 수 있는 동안만(겹침 구간) 보관하고 리전당 최대 1만 개입니다.
+- **첫 실행**: 상태가 없으면 `initialLookback`(기본 10분)만 거슬러 봅니다.
+- **재시작**: 마지막 끝 시각과 겹침 구간의 중복 제거 키를 `(roleArn, region)`별로 `stateFile`에 저장하므로, 다시 시작하면 멈춘 시점부터 빈틈과 중복 없이 이어갑니다. 저장은 임시 파일에 쓴 뒤 이름을 바꾸는 방식이라 도중에 죽어도 파일이 깨지지 않습니다. 파일을 읽을 수 없으면 `.corrupt-<시각>`으로 옮기고 `initialLookback`부터 다시 시작합니다.
+- **따라잡기 상한**: 마지막 끝 시각이 `maxCatchUp`(기본 24시간)보다 오래됐으면 최근 24시간만 조회하고, 건너뛴 구간을 로그에 남깁니다.
+- **오류**: 권한 거부(AccessDenied), 자격 오류·만료가 나면 그 리전의 구간을 앞으로 옮기지 않고 다음 주기에 같은 구간부터 다시 조회합니다. 자격 오류면 캐시된 자격을 버리고 새로 받습니다. 같은 리전·같은 종류의 오류 로그는 10분에 한 번만 남깁니다. 스로틀링은 SDK가 지수 백오프로 최대 5번 시도하고, 그래도 실패하면 그 리전만 주기의 2배·4배·8배·16배(최대 15분) 동안 쉬었다가 다시 조회합니다.
+- **전송**: 이 OpenAgent의 수집 서버 연결(프로젝트, 오브젝트)로 보냅니다. 수집 서버 연결 전이거나 전송 큐가 30초 넘게 차 있으면 보내지 못한 이벤트가 있는 리전의 구간을 유지하고 다음 주기에 다시 보냅니다. 이미 큐에 넣은 이벤트는 다시 보내지 않습니다.
+- **에이전트 보호**: 조회 중 패닉이 나도 복구하고 다음 주기에 다시 시도합니다.
+
+### 에이전시와 다른 점
+
+| 항목 | 에이전시 | OpenAgent |
+|---|---|---|
+| 처음 조회 범위 | 2일 2시간 | 10분(`initialLookback`). 오래된 재시작이 새 알림으로 울리지 않게 하기 위해서입니다. |
+| 재시작 뒤 | 마지막 조회 시각부터 이어감 | `stateFile`로 이어가되 최대 24시간(`maxCatchUp`) |
+| 구간 겹침 | 없음 | 5분 겹쳐 읽고 중복 제거(늦게 보이는 이벤트 대비) |
+| `agency` 태그 | 에이전시 서비스 id | `agencyName`(기본 `openagent`) |
+| 자격 증명 | 에이전시에 등록한 역할 또는 액세스 키 | 서버의 기본 자격 체인 + 선택적 `roleArn`/`externalId` |
+| 보내는 곳 | 에이전시 오브젝트 | 이 OpenAgent의 프로젝트와 오브젝트. 한 프로세스가 여러 프로젝트로 나눠 보내지는 않습니다. |
+
+### 확인용 한 번 실행 (`rds-events-dryrun`)
+
+실제 자격으로 조회와 변환을 확인할 때 씁니다. 같은 `awsRdsEvents` 섹션을 읽어(`enabled`는 무시) 한 주기를 실행하고, 보낼 팩을 **보내지 않고** JSON 배열로 표준 출력에 씁니다. 상태 파일을 읽거나 쓰지 않고 와탭 수집 서버에 연결하지 않습니다. 진행 상황과 오류는 표준 에러로 나옵니다.
+
+```bash
+# 서버의 기본 자격 증명으로 서울 리전 최근 24시간
+./openagent rds-events-dryrun -regions ap-northeast-2 -lookback 24h > rds-events.json
+
+# 설정 파일의 역할로 조회
+./openagent rds-events-dryrun -config /opt/whatap/scrape_config.yaml -lookback 1h
+```
+
+| 플래그 | 설명 |
+|---|---|
+| `-config` | 읽을 `scrape_config.yaml` (기본 `$WHATAP_OPEN_HOME/scrape_config.yaml`, 없으면 건너뜀) |
+| `-regions` | 쉼표로 구분한 리전. 설정보다 우선 |
+| `-role-arn`, `-external-id` | 맡을 역할과 외부 ID. 설정보다 우선 |
+| `-no-role` | 설정의 `roleArn`을 무시하고 기본 자격으로 조회 |
+| `-lookback` | 조회 범위(기본: 설정의 `initialLookback`, 10분) |
+| `-agency-name` | `agency` 태그 값 |
+
+종료 코드는 성공 0, 실패한 리전이 있으면 1, 플래그·설정 오류 2입니다. 출력 예(값은 예시):
+
+```json
+[
+  {"category": "aws_rds_event", "time": 1795575481123, "timeUTC": "2026-11-25T02:58:01.123Z",
+   "tags": {"category0": "failover", "sourceArn": "arn:aws:rds:ap-northeast-2:111122223333:db:orders-db", "sourceIdentifier": "orders-db", "sourceType": "db-instance", "agency": "openagent"},
+   "fields": {"message": "Multi-AZ instance failover completed."}}
+]
+```
+
+`timeUTC`는 읽기 편하라고 붙인 값이며 팩에는 없습니다.
 
 ## TLS 설정
 
